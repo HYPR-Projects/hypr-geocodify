@@ -3,6 +3,8 @@
 
 let _map = null;
 
+function getMap() { return _map || window.map; }
+
 export function setPanelsMap(mapRef) { _map = mapRef; }
 
 export function setTab(name) {
@@ -22,21 +24,20 @@ export function initResizablePanels() {
 
   setupResizer('sidebar-resizer', 'sidebar', 'right', 160, 420, 'hypr_sidebar_w');
   setupResizer('panel-resizer', 'right-panel', 'left', 200, 520, 'hypr_panel_w');
-
-  try {
-    if (localStorage.getItem('hypr_sidebar_collapsed') === 'true') toggleSidebar();
-    if (localStorage.getItem('hypr_panel_collapsed') === 'true') togglePanel();
-    if (localStorage.getItem('hypr_fullmap') === 'true') toggleFullMap();
-  } catch {}
 }
 
 export function toggleFullMap() {
   const app = document.getElementById('app');
   const btn = document.getElementById('btn-fullmap');
   const isFullMap = app.classList.toggle('map-only');
-  if (btn) btn.classList.toggle('active', isFullMap);
+  if (btn) {
+    btn.classList.toggle('active', isFullMap);
+    btn.innerHTML = isFullMap
+      ? '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="4 14 10 14 10 20"/><polyline points="20 10 14 10 14 4"/><line x1="10" y1="14" x2="3" y2="21"/><line x1="21" y1="3" x2="14" y2="10"/></svg> Recolher'
+      : '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/></svg> Expandir';
+  }
   try { localStorage.setItem('hypr_fullmap', isFullMap); } catch {}
-  setTimeout(() => _map?.resize(), 250);
+  setTimeout(() => getMap()?.resize(), 250);
 }
 
 export function toggleSidebar() {
@@ -45,7 +46,7 @@ export function toggleSidebar() {
   const collapsed = sidebar.classList.toggle('collapsed');
   if (btn) btn.textContent = collapsed ? '›' : '‹';
   try { localStorage.setItem('hypr_sidebar_collapsed', collapsed); } catch {}
-  setTimeout(() => _map?.resize(), 220);
+  setTimeout(() => getMap()?.resize(), 220);
 }
 
 export function togglePanel() {
@@ -54,7 +55,7 @@ export function togglePanel() {
   const collapsed = panel.classList.toggle('collapsed');
   if (btn) btn.textContent = collapsed ? '‹' : '›';
   try { localStorage.setItem('hypr_panel_collapsed', collapsed); } catch {}
-  setTimeout(() => _map?.resize(), 220);
+  setTimeout(() => getMap()?.resize(), 220);
 }
 
 function setupResizer(handleId, panelId, direction, minW, maxW, storageKey) {
@@ -72,7 +73,7 @@ function setupResizer(handleId, panelId, direction, minW, maxW, storageKey) {
     const onMove = ev => {
       const delta = direction === 'right' ? ev.clientX - startX : startX - ev.clientX;
       panel.style.width = Math.min(maxW, Math.max(minW, startW + delta)) + 'px';
-      _map?.resize();
+      getMap()?.resize();
     };
 
     const onUp = () => {
@@ -82,7 +83,7 @@ function setupResizer(handleId, panelId, direction, minW, maxW, storageKey) {
       try { localStorage.setItem(storageKey, panel.style.width); } catch {}
       document.removeEventListener('mousemove', onMove);
       document.removeEventListener('mouseup', onUp);
-      _map?.resize();
+      getMap()?.resize();
     };
 
     document.addEventListener('mousemove', onMove);
@@ -101,7 +102,7 @@ function setupResizer(handleId, panelId, direction, minW, maxW, storageKey) {
       try { localStorage.setItem(storageKey, panel.style.width); } catch {}
       handle.removeEventListener('touchmove', onMove);
       handle.removeEventListener('touchend', onEnd);
-      _map?.resize();
+      getMap()?.resize();
     };
     handle.addEventListener('touchmove', onMove);
     handle.addEventListener('touchend', onEnd);

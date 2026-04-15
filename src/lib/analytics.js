@@ -11,23 +11,25 @@ let _panelRafId = null;
 // ── Public API ──────────────────────────────────────────────────────────────
 
 export function updateOverlay(filteredData) {
+  const data = filteredData || window.filteredData || [];
   const el = document.getElementById('overlay-count');
-  if (el) el.textContent = filteredData.length.toLocaleString('pt-BR');
-  const shareAvg = avg(filteredData, 'share_reais_sku_dimensao') * 100;
+  if (el) el.textContent = data.length.toLocaleString('pt-BR');
+  const shareAvg = avg(data, 'share_reais_sku_dimensao') * 100;
   const shareEl = document.getElementById('overlay-share');
   if (shareEl) shareEl.textContent = shareAvg.toFixed(1) + '%';
 }
 
 export function updatePanels(filteredData) {
-  const hash = filteredData.length + '_' + (filteredData[0]?.cnpj || '') + '_' + (filteredData[filteredData.length - 1]?.cnpj || '');
+  const data = filteredData || window.filteredData || [];
+  const hash = data.length + '_' + (data[0]?.cnpj || '') + '_' + (data[data.length - 1]?.cnpj || '');
   if (hash === _lastFilteredHash) return;
   _lastFilteredHash = hash;
 
   if (_panelRafId) cancelAnimationFrame(_panelRafId);
   _panelRafId = requestAnimationFrame(() => {
-    updateHeader(filteredData);
-    updateOverview(filteredData);
-    setTimeout(() => { updateRanking(filteredData); updateAnalysis(filteredData); }, 50);
+    updateHeader(data);
+    updateOverview(data);
+    setTimeout(() => { updateRanking(data); updateAnalysis(data); }, 50);
     _panelRafId = null;
   });
 }
