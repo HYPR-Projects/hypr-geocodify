@@ -1,21 +1,6 @@
 // ─── HYPR Geocodify — Application ───────────────────────────────────────────
-// Single-file app module. Sections marked with ═══ headers.
-// Imported by main.js as ES module, functions exposed to window.* at bottom.
-
-
-// ═══════════════════════════════════════════════════════════════════════════════
-// ═══ APP INIT ═════════════════════════════════════════════════════════════════
-// ═══════════════════════════════════════════════════════════════════════════════
-
-// ─── HYPR Geocodify — Legacy Inline JS ──────────────────────────────────────
-// Extracted from index.html blocks 1-4.
-// This file preserves the original code structure.
-// Functions are exposed to window.* at the bottom for HTML onclick compatibility.
-// Next step: split into domain modules and remove window.* exposure.
-//
-// NOTE: This runs as an ES module (imported by main.js).
-// Top-level vars become module-scoped, not global.
-// window.* assignments at the bottom make them accessible to HTML.
+// All app JS extracted from index.html. Imported by main.js as ES module.
+// Functions are exposed to window.* at the bottom for HTML onclick handlers.
 
 // ── Bootstrap — inicializa Supabase e auth ──
 window._supa = null;
@@ -32,8 +17,6 @@ document.addEventListener('DOMContentLoaded', function() {
     _supa = window.supabase.createClient(url, anon);
     window._supa = _supa;
     window._supaReady = true;
-    SUPABASE_URL = url;
-    SUPABASE_ANON = anon;
     window.SUPABASE_URL  = url;
     window.SUPABASE_ANON = anon;
     if (typeof _initMapStyles === 'function') _initMapStyles();
@@ -130,15 +113,22 @@ function _buildLightMapStyle() {
   };
 }
 
-
 // ─── Utilitários ────────────────────────────────────────────────────────────
 function debounce(fn, ms) {
   let tid;
   return function(...args) { clearTimeout(tid); tid = setTimeout(() => fn.apply(this, args), ms); };
 }
+function throttle(fn, ms) {
+  let last = 0;
+  return function(...args) { const now = Date.now(); if (now - last >= ms) { last = now; fn.apply(this, args); } };
+}
+
+// ─── HTML Escape (XSS prevention) ────────────────────────────────────────────
+function _escForHtml(s) {
+  return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
 
 // ─── State ───────────────────────────────────────────────────────────────────
-
 var STATE_NAME_TO_UF = {'Acre':'AC','Alagoas':'AL','Amapá':'AP','Amazonas':'AM','Bahia':'BA','Ceará':'CE','Distrito Federal':'DF','Espírito Santo':'ES','Goiás':'GO','Maranhão':'MA','Mato Grosso do Sul':'MS','Mato Grosso':'MT','Minas Gerais':'MG','Pará':'PA','Paraíba':'PB','Paraná':'PR','Pernambuco':'PE','Piauí':'PI','Rio de Janeiro':'RJ','Rio Grande do Norte':'RN','Rio Grande do Sul':'RS','Rondônia':'RO','Roraima':'RR','Santa Catarina':'SC','São Paulo':'SP','Sergipe':'SE','Tocantins':'TO'};
 // HERE key: usada APENAS para satellite tiles do MapLibre (raster tile URL precisa da key no client).
 // Geocoding e reverse geocoding usam o proxy server-side /api/geocode (key fica no Vercel env vars).
@@ -152,68 +142,6 @@ var activeLayer = 'dark';
 var _popup = null;        // MapLibre popup atual
 
 // ─── Estilos de mapa (MapLibre style URLs) ───────────────────────────────────
-
-var _bandeiraGroupMap = {}; // mapa: nome original → nome normalizado
-
-// ─── Multi-select component ─────────────────────────────────────────────────
-
-async function sbFetch(path, opts = {}) {
-  const controller = new AbortController();
-  const tid = setTimeout(() => controller.abort(), 15000); // 15s timeout
-  // Usar token do usuário logado se disponível, senão usar anon key
-  const authToken = (await _supa.auth.getSession()).data.session?.access_token || SUPABASE_ANON;
-  const headers = {
-    'apikey': SUPABASE_ANON,
-    'Authorization': `Bearer ${authToken}`,
-    'Content-Type': 'application/json',
-    'Prefer': 'return=representation',
-    ...(opts.headers || {}),
-  };
-  try {
-    const res = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, {
-      ...opts, headers, signal: controller.signal
-    });
-    clearTimeout(tid);
-    if (!res.ok) throw new Error(await res.text());
-    const text = await res.text();
-    return text ? JSON.parse(text) : null;
-  } catch(e) {
-    clearTimeout(tid);
-    throw e;
-  }
-}
-
-// ─── Galeria ──────────────────────────────────────────────────────────────────
-
-
-// ═══════════════════════════════════════════════════════════════════════════════
-// ═══ AUTH UI ══════════════════════════════════════════════════════════════════
-// ═══════════════════════════════════════════════════════════════════════════════
-
-var SUPABASE_URL  = 'https://qfyqvcxhcmduhknbpofx.supabase.co';
-var SUPABASE_ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFmeXF2Y3hoY21kdWhrbmJwb2Z4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM0Mjk1NjAsImV4cCI6MjA4OTAwNTU2MH0.k92V1LN4OqqdtfF86iml4L-gVg0AabENKt7S5vlP2dk';
-// Inicializar imediatamente — supabase.js já carregou (script síncrono no <head>)
-var _supa = null;
-var currentUser = null;
-
-function supaLogout() {
-  try { sessionStorage.removeItem('hypr_last_map'); } catch(e) {}
-  _supa.auth.signOut();
-  currentUser = null;
-  document.getElementById('login-screen').style.display = '';
-  document.getElementById('gallery-screen').classList.add('hidden');
-}
-
-// Criar versão debounced de applyFilters (150ms) para sliders
-var _debouncedFilter = debounce(applyFilters, 150);
-
-// ─── Estado do tipo de mapa atual ─────────────────────────────────────────────
-
-
-// ═══════════════════════════════════════════════════════════════════════════════
-// ═══ MAP ══════════════════════════════════════════════════════════════════════
-// ═══════════════════════════════════════════════════════════════════════════════
-
 // OpenFreeMap — vector tiles WebGL gratuito + HERE raster para satellite
 var MAP_STYLES = null; // inicializado após _buildDarkStyle e _buildSatelliteStyle
 
@@ -320,7 +248,6 @@ function _initMapStyles() {
 
 
 // ─── Map Init ────────────────────────────────────────────────────────────────
-
 function initMap() {
   _initMapStyles();
   map = new maplibregl.Map({
@@ -460,412 +387,323 @@ function _setupMapInteractions() {
   map.on('mouseleave', 'pdv-points', () => map.getCanvas().style.cursor = '');
 }
 
-// ─── Filters ─────────────────────────────────────────────────────────────────
-
-var currentMapType = 'varejo360'; // 'geocoder' | 'reverse_geocoder' | 'varejo360' | 'places_discovery'
-
-// Aplica modo visual correto — sempre chamar ao mudar de mapa
-function applyMapMode(type) {
-  currentMapType = type || 'varejo360';
-  const app = document.getElementById('app');
-  if (!app) return;
-  const isGeo = currentMapType !== 'varejo360' && currentMapType !== 'places_discovery';
-  const isPlaces = currentMapType === 'places_discovery';
-  // Forçar remoção antes de adicionar — garante estado limpo
-  app.classList.remove('mode-geo', 'mode-places');
-  if (isGeo) app.classList.add('mode-geo');
-  if (isPlaces) app.classList.add('mode-places');
-  // Explicitly hide/show places-panel based on mode
-  var placesPanel = document.getElementById('places-panel');
-  if (placesPanel) {
-    if (!isPlaces) {
-      placesPanel.style.display = 'none';
-    }
-  }
-  // Clear GeoJSON source when switching modes to prevent stale data on map
-  if (map && map.getSource('pdvs') && !isPlaces) {
-    // Don't clear if loading saved map data (allData may be populated by openSavedMap)
-  }
-  // Subtítulo do header
-  const labels = { geocoder:'📍 Lat/Lon Generator', reverse_geocoder:'🔄 Address Generator', varejo360:'📊 Varejo 360 Analysis', places_discovery:'🔎 Places Discovery' };
-  const sub = document.getElementById('logo-map-type');
-  if (sub) sub.textContent = labels[currentMapType] || 'by HYPR°';
-  // View toggle buttons
-  const vt = document.getElementById('view-toggle-btns');
-  if (vt) vt.style.display = (isGeo || isPlaces) ? 'flex' : 'none';
+// ─── Pin Color ───────────────────────────────────────────────────────────────
+function pinColor(row) {
+  if (currentMapType === 'places_discovery') return _cssVar('--purple') || '#a855f7';
+  const diff = parseFloat(row.percentual_diff_media_dimensao || 0);
+  if (diff > 2) return _cssVar('--win');
+  if (diff < -2) return _cssVar('--lose');
+  return _cssVar('--neutral');
 }
 
-// ─── Modal de seleção de tipo ─────────────────────────────────────────────────
+// ─── Render Markers (GeoJSON source update) ──────────────────────────────────
+function renderMarkers() {
+  if (!map) return;
 
-var currentView = 'map';
-function setMapView(view) {
-  currentView = view;
-  const listEl = document.getElementById('geocoder-list-view');
-  const btnMap  = document.getElementById('btn-view-map');
-  const btnList = document.getElementById('btn-view-list');
-
-  if (btnMap) btnMap.classList.toggle('active', view === 'map');
-  if (btnList) btnList.classList.toggle('active', view === 'list');
-
-  if (view === 'list') {
-    if (listEl) {
-      listEl.style.display = 'block';
-      // Garantir que a lista está ACIMA do mapa (z-index)
-      listEl.style.zIndex = '50';
-      listEl.style.position = 'absolute';
-      listEl.style.inset = '0';
-      listEl.style.background = 'var(--bg)';
-      listEl.style.overflowY = 'auto';
-      listEl.style.padding = '16px';
+  const _doRender = () => {
+    if (!map.getSource('pdvs')) {
+      _setupMapSources();
+      _setupMapInteractions();
     }
-    renderGeocoderList();
+
+    const features = filteredData
+      .filter(r => parseFloat(r.lat) && parseFloat(r.lon))
+      .map((r, i) => {
+        if (r._mapId === undefined) r._mapId = i;
+        return {
+          type: 'Feature',
+          geometry: { type: 'Point', coordinates: [parseFloat(r.lon), parseFloat(r.lat)] },
+          properties: { color: pinColor(r), _mapId: r._mapId },
+        };
+      });
+
+    try {
+      map.getSource('pdvs').setData({ type: 'FeatureCollection', features });
+    } catch(e) {
+      // Source ainda não existe — tentar novamente
+      setTimeout(_doRender, 200);
+    }
+  };
+
+  // Se o mapa ainda está carregando o style, aguardar
+  if (!map.isStyleLoaded()) {
+    map.once('styledata', _doRender);
   } else {
-    if (listEl) listEl.style.display = 'none';
-    setTimeout(() => map && map.resize(), 100);
+    _doRender();
   }
 }
 
-function renderGeocoderList() {
-  const thead = document.getElementById('geocoder-thead');
-  const tbody = document.getElementById('geocoder-tbody');
-  const countEl = document.getElementById('list-count');
-  if (!thead || !tbody) return;
-
-  const data = filteredData.length ? filteredData : allData;
-  const failCount = data.filter(r => r._geocodeFailed).length;
-  const mismatchCount = data.filter(r => r._ufMismatch).length;
-  let summaryParts = [`${data.length.toLocaleString('pt-BR')} pontos`];
-  if (failCount > 0)    summaryParts.push(`<span style="color:var(--lose);">${failCount.toLocaleString('pt-BR')} não identificados</span>`);
-  if (mismatchCount > 0) summaryParts.push(`<span style="color:var(--neutral);">${mismatchCount.toLocaleString('pt-BR')} UF divergente</span>`);
-  countEl.innerHTML = summaryParts.join(' · ');
-
-  // Colunas conforme tipo — mostrar apenas dados relevantes
-  let cols = [];
-  const isGeoMode = currentMapType === 'geocoder' || currentMapType === 'reverse_geocoder';
-  if (currentMapType === 'geocoder') {
-    cols = ['_input', 'lat', 'lon', 'geo_address', '_status'];
-  } else if (currentMapType === 'reverse_geocoder') {
-    cols = ['nome', 'input_lat', 'input_lon', 'geo_address', '_status'];
-  } else if (currentMapType === 'places_discovery') {
-    cols = ['nome', 'geo_address', 'lat', 'lon', 'place_types', 'place_status'];
-  } else {
-    // Varejo 360: full columns including bandeira and CNPJ
-    cols = ['bandeira', 'lat', 'lon', 'geo_address', 'cnpj'];
-  }
-
-  const labels = { nome: 'Nome', bandeira: 'Bandeira/Rede', lat: 'Latitude', lon: 'Longitude',
-    geo_address: 'Endereço Geocodificado', cnpj: 'CNPJ', input_lat: 'Lat input', input_lon: 'Lon input',
-    place_types: 'Tipos', place_status: 'Status', place_id: 'Place ID', _status: 'Status',
-    _input: 'Endereço Original' };
-
-  thead.innerHTML = cols.map(c => `<th style="padding:8px 10px;text-align:left;font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:0.5px;color:var(--text-muted);border-bottom:1px solid var(--border);">${labels[c]||c}</th>`).join('');
-
-  // Sort: falhas primeiro, depois mismatches, depois OK
-  const sorted = [...data].sort((a, b) => {
-    const aW = a._geocodeFailed ? 2 : (a._ufMismatch ? 1 : 0);
-    const bW = b._geocodeFailed ? 2 : (b._ufMismatch ? 1 : 0);
-    return bW - aW;
-  });
-
-  tbody.innerHTML = sorted.slice(0, 500).map((r, i) => {
-    const isFail = r._geocodeFailed;
-    const isMismatch = !isFail && r._ufMismatch;
-    const rowStyle = isFail ? 'border-bottom:1px solid var(--border);background:rgba(239,68,68,0.06);'
-      : isMismatch ? 'border-bottom:1px solid var(--border);background:rgba(245,158,11,0.06);'
-      : 'border-bottom:1px solid var(--border);';
-    return `<tr style="${rowStyle}">
-      ${cols.map(c => {
-        if (c === '_status') {
-          if (isFail) return '<td style="padding:7px 10px;font-size:11px;"><span style="color:var(--lose);font-weight:500;">✗ Não identificado</span></td>';
-          if (isMismatch) return `<td style="padding:7px 10px;font-size:11px;"><span style="color:var(--neutral);font-weight:500;" title="Esperava ${r._expectedUF}, HERE retornou ${r.uf}">⚠ UF: ${r._expectedUF}→${r.uf}</span></td>`;
-          return '<td style="padding:7px 10px;font-size:11px;"><span style="color:var(--win);">✓ OK</span></td>';
-        }
-        if (c === '_input') {
-          // Endereço original: usar endereco_geocode, _endereco_livre, ou campo endereco do CSV
-          var inputAddr = r.endereco_geocode || r._endereco_livre || r.endereco || r['endereço'] || r.address || '';
-          var inputName = r.nome || r.marca || '';
-          var display = inputName ? inputName + (inputAddr ? ' — ' + inputAddr : '') : inputAddr;
-          return `<td style="padding:7px 10px;color:${isFail ? 'var(--lose)' : 'var(--text-dim)'};font-size:12px;" title="${display ? _escForHtml(display) : ''}">${display ? _escForHtml(String(display).slice(0,80)) : '—'}</td>`;
-        }
-        return `<td style="padding:7px 10px;color:${isFail ? 'var(--lose)' : 'var(--text-dim)'};font-size:12px;">${r[c] != null && r[c] !== '' ? _escForHtml(String(r[c]).slice(0,60)) : '—'}</td>`;
-      }).join('')}
-    </tr>`;
-  }).join('');
-
-  if (data.length > 500) {
-    tbody.innerHTML += `<tr><td colspan="${cols.length}" style="padding:12px;text-align:center;color:var(--text-muted);font-size:11px;">Mostrando primeiros 500 de ${data.length.toLocaleString('pt-BR')}. Exporte o CSV para ver todos.</td></tr>`;
-  }
-}
-
-// ─── Download CSV geocodificado ────────────────────────────────────────────────
-
-
-// ═══════════════════════════════════════════════════════════════════════════════
-// ═══ ANALYTICS ════════════════════════════════════════════════════════════════
-// ═══════════════════════════════════════════════════════════════════════════════
-
-function updateOverview() {
-  const shareAvg = avg(filteredData, 'share_reais_sku_dimensao') * 100;
-  const diffAvg = avg(filteredData, 'percentual_diff_media_dimensao');
-  document.getElementById('ov-share-val').textContent = shareAvg.toFixed(1);
-  const deltaEl = document.getElementById('ov-share-delta');
-  deltaEl.textContent = (diffAvg > 0 ? '+' : '') + diffAvg.toFixed(1) + '% vs. média';
-  deltaEl.className = 'share-delta ' + (diffAvg >= 0 ? 'pos' : 'neg');
-
-  // Chart: shares (reais, volume, unidades)
-  const shareR = avg(filteredData, 'share_reais_sku_dimensao') * 100;
-  const shareV = avg(filteredData, 'share_volume_sku_dimensao') * 100;
-  const shareU = avg(filteredData, 'share_unidades_sku_dimensao') * 100;
-  renderBarChart('chart-shares',
-    ['Reais', 'Volume', 'Unidades'],
-    [shareR, shareV, shareU],
-    [_cssVar('--accent'), _cssVar('--accent-light'), _cssVar('--blue-light')]
-  );
-
-  // Chart: PDVs por bandeira
-  const grp = groupBy(filteredData, 'bandeira');
-  const bandSort = Object.entries(grp).sort((a,b) => b[1].length - a[1].length).slice(0, 8);
-  renderHorizBarChart('chart-bandeiras', bandSort.map(e => e[0]), bandSort.map(e => e[1].length));
-
-  // Chart: distribuição de share
-  const bins = [0,2,5,10,15,20,30,50,100];
-  const labels = bins.slice(0,-1).map((v,i) => `${v}–${bins[i+1]}%`);
-  const counts = bins.slice(0,-1).map((v,i) => filteredData.filter(r => {
-    const s = parseFloat(r.share_reais_sku_dimensao||0)*100;
-    return s >= v && s < bins[i+1];
-  }).length);
-  renderHistChart('chart-dist', labels, counts);
-}
-
-// ─── Ranking Tab ─────────────────────────────────────────────────────────────
-function updateRanking() {
-  const grp = groupBy(filteredData, 'bandeira');
-  const ranked = Object.entries(grp).map(([b, rows]) => ({
-    name: b,
-    count: rows.length,
-    shareAvg: avg(rows, 'share_reais_sku_dimensao') * 100,
-    diffAvg: avg(rows, 'percentual_diff_media_dimensao'),
-    oportAvg: avg(rows, 'oportunidade_dimensao'),
-  })).sort((a,b) => b.shareAvg - a.shareAvg);
-
-  const maxShare = Math.max(...ranked.map(r => r.shareAvg), 1);
-
-  const top = ranked.slice(0, 7);
-  const bottom = [...ranked].sort((a,b) => a.shareAvg - b.shareAvg).slice(0, 7);
-  const topOport = [...ranked].sort((a,b) => b.oportAvg - a.oportAvg).slice(0, 7);
-
-  function renderRankList(id, items, valueKey, label, badgeFn) {
-    const el = document.getElementById(id);
-    el.innerHTML = items.map((item, i) => {
-      const val = item[valueKey];
-      const badge = badgeFn ? badgeFn(item) : '';
-      const barColor = item.diffAvg > 2 ? _cssVar('--win') : item.diffAvg < -2 ? _cssVar('--lose') : _cssVar('--neutral');
-      return `<div class="rank-item">
-        <span class="rank-num">${i+1}</span>
-        <span class="rank-name" title="${_escForHtml(item.name)}">${_escForHtml(item.name)}</span>
-        <div class="rank-bar-wrap"><div class="rank-bar" style="width:${Math.min(val/maxShare*100,100)}%;background:${barColor}"></div></div>
-        <span class="rank-val" style="color:${barColor}">${val.toFixed(1)}%</span>
-        ${badge}
-      </div>`;
-    }).join('');
-  }
-
-  renderRankList('rank-top', top, 'shareAvg', '%', item => {
-    const cls = item.diffAvg > 2 ? 'win' : item.diffAvg < -2 ? 'lose' : 'neutral';
-    const label = item.diffAvg > 2 ? '▲ ganha' : item.diffAvg < -2 ? '▼ perde' : '→ neutro';
-    return `<span class="rank-badge ${cls}">${label}</span>`;
-  });
-  renderRankList('rank-bottom', bottom, 'shareAvg', '%', item => {
-    const cls = item.diffAvg > 2 ? 'win' : item.diffAvg < -2 ? 'lose' : 'neutral';
-    const label = item.diffAvg > 2 ? '▲ ganha' : item.diffAvg < -2 ? '▼ perde' : '→ neutro';
-    return `<span class="rank-badge ${cls}">${label}</span>`;
-  });
-
-  // Oportunidade
-  const maxOport = Math.max(...topOport.map(r => r.oportAvg), 1);
-  const el = document.getElementById('rank-oport');
-  el.innerHTML = topOport.map((item, i) => `
-    <div class="rank-item">
-      <span class="rank-num">${i+1}</span>
-      <span class="rank-name" title="${_escForHtml(item.name)}">${_escForHtml(item.name)}</span>
-      <div class="rank-bar-wrap"><div class="rank-bar" style="width:${Math.min(item.oportAvg/maxOport*100,100)}%;background:var(--accent)"></div></div>
-      <span class="rank-val" style="color:var(--accent-light)">${item.oportAvg.toFixed(2)}</span>
-      <span class="rank-badge neutral">${item.count} PDVs</span>
-    </div>
-  `).join('');
-}
-
-// ─── Analysis Tab ────────────────────────────────────────────────────────────
-function updateAnalysis() {
-  const grp = groupBy(filteredData, 'bandeira');
-  const ranked = Object.entries(grp).map(([b, rows]) => ({
-    name: b,
-    count: rows.length,
-    shareAvg: avg(rows, 'share_reais_sku_dimensao') * 100,
-    diffAvg: avg(rows, 'percentual_diff_media_dimensao'),
-    oportTotal: rows.reduce((s,r) => s + parseFloat(r.oportunidade_dimensao||0), 0),
-  }));
-
-  const winBandeiras = ranked.filter(r => r.diffAvg > 3).sort((a,b) => b.diffAvg - a.diffAvg).slice(0,3);
-  const loseBandeiras = ranked.filter(r => r.diffAvg < -3).sort((a,b) => a.diffAvg - b.diffAvg).slice(0,3);
-  const bestOport = ranked.sort((a,b) => b.oportTotal - a.oportTotal).slice(0,3);
-
-  const totalPDVs = filteredData.length;
-  const winCount = filteredData.filter(r => parseFloat(r.percentual_diff_media_dimensao||0) > 2).length;
-  const loseCount = filteredData.filter(r => parseFloat(r.percentual_diff_media_dimensao||0) < -2).length;
-  const winPct = totalPDVs ? (winCount / totalPDVs * 100).toFixed(0) : 0;
-  const losePct = totalPDVs ? (loseCount / totalPDVs * 100).toFixed(0) : 0;
-
-  const cards = [
-    {
-      icon: '📈',
-      title: 'Onde a marca ganha share',
-      body: winBandeiras.length
-        ? `A marca está <span class="analysis-highlight win">acima da média</span> em ${winCount} PDVs (${winPct}% do total). ${winBandeiras.length ? `Melhor performance em: <span class="analysis-highlight">${winBandeiras.map(b => _escForHtml(b.name)).join(', ')}</span>.` : ''}`
-        : `Nenhuma bandeira com performance significativamente acima da média nos filtros selecionados.`
-    },
-    {
-      icon: '📉',
-      title: 'Onde a marca perde share',
-      body: loseBandeiras.length
-        ? `A marca está <span class="analysis-highlight lose">abaixo da média</span> em ${loseCount} PDVs (${losePct}% do total). Risco concentrado em: <span class="analysis-highlight">${loseBandeiras.map(b => _escForHtml(b.name)).join(', ')}</span>.`
-        : `Nenhuma bandeira com performance significativamente abaixo da média.`
-    },
-    {
-      icon: '🎯',
-      title: 'Maior oportunidade de investimento',
-      body: bestOport.length
-        ? `Priorizando bandeiras com maior score de oportunidade: <span class="analysis-highlight">${bestOport.map(b => `${_escForHtml(b.name)} (${b.count} PDVs)`).join(', ')}</span>. Esses PDVs têm maior potencial de crescimento de share.`
-        : `Sem dados de oportunidade disponíveis.`
-    },
-    {
-      icon: '⚖️',
-      title: 'Balanço geral',
-      body: `De ${totalPDVs.toLocaleString('pt-BR')} PDVs visíveis, <span class="analysis-highlight win">${winPct}% ganham</span> e <span class="analysis-highlight lose">${losePct}% perdem</span> share vs. a média da dimensão. ${parseFloat(winPct) > parseFloat(losePct) ? 'Cenário <span class="analysis-highlight win">favorável</span> para a marca.' : 'Há espaço relevante para <span class="analysis-highlight">recuperação de share</span>.'}`
-    }
-  ];
-
-  document.getElementById('analysis-cards').innerHTML = cards.map(c => `
-    <div class="analysis-card">
-      <div class="analysis-card-header">
-        <span class="analysis-card-icon">${c.icon}</span>
-        <span class="analysis-card-title">${c.title}</span>
+// ─── Popup Builder ───────────────────────────────────────────────────────────
+function pct(v) { return v != null ? (parseFloat(v) * 100).toFixed(1) + '%' : '—'; }
+function pctRaw(v) { return v != null ? parseFloat(v).toFixed(1) + '%' : '—'; }
+function buildPopup(row) {
+  // Places Discovery: simplified popup with name, address, type, status
+  if (row.place_id) {
+    return `<div class="popup-inner">
+      <div class="popup-header">
+        <div class="popup-bandeira">${row.nome || row.bandeira || ''}</div>
+        <div class="popup-address">${row.geo_address || ''}</div>
+        ${row.place_types ? `<div style="font-size:11px;color:var(--text-muted);margin-top:6px;">${row.place_types}</div>` : ''}
+        ${row.place_status ? `<div style="font-size:11px;margin-top:3px;color:${row.place_status === 'Aberto' ? 'var(--win)' : 'var(--text-muted)'}">${row.place_status}</div>` : ''}
       </div>
-      <div class="analysis-card-body">${c.body}</div>
+    </div>`;
+  }
+
+  // Geocoder / Reverse Geocoder: show name, address, coordinates
+  if (currentMapType === 'geocoder' || currentMapType === 'reverse_geocoder') {
+    // Nome: preferir nome/marca; nunca mostrar endereço como nome
+    var name = row.nome || row.marca || row.nome_fantasia || '';
+    if (!name || name === 'Carregando...' || name === 'Não identificado' || name === 'Desconhecido') {
+      name = row.razao_social || '';
+    }
+    // Se bandeira contém " - " (formato HYPR) ou é igual ao endereço, não usar como nome
+    var bnd = row.bandeira || '';
+    if (bnd && bnd !== 'Carregando...' && bnd !== 'Não identificado' && bnd !== 'Desconhecido'
+        && !bnd.includes(' - ') && bnd !== row.geo_address && bnd !== (row._endereco_livre || '')) {
+      name = name || bnd;
+    }
+    var addr = row.geo_address || '';
+    // Só mostrar CNPJ se é realmente um CNPJ (14 dígitos)
+    var cnpjRaw = (row.cnpj || '').split(' - ')[0].replace(/\D/g, '');
+    var cnpjDisplay = cnpjRaw.length >= 11 ? cnpjRaw : '';
+    // Coordenadas
+    var coords = (row.lat && row.lon) ? parseFloat(row.lat).toFixed(6) + ', ' + parseFloat(row.lon).toFixed(6) : '';
+    return `<div class="popup-inner">
+      <div class="popup-header" style="margin-bottom:0;padding-bottom:0;border-bottom:none;">
+        ${name ? `<div class="popup-bandeira">${name}</div>` : ''}
+        ${addr ? `<div class="popup-address">${addr}</div>` : ''}
+        ${cnpjDisplay ? `<div style="font-size:11px;color:var(--text-muted);font-family:var(--mono);margin-top:6px;">CNPJ ${cnpjDisplay}</div>` : ''}
+        ${coords ? `<div style="font-size:10px;color:var(--text-muted);font-family:var(--mono);margin-top:4px;">${coords}</div>` : ''}
+      </div>
+    </div>`;
+  }
+
+  // Varejo 360: full popup with metrics
+  const diff = parseFloat(row.percentual_diff_media_dimensao || 0);
+  const diffClass = diff > 2 ? 'positive' : diff < -2 ? 'negative' : '';
+  const diffLabel = diff > 0 ? `+${diff.toFixed(1)}%` : `${diff.toFixed(1)}%`;
+
+  const shareReis = parseFloat(row.share_reais_sku_dimensao || 0) * 100;
+  const shareVol = parseFloat(row.share_volume_sku_dimensao || 0) * 100;
+  const shareUn = parseFloat(row.share_unidades_sku_dimensao || 0) * 100;
+
+  const maxShare = Math.max(shareReis, shareVol, shareUn, 1);
+
+  const v360CnpjDisplay = row.cnpj_completo || (row.cnpj || '').split(' - ')[0];
+  const addrDisplay = (row.cnpj || '').split(' - ').slice(1).join(' - ');
+
+  return `<div class="popup-inner">
+    <div class="popup-header">
+      <div class="popup-bandeira">${row.bandeira || 'Bandeira desconhecida'}</div>
+      ${row.razao_social && row.razao_social !== row.bandeira ? `<div class="popup-fantasia">${row.razao_social}</div>` : ''}
+      <div class="popup-address">${row.geo_address || addrDisplay}</div>
+      <div class="popup-cnpj">CNPJ ${v360CnpjDisplay}${row.situacao && row.situacao !== 'ATIVA' ? ` · <span style="color:var(--lose)">${row.situacao}</span>` : ''}${row.atividade ? `<div style="font-size:9px;color:var(--text-muted);margin-top:2px">${row.atividade.slice(0,60)}${row.atividade.length>60?'…':''}</div>` : ''}</div>
     </div>
-  `).join('');
-
-  // Win/Lose chart
-  const wlData = ranked.slice(0, 10);
-  renderWinLoseChart('chart-winlose',
-    wlData.map(r => r.name),
-    wlData.map(r => Math.max(r.diffAvg, 0)),
-    wlData.map(r => Math.min(r.diffAvg, 0))
-  );
-
-  // UF ranking
-  const ufGrp = groupBy(filteredData, 'uf');
-  const ufRanked = Object.entries(ufGrp)
-    .map(([uf, rows]) => ({ name: uf, count: rows.length, shareAvg: avg(rows, 'share_reais_sku_dimensao') * 100 }))
-    .sort((a,b) => b.count - a.count).slice(0, 10);
-  const maxUf = Math.max(...ufRanked.map(r => r.count), 1);
-  document.getElementById('rank-uf').innerHTML = ufRanked.map((item, i) => `
-    <div class="rank-item">
-      <span class="rank-num">${i+1}</span>
-      <span class="rank-name">${_escForHtml(item.name)}</span>
-      <div class="rank-bar-wrap"><div class="rank-bar" style="width:${item.count/maxUf*100}%;background:var(--accent)"></div></div>
-      <span class="rank-val" style="color:var(--text-dim)">${item.count}</span>
-      <span class="rank-badge neutral">${item.shareAvg.toFixed(1)}%</span>
+    <div class="popup-metrics">
+      <div class="popup-metric">
+        <div class="popup-metric-val ${diffClass}">${diffLabel}</div>
+        <div class="popup-metric-label">Diff vs. média dimensão</div>
+      </div>
+      <div class="popup-metric">
+        <div class="popup-metric-val">${parseFloat(row.oportunidade_dimensao || 0).toFixed(2)}</div>
+        <div class="popup-metric-label">Score oportunidade</div>
+      </div>
+      <div class="popup-metric">
+        <div class="popup-metric-val">${pctRaw(row.percentual_dimensao)}</div>
+        <div class="popup-metric-label">% dimensão total</div>
+      </div>
+      <div class="popup-metric">
+        <div class="popup-metric-val">${pctRaw(row.percentual_marca_dimensao)}</div>
+        <div class="popup-metric-label">% marca/dimensão</div>
+      </div>
     </div>
-  `).join('');
+    <div class="popup-section-title">Share da marca neste PDV</div>
+    <div class="popup-share-bars">
+      <div class="share-bar-row">
+        <span class="share-bar-label">Reais</span>
+        <div class="share-bar-track"><div class="share-bar-fill ${shareReis >= 10 ? 'win' : shareReis < 5 ? 'lose' : ''}" style="width:${Math.min(shareReis / maxShare * 100, 100)}%"></div></div>
+        <span class="share-bar-val">${shareReis.toFixed(1)}%</span>
+      </div>
+      <div class="share-bar-row">
+        <span class="share-bar-label">Volume</span>
+        <div class="share-bar-track"><div class="share-bar-fill" style="width:${Math.min(shareVol / maxShare * 100, 100)}%"></div></div>
+        <span class="share-bar-val">${shareVol.toFixed(1)}%</span>
+      </div>
+      <div class="share-bar-row">
+        <span class="share-bar-label">Unidades</span>
+        <div class="share-bar-track"><div class="share-bar-fill" style="width:${Math.min(shareUn / maxShare * 100, 100)}%"></div></div>
+        <span class="share-bar-val">${shareUn.toFixed(1)}%</span>
+      </div>
+    </div>
+    <div class="popup-tickets">
+      <span class="popup-tickets-label">Tickets na amostra</span>
+      <span class="popup-tickets-val">${parseInt(row.tickets_amostra || 0).toLocaleString('pt-BR')}</span>
+    </div>
+  </div>`;
 }
 
-// ─── Charts ──────────────────────────────────────────────────────────────────
+// ─── CSV Parser ───────────────────────────────────────────────────────────────
+// ─── CSV Parser com detecção automática de formato ───────────────────────────
+// Suporta: HYPR/Kantar · lat/lon · endereços livres · CNPJs puros · separador ; ou ,
+function parseCSV(text) {
+  const lines = text.trim().split('\n');
 
-var chartDefaults = {
-  plugins: { legend: { display: false }, tooltip: {
-    backgroundColor: _cssVar('--surface-solid'), borderColor: _cssVar('--border'), borderWidth: 1,
-    titleColor: _cssVar('--text'), bodyColor: _cssVar('--text-dim'), padding: 10, cornerRadius: 6,
-  }},
-  scales: {},
-};
-
-function destroyChart(id) {
-  if (charts[id]) { charts[id].destroy(); delete charts[id]; }
-}
-
-function renderBarChart(id, labels, data, colors) {
-  destroyChart(id);
-  const ctx = document.getElementById(id).getContext('2d');
-  charts[id] = new Chart(ctx, {
-    type: 'bar',
-    data: { labels, datasets: [{ data, backgroundColor: colors, borderRadius: 4, borderSkipped: false }] },
-    options: { ...chartDefaults, responsive: true, maintainAspectRatio: false,
-      scales: { x: { grid: { color: _cssVar('--surface-subtle') }, ticks: { color: _cssVar('--text-muted'), font: { size: 10 } } },
-        y: { grid: { color: _cssVar('--surface-subtle') }, ticks: { color: _cssVar('--text-muted'), font: { size: 10 }, callback: v => v.toFixed(1) + '%' } } }
+  // Encontrar linha do header
+  let headerIdx = 0;
+  for (let i = 0; i < Math.min(lines.length, 5); i++) {
+    const clean = lines[i].replace(/^\uFEFF/, '').toLowerCase();
+    if (clean.includes('marca') || clean.includes('lat') || clean.includes('lon') ||
+        clean.includes('cnpj') || clean.includes('enderec') || clean.includes('address') ||
+        clean.includes('nome') || clean.includes('name')) {
+      headerIdx = i; break;
     }
-  });
-}
+  }
 
-function renderHorizBarChart(id, labels, data) {
-  destroyChart(id);
-  const ctx = document.getElementById(id).getContext('2d');
-  charts[id] = new Chart(ctx, {
-    type: 'bar',
-    data: { labels, datasets: [{ data, backgroundColor: _cssVar('--accent'), borderRadius: 3, borderSkipped: false }] },
-    options: { ...chartDefaults, indexAxis: 'y', responsive: true, maintainAspectRatio: false,
-      scales: {
-        x: { grid: { color: _cssVar('--surface-subtle') }, ticks: { color: _cssVar('--text-muted'), font: { size: 10 } } },
-        y: { grid: { display: false }, ticks: { color: _cssVar('--text-dim'), font: { size: 10 }, callback: v => v.length > 14 ? v.slice(0,14)+'…' : v } }
-      }
+  const raw = lines[headerIdx].replace(/^\uFEFF/, '');
+  const sep = (raw.match(/;/g) || []).length > (raw.match(/,/g) || []).length ? ';' : ',';
+  const header = raw.split(sep).map(h => h.trim().replace(/"/g,'').toLowerCase()
+    .normalize('NFD').replace(/[\u0300-\u036f]/g,''));
+
+  function parseLine(line) {
+    const values = []; let cur = '', inQ = false;
+    for (let i = 0; i < line.length; i++) {
+      if (line[i] === '"') { inQ = !inQ; continue; }
+      if (line[i] === sep && !inQ) { values.push(cur.trim()); cur = ''; continue; }
+      cur += line[i];
     }
-  });
+    values.push(cur.trim());
+    const obj = {};
+    header.forEach((h, i) => obj[h] = values[i] || '');
+    return obj;
+  }
+
+  return lines.slice(headerIdx + 1).filter(l => l.trim()).map(parseLine);
 }
 
-function renderHistChart(id, labels, data) {
-  destroyChart(id);
-  const ctx = document.getElementById(id).getContext('2d');
-  charts[id] = new Chart(ctx, {
-    type: 'bar',
-    data: { labels, datasets: [{ data, backgroundColor: _cssVar('--accent-chart'), borderRadius: 2 }] },
-    options: { ...chartDefaults, responsive: true, maintainAspectRatio: false,
-      scales: { x: { grid: { display: false }, ticks: { color: _cssVar('--text-muted'), font: { size: 9 }, maxRotation: 45 } },
-        y: { grid: { color: _cssVar('--surface-subtle') }, ticks: { color: _cssVar('--text-muted'), font: { size: 10 } } } }
-    }
-  });
+// Detectar formato e normalizar para estrutura interna
+function detectAndNormalize(rows) {
+  if (!rows.length) return { rows: [], formato: 'vazio', info: 'Sem dados' };
+  const keys = Object.keys(rows[0]);
+
+  const find = (...terms) => keys.find(k => terms.some(t => k.includes(t)));
+
+  const latKey      = find('lat', 'latitude');
+  const lonKey      = find('lon', 'lng', 'longitude');
+  const cnpjRaizKey = keys.find(k => k === 'cnpj_raiz');          // coluna exata cnpj_raiz
+  const cnpjKey     = !cnpjRaizKey ? find('cnpj') : null;         // só busca 'cnpj' se não tiver raiz
+  const endKey      = find('endereco', 'endereço', 'address', 'logradouro', 'rua');
+  const nomeKey     = find('nome', 'name', 'marca', 'brand', 'loja', 'razao', 'fantasia');
+
+  // Formato 0: Varejo 360 com cnpj_raiz — base de share por PDV (ex: Varejo 360 / Kantar)
+  if (cnpjRaizKey && rows.some(r => (r[cnpjRaizKey] || '').replace(/\D/g,'').length >= 8)) {
+    const marcaKey = keys.find(k => k === 'marca') || nomeKey;
+    const norm = rows.map(r => ({
+      cnpj:       r[cnpjRaizKey],
+      _cnpj_raiz: (r[cnpjRaizKey] || '').replace(/\D/g,'').padStart(8,'0'),
+      marca:      r[marcaKey] || '',
+      bandeira:   'Carregando...',
+      ...r,
+    }));
+    return { rows: norm, formato: 'cnpj_raiz', info: `${norm.length} PDVs por CNPJ Raiz — endereços via Receita Federal` };
+  }
+
+  // Formato 1: lat/lon direto — plota sem geocodificar
+  if (latKey && lonKey && rows.some(r => parseFloat(r[latKey]) && parseFloat(r[lonKey]))) {
+    const norm = rows.map(r => ({
+      cnpj: r[cnpjKey] || '',
+      nome: r[nomeKey] || '',
+      marca: r[nomeKey] || '',
+      bandeira: r[nomeKey] || 'Desconhecido',
+      lat: parseFloat(r[latKey]), lon: parseFloat(r[lonKey]),
+      geo_address: r[endKey] || '',
+      ...r,
+    }));
+    return { rows: norm, formato: 'latlon', info: `${norm.length} pontos com coordenadas — plotando direto` };
+  }
+
+  // Formato 2: HYPR/Kantar — campo cnpj contém endereço embutido ("CNPJ - RUA - CIDADE/UF")
+  if (cnpjKey && rows.some(r => (r[cnpjKey] || '').includes(' - '))) {
+    const marcaKeyH = keys.find(k => k === 'marca') || nomeKey;
+    const normH = rows.map(r => ({ ...r, marca: r[marcaKeyH] || '', bandeira: 'Carregando...' }));
+    return { rows: normH, formato: 'hypr', info: `${normH.length} PDVs no formato HYPR/Kantar` };
+  }
+
+  // Formato 3: Endereço livre — tem coluna de endereço mas não cnpj com " - "
+  if (endKey) {
+    const norm = rows.map(r => ({
+      cnpj: r[cnpjKey] || '',
+      _endereco_livre: [r[endKey], r[find('bairro','neighborhood')||''], r[find('cidade','city','municipio')||''], r[find('uf','estado','state')||''], 'Brasil'].filter(Boolean).join(', '),
+      nome: r[nomeKey] || '',
+      marca: r[nomeKey] || '',
+      bandeira: r[nomeKey] || 'Desconhecido',
+      ...r,
+    }));
+    return { rows: norm, formato: 'endereco', info: `${norm.length} endereços livres detectados` };
+  }
+
+  // Formato 4: CNPJ puro (14 dígitos) — busca endereço na Receita Federal
+  if (cnpjKey && rows.some(r => r[cnpjKey]?.replace(/\D/g,'').length >= 8)) {
+    const norm = rows.map(r => ({
+      cnpj: r[cnpjKey],
+      marca: r[nomeKey] || '',
+      bandeira: r[nomeKey] || r[cnpjKey] || 'Desconhecido',
+      ...r,
+    }));
+    return { rows: norm, formato: 'cnpj_puro', info: `${norm.length} CNPJs — endereços serão buscados na Receita Federal` };
+  }
+
+  // Fallback genérico
+  return { rows, formato: 'hypr', info: `${rows.length} linhas (formato genérico)` };
 }
 
-function renderWinLoseChart(id, labels, wins, loses) {
-  destroyChart(id);
-  const ctx = document.getElementById(id).getContext('2d');
-  charts[id] = new Chart(ctx, {
-    type: 'bar',
-    data: {
-      labels,
-      datasets: [
-        { label: 'Ganho', data: wins, backgroundColor: _cssVar('--win-chart'), borderRadius: 3 },
-        { label: 'Perda', data: loses, backgroundColor: _cssVar('--lose-chart'), borderRadius: 3 },
-      ]
-    },
-    options: { ...chartDefaults, indexAxis: 'y', responsive: true, maintainAspectRatio: false,
-      plugins: { ...chartDefaults.plugins, legend: { display: true, labels: { color: _cssVar('--text-dim'), font: { size: 10 } } } },
-      scales: {
-        x: { stacked: false, grid: { color: _cssVar('--surface-subtle') }, ticks: { color: _cssVar('--text-muted'), font: { size: 10 } } },
-        y: { grid: { display: false }, ticks: { color: _cssVar('--text-dim'), font: { size: 10 }, callback: v => v.length > 12 ? v.slice(0,12)+'…' : v } }
-      }
-    }
-  });
-}
-
-// ─── Load Data ───────────────────────────────────────────────────────────────
-
-
-// ═══════════════════════════════════════════════════════════════════════════════
-// ═══ FILTERS ══════════════════════════════════════════════════════════════════
-// ═══════════════════════════════════════════════════════════════════════════════
-
+// ─── Filters ─────────────────────────────────────────────────────────────────
 // ─── Normalização de nomes de bandeira ──────────────────────────────────────
+var _bandeiraGroupMap = {}; // mapa: nome original → nome normalizado
+function normalizeBandeira(nome) {
+  if (!nome) return nome;
+  var n = nome.toUpperCase().trim();
+  // Remover complemento após hífen/travessão: "ATACADAO SOUZA - COMERCIO DE PRODUTOS..."
+  n = n.replace(/\s*[-–—]\s*(COMERCIO|COMÉRCIO|COM\.?|DIST\.?|IND\.?)\s+DE\s+.+$/i, '');
+  // Remover sufixos jurídicos e descritivos (loop até estabilizar)
+  var prev = '';
+  while (prev !== n) {
+    prev = n;
+    n = n.replace(/\s+(LTDA\.?|ME\.?|EPP\.?|EIRELI\.?|SLU\.?|SS\.?|S\.?\s*A\.?|S\/A|CIA\.?)\.?$/i, '');
+    n = n.replace(/\s+(COMERCIAL|DISTRIBUIDORA|SUPERMERCADOS?|HIPERMERCADOS?|ATACADISTA|ATACADO|VAREJO|VAREJISTA|MERCADO|MERCEARIA|EMPORIO|MINIMERCADO)$/i, '');
+    n = n.replace(/\s+(COMERCIO|COMÉRCIO|COM\.?)\s+(DE|E)\s+.+$/i, '');
+    n = n.replace(/\s+(ALIMENTOS|BEBIDAS|PRODUTOS|GENEROS|GÊNEROS|CEREAIS|FRIOS|HORTIFRUTI).*$/i, '');
+    n = n.replace(/\s+(IND\.?\s*(E|&)\s*COM\.?|COM\.?\s*(E|&)\s*IND\.?).*$/i, '');
+  }
+  // Remover pontuação final e normalizar espaços
+  n = n.replace(/[\.\,\-]+$/, '').trim();
+  n = n.replace(/\s+/g, ' ');
+  return n;
+}
 
+function buildBandeiraGroups() {
+  _bandeiraGroupMap = {};
+  var groups = {}; // chave normalizada → { display: nome mais curto, originals: [...] }
+  allData.forEach(function(r) {
+    if (!r.bandeira || r.bandeira === 'Não identificado' || r.bandeira === 'Carregando...') return;
+    var key = normalizeBandeira(r.bandeira);
+    if (!groups[key]) groups[key] = { display: null, originals: new Set(), count: 0 };
+    groups[key].originals.add(r.bandeira);
+    groups[key].count++;
+    // Usar o nome mais curto como display (mais limpo)
+    if (!groups[key].display || r.bandeira.length < groups[key].display.length) {
+      groups[key].display = r.bandeira;
+    }
+  });
+  // Construir mapa reverso: original → display
+  Object.values(groups).forEach(function(g) {
+    g.originals.forEach(function(orig) {
+      _bandeiraGroupMap[orig] = g.display;
+    });
+  });
+  return groups;
+}
+
+// ─── Multi-select component ─────────────────────────────────────────────────
 var _msState = {}; // id → { options: [{value, label, count}], selected: Set }
 
 function initMultiSelect(id, options) {
@@ -1091,6 +929,27 @@ function resetFilters() {
   updateOverlay();
 }
 
+// ─── Stats & Panels ───────────────────────────────────────────────────────────
+function avg(arr, key) {
+  const vals = arr.map(r => parseFloat(r[key] || 0)).filter(v => !isNaN(v));
+  return vals.length ? vals.reduce((a,b) => a+b, 0) / vals.length : 0;
+}
+
+function groupBy(arr, key) {
+  return arr.reduce((acc, r) => {
+    const k = r[key] || 'Outros';
+    if (!acc[k]) acc[k] = [];
+    acc[k].push(r);
+    return acc;
+  }, {});
+}
+
+function updateOverlay() {
+  document.getElementById('overlay-count').textContent = filteredData.length.toLocaleString('pt-BR');
+  const shareAvg = avg(filteredData, 'share_reais_sku_dimensao') * 100;
+  document.getElementById('overlay-share').textContent = shareAvg.toFixed(1) + '%';
+}
+
 function updateHeader() {
   const winCount = filteredData.filter(r => parseFloat(r.percentual_diff_media_dimensao||0) > 2).length;
   const shareAvg = avg(filteredData, 'share_reais_sku_dimensao') * 100;
@@ -1106,280 +965,321 @@ var _lastFilteredLength = -1;
 var _lastFilteredHash = '';
 var _panelRafId = null;
 
+function updatePanels() {
+  const hash = filteredData.length + '_' + (filteredData[0]?.cnpj || '') + '_' + (filteredData[filteredData.length-1]?.cnpj || '');
+  if (hash === _lastFilteredHash) return;
+  _lastFilteredHash = hash;
+
+  // Usar rAF para não bloquear o render do mapa
+  if (_panelRafId) cancelAnimationFrame(_panelRafId);
+  _panelRafId = requestAnimationFrame(() => {
+    updateHeader();
+    updateOverview();
+    // Atualizar ranking e análise com pequeno delay para priorizar o mapa
+    setTimeout(() => { updateRanking(); updateAnalysis(); }, 50);
+    _panelRafId = null;
+  });
+}
+
 // ─── Overview Tab ────────────────────────────────────────────────────────────
+function updateOverview() {
+  const shareAvg = avg(filteredData, 'share_reais_sku_dimensao') * 100;
+  const diffAvg = avg(filteredData, 'percentual_diff_media_dimensao');
+  document.getElementById('ov-share-val').textContent = shareAvg.toFixed(1);
+  const deltaEl = document.getElementById('ov-share-delta');
+  deltaEl.textContent = (diffAvg > 0 ? '+' : '') + diffAvg.toFixed(1) + '% vs. média';
+  deltaEl.className = 'share-delta ' + (diffAvg >= 0 ? 'pos' : 'neg');
 
-
-// ═══════════════════════════════════════════════════════════════════════════════
-// ═══ RECEITA ══════════════════════════════════════════════════════════════════
-// ═══════════════════════════════════════════════════════════════════════════════
-
-// Usa cnpj.ws — sem rate limit agressivo, dados direto da Receita Federal
-var _receitaCache = {};
-var _receitaInFlight = 0;    // throttle de requisições simultâneas
-var _receitaPending = 0;     // total de requisições pendentes (para aguardar antes do save)
-
-async function buscarReceitaEstab(estab, razaoSocial) {
-  // Nome fantasia é preferido; fallback para razão social — nunca retornar string vazia
-  const nomeFantasia = (estab.nome_fantasia || '').trim();
-  const razao        = (razaoSocial || estab.razao_social || '').trim();
-  const logradouro   = [estab.tipo_logradouro, estab.logradouro, estab.numero, estab.complemento]
-    .filter(Boolean).join(' ');
-  const bairro = (estab.bairro || '').trim();
-  const cidade = estab.cidade?.nome || '';
-  const uf     = estab.estado?.sigla || '';
-  const cep    = (estab.cep || '').replace(/\D/g, '');
-  return {
-    nome_fantasia:    nomeFantasia,
-    razao_social:     razao,
-    nome_exibicao:    nomeFantasia || razao,  // fonte de verdade para row.bandeira
-    endereco_receita: [logradouro, bairro, cidade, uf, 'Brasil'].filter(Boolean).join(', '),
-    municipio:        cidade,
-    uf_receita:       uf,
-    cep,
-    situacao:         estab.situacao_cadastral || '',
-    atividade:        estab.atividade_principal?.descricao || estab.cnae_fiscal_descricao || '',
-    logradouro,
-    bairro,
-    numero:           estab.numero || '',
-  };
-}
-
-// Busca CNPJ completo na Receita Federal via publica.cnpj.ws com fallback para BrasilAPI.
-// Para CNPJ raiz (8 dígitos): busca via /estabelecimentos e usa a filial mais representativa
-// (a que tiver mais funcionários ou a primeira ativa), NÃO a primeira filial aleatória.
-// Garantias: (1) sempre usa CNPJ completo de 14 dígitos para identificação de filial,
-//            (2) razão social é fallback obrigatório quando nome_fantasia ausente,
-//            (3) BrasilAPI como segunda fonte se cnpj.ws falhar.
-async function buscarReceita(cnpjCol, _retries) {
-  if (_retries === undefined) _retries = 0;
-  var MAX_RETRIES = 3;
-  const cnpjNum = (cnpjCol.split(' - ')[0] || '').replace(/\D/g, '').slice(0, 14);
-  if (!cnpjNum) return null;
-
-  // CNPJ Raiz (8 dígitos) — busca a primeira filial ativa via /estabelecimentos
-  if (cnpjNum.length === 8) {
-    const cacheKey = 'raiz_' + cnpjNum;
-    if (_receitaCache[cacheKey] !== undefined) return _receitaCache[cacheKey];
-    if (_receitaInFlight >= 5) await new Promise(r => setTimeout(r, 300));
-    _receitaInFlight++;
-    try {
-      const controller = new AbortController();
-      const tid = setTimeout(() => controller.abort(), 10000);
-      const resp = await fetch(`https://publica.cnpj.ws/cnpj/${cnpjNum}/estabelecimentos?quantidade=5`, {
-        signal: controller.signal,
-        headers: { 'Accept': 'application/json' }
-      });
-      clearTimeout(tid);
-      if (resp.status === 429) {
-        _receitaInFlight--;
-        if (_retries >= MAX_RETRIES) { _receitaCache[cacheKey] = null; return null; }
-        await new Promise(r => setTimeout(r, 2000 * (_retries + 1)));
-        return buscarReceita(cnpjCol, _retries + 1);
-      }
-      if (!resp.ok) { _receitaCache[cacheKey] = null; _receitaInFlight--; return null; }
-      const d = await resp.json();
-      // Escolher a primeira filial ativa (situacao_cadastral = "Ativa" ou "ATIVA")
-      const estabs = Array.isArray(d) ? d : (d.estabelecimentos || d.data || []);
-      const ativa = estabs.find(e => /ativa/i.test(e.situacao_cadastral || '')) || estabs[0];
-      if (!ativa) { _receitaCache[cacheKey] = null; _receitaInFlight--; return null; }
-      const result = await buscarReceitaEstab(ativa, d.razao_social || ativa.razao_social || '');
-      _receitaCache[cacheKey] = result;
-      _receitaInFlight--;
-      _receitaPending = Math.max(0, _receitaPending - 1);
-      return result;
-    } catch {
-      _receitaCache['raiz_' + cnpjNum] = null;
-      _receitaInFlight = Math.max(0, _receitaInFlight - 1);
-      _receitaPending  = Math.max(0, _receitaPending - 1);
-      return null;
-    }
-  }
-
-  if (cnpjNum.length < 14) return null;
-
-  // Cache por CNPJ completo (14 dígitos) — cada filial tem endereço único
-  if (_receitaCache[cnpjNum] !== undefined) return _receitaCache[cnpjNum];
-
-  // Throttle: máx 5 requisições simultâneas
-  if (_receitaInFlight >= 5) {
-    await new Promise(r => setTimeout(r, 300));
-  }
-  _receitaInFlight++;
-
-  try {
-    // PRIMARY: BrasilAPI (faster, more stable)
-    const result = await buscarReceitaBrasilAPI(cnpjNum);
-    if (result) {
-      _receitaCache[cnpjNum] = result;
-      _receitaInFlight--;
-      _receitaPending = Math.max(0, _receitaPending - 1);
-      return result;
-    }
-    // FALLBACK: publica.cnpj.ws
-    const controller = new AbortController();
-    const tid = setTimeout(() => controller.abort(), 8000);
-    const resp = await fetch(`https://publica.cnpj.ws/cnpj/${cnpjNum}`, {
-      signal: controller.signal,
-      headers: { 'Accept': 'application/json' }
-    });
-    clearTimeout(tid);
-
-    if (resp.status === 429) {
-      _receitaInFlight--;
-      if (_retries >= MAX_RETRIES) { _receitaCache[cnpjNum] = null; return null; }
-      await new Promise(r => setTimeout(r, 2000 * (_retries + 1)));
-      return buscarReceita(cnpjCol, _retries + 1);
-    }
-    if (!resp.ok) {
-      _receitaCache[cnpjNum] = null;
-      _receitaInFlight--;
-      _receitaPending = Math.max(0, _receitaPending - 1);
-      return null;
-    }
-
-    const d = await resp.json();
-    const estab = d.estabelecimento || {};
-    const fallback = await buscarReceitaEstab(estab, d.razao_social || '');
-    _receitaCache[cnpjNum] = fallback;
-    _receitaInFlight--;
-    _receitaPending = Math.max(0, _receitaPending - 1);
-    return fallback;
-  } catch {
-    _receitaCache[cnpjNum] = null;
-    _receitaInFlight = Math.max(0, _receitaInFlight - 1);
-    _receitaPending = Math.max(0, _receitaPending - 1);
-    return null;
-  }
-}
-
-// Fallback: BrasilAPI (fonte: Receita Federal, endpoint alternativo)
-async function buscarReceitaBrasilAPI(cnpjNum) {
-  try {
-    const controller = new AbortController();
-    const tid = setTimeout(() => controller.abort(), 8000);
-    const resp = await fetch(`https://brasilapi.com.br/api/cnpj/v1/${cnpjNum}`, {
-      signal: controller.signal,
-      headers: { 'Accept': 'application/json' }
-    });
-    clearTimeout(tid);
-    if (!resp.ok) return null;
-    const d = await resp.json();
-    // BrasilAPI retorna formato diferente — normalizar
-    const nomeFantasia = (d.nome_fantasia || '').trim();
-    const razao = (d.razao_social || '').trim();
-    const logradouro = [d.descricao_tipo_logradouro, d.logradouro, d.numero, d.complemento]
-      .filter(Boolean).join(' ');
-    const bairro = (d.bairro || '').trim();
-    const cidade = (d.municipio || '').trim();
-    const uf = (d.uf || '').trim();
-    const cep = (d.cep || '').replace(/\D/g, '');
-    return {
-      nome_fantasia:    nomeFantasia,
-      razao_social:     razao,
-      nome_exibicao:    nomeFantasia || razao,
-      endereco_receita: [logradouro, bairro, cidade, uf, 'Brasil'].filter(Boolean).join(', '),
-      municipio:        cidade,
-      uf_receita:       uf,
-      cep,
-      situacao:         d.descricao_situacao_cadastral || '',
-      atividade:        d.cnae_fiscal_descricao || '',
-      logradouro,
-      bairro,
-      numero:           d.numero || '',
-    };
-  } catch {
-    return null;
-  }
-}
-
-// ─── Start Geocoding ──────────────────────────────────────────────────────────
-
-
-// ═══════════════════════════════════════════════════════════════════════════════
-// ═══ GEOCODING ════════════════════════════════════════════════════════════════
-// ═══════════════════════════════════════════════════════════════════════════════
-
-function downloadGeocoderCSV() {
-  const data = allData.length ? allData : [];
-  if (!data.length) { alert('Nenhum dado para exportar.'); return; }
-
-  let cols, labels;
-  if (currentMapType === 'geocoder') {
-    cols   = ['_input', 'lat', 'lon', 'geo_address', 'uf', 'cep', '_status'];
-    labels = ['Endereco_Original', 'Latitude', 'Longitude', 'Endereco_Geocodificado', 'UF', 'CEP', 'Status'];
-  } else if (currentMapType === 'reverse_geocoder') {
-    cols   = ['nome', 'input_lat', 'input_lon', 'geo_address', 'uf', 'cep', '_status'];
-    labels = ['Nome', 'Lat_Input', 'Lon_Input', 'Endereco', 'UF', 'CEP', 'Status'];
-  } else if (currentMapType === 'places_discovery') {
-    cols   = ['nome', 'geo_address', 'lat', 'lon', 'place_id', 'place_types', 'place_status'];
-    labels = ['Nome', 'Endereco', 'Latitude', 'Longitude', 'Google_Place_ID', 'Tipos', 'Status'];
-  } else {
-    // Varejo 360: full columns with CNPJ, bandeira, receita data
-    cols   = ['bandeira', 'cnpj', 'lat', 'lon', 'geo_address', 'uf', 'nome_fantasia', 'razao_social', 'cep'];
-    labels = ['Bandeira', 'CNPJ', 'Latitude', 'Longitude', 'Endereco', 'UF', 'Nome_Fantasia', 'Razao_Social', 'CEP'];
-  }
-
-  const esc = v => v == null ? '' : `"${String(v).replace(/"/g, '""')}"`;
-  const rows = [labels.join(','), ...data.map(r => cols.map(c => {
-    if (c === '_status') return esc(r._geocodeFailed ? 'Não identificado' : (r._ufMismatch ? 'UF Mismatch (' + r._expectedUF + '→' + (r.uf||'?') + ')' : 'OK'));
-    if (c === '_input') return esc(r.endereco_geocode || r._endereco_livre || r.endereco || r['endereço'] || r.address || '');
-    return esc(r[c]);
-  }).join(','))];
-  const blob = new Blob([rows.join('\r\n')], { type: 'text/csv;charset=utf-8;' });
-  const url  = URL.createObjectURL(blob);
-  const a    = Object.assign(document.createElement('a'), { href: url, download: `geocodify_${currentMapType}_${Date.now()}.csv` });
-  a.click();
-  URL.revokeObjectURL(url);
-}
-
-// ─── Reverse Geocoding (lat/lon → endereço) ───────────────────────────────────
-
-async function reverseGeocodeHERE(lat, lon) {
-  const resp = await fetch(
-    `/api/geocode?action=reverse&at=${lat},${lon}&lang=pt-BR&limit=1`
+  // Chart: shares (reais, volume, unidades)
+  const shareR = avg(filteredData, 'share_reais_sku_dimensao') * 100;
+  const shareV = avg(filteredData, 'share_volume_sku_dimensao') * 100;
+  const shareU = avg(filteredData, 'share_unidades_sku_dimensao') * 100;
+  renderBarChart('chart-shares',
+    ['Reais', 'Volume', 'Unidades'],
+    [shareR, shareV, shareU],
+    [_cssVar('--accent'), _cssVar('--accent-light'), _cssVar('--blue-light')]
   );
-  if (!resp.ok) return null;
-  const d = await resp.json();
-  const item = d.items?.[0];
-  if (!item) return null;
-  return {
-    geo_address: item.address?.label || '',
-    uf: item.address?.stateCode || '',
-    cep: item.address?.postalCode || '',
-  };
+
+  // Chart: PDVs por bandeira
+  const grp = groupBy(filteredData, 'bandeira');
+  const bandSort = Object.entries(grp).sort((a,b) => b[1].length - a[1].length).slice(0, 8);
+  renderHorizBarChart('chart-bandeiras', bandSort.map(e => e[0]), bandSort.map(e => e[1].length));
+
+  // Chart: distribuição de share
+  const bins = [0,2,5,10,15,20,30,50,100];
+  const labels = bins.slice(0,-1).map((v,i) => `${v}–${bins[i+1]}%`);
+  const counts = bins.slice(0,-1).map((v,i) => filteredData.filter(r => {
+    const s = parseFloat(r.share_reais_sku_dimensao||0)*100;
+    return s >= v && s < bins[i+1];
+  }).length);
+  renderHistChart('chart-dist', labels, counts);
 }
 
-document.addEventListener('DOMContentLoaded', () => {
-  initResizablePanels();
-  // Restaurar estado de colapso
-  try {
-    if (localStorage.getItem('hypr_sidebar_collapsed') === 'true') toggleSidebar();
-    if (localStorage.getItem('hypr_panel_collapsed') === 'true') togglePanel();
-    if (localStorage.getItem('hypr_fullmap') === 'true') toggleFullMap();
-  } catch(e) {}
+// ─── Ranking Tab ─────────────────────────────────────────────────────────────
+function updateRanking() {
+  const grp = groupBy(filteredData, 'bandeira');
+  const ranked = Object.entries(grp).map(([b, rows]) => ({
+    name: b,
+    count: rows.length,
+    shareAvg: avg(rows, 'share_reais_sku_dimensao') * 100,
+    diffAvg: avg(rows, 'percentual_diff_media_dimensao'),
+    oportAvg: avg(rows, 'oportunidade_dimensao'),
+  })).sort((a,b) => b.shareAvg - a.shareAvg);
 
-  // Atalho de teclado: F = toggle tela cheia do mapa
-  document.addEventListener('keydown', e => {
-    if (e.key === 'f' || e.key === 'F') {
-      // Não disparar se estiver em input/textarea
-      if (['INPUT','TEXTAREA','SELECT'].includes(document.activeElement?.tagName)) return;
-      toggleFullMap();
-    }
-    // ESC sai do modo tela cheia ou fecha modal/toast
-    if (e.key === 'Escape') {
-      var geoToast = document.getElementById('geo-toast');
-      if (geoToast && geoToast.classList.contains('active')) { dismissGeoToast(); return; }
-      var vsm = document.getElementById('varejo-sub-modal');
-      if (vsm && vsm.classList.contains('active')) { closeVarejoSubModal(); return; }
-      const modal = document.getElementById('map-type-modal');
-      if (modal?.classList.contains('active')) { closeMapTypeModal(); return; }
-      const app = document.getElementById('app');
-      if (app.classList.contains('map-only')) toggleFullMap();
-    }
+  const maxShare = Math.max(...ranked.map(r => r.shareAvg), 1);
+
+  const top = ranked.slice(0, 7);
+  const bottom = [...ranked].sort((a,b) => a.shareAvg - b.shareAvg).slice(0, 7);
+  const topOport = [...ranked].sort((a,b) => b.oportAvg - a.oportAvg).slice(0, 7);
+
+  function renderRankList(id, items, valueKey, label, badgeFn) {
+    const el = document.getElementById(id);
+    el.innerHTML = items.map((item, i) => {
+      const val = item[valueKey];
+      const badge = badgeFn ? badgeFn(item) : '';
+      const barColor = item.diffAvg > 2 ? _cssVar('--win') : item.diffAvg < -2 ? _cssVar('--lose') : _cssVar('--neutral');
+      return `<div class="rank-item">
+        <span class="rank-num">${i+1}</span>
+        <span class="rank-name" title="${_escForHtml(item.name)}">${_escForHtml(item.name)}</span>
+        <div class="rank-bar-wrap"><div class="rank-bar" style="width:${Math.min(val/maxShare*100,100)}%;background:${barColor}"></div></div>
+        <span class="rank-val" style="color:${barColor}">${val.toFixed(1)}%</span>
+        ${badge}
+      </div>`;
+    }).join('');
+  }
+
+  renderRankList('rank-top', top, 'shareAvg', '%', item => {
+    const cls = item.diffAvg > 2 ? 'win' : item.diffAvg < -2 ? 'lose' : 'neutral';
+    const label = item.diffAvg > 2 ? '▲ ganha' : item.diffAvg < -2 ? '▼ perde' : '→ neutro';
+    return `<span class="rank-badge ${cls}">${label}</span>`;
+  });
+  renderRankList('rank-bottom', bottom, 'shareAvg', '%', item => {
+    const cls = item.diffAvg > 2 ? 'win' : item.diffAvg < -2 ? 'lose' : 'neutral';
+    const label = item.diffAvg > 2 ? '▲ ganha' : item.diffAvg < -2 ? '▼ perde' : '→ neutro';
+    return `<span class="rank-badge ${cls}">${label}</span>`;
   });
 
-  initAuth();
-});
+  // Oportunidade
+  const maxOport = Math.max(...topOport.map(r => r.oportAvg), 1);
+  const el = document.getElementById('rank-oport');
+  el.innerHTML = topOport.map((item, i) => `
+    <div class="rank-item">
+      <span class="rank-num">${i+1}</span>
+      <span class="rank-name" title="${_escForHtml(item.name)}">${_escForHtml(item.name)}</span>
+      <div class="rank-bar-wrap"><div class="rank-bar" style="width:${Math.min(item.oportAvg/maxOport*100,100)}%;background:var(--accent)"></div></div>
+      <span class="rank-val" style="color:var(--accent-light)">${item.oportAvg.toFixed(2)}</span>
+      <span class="rank-badge neutral">${item.count} PDVs</span>
+    </div>
+  `).join('');
+}
+
+// ─── Analysis Tab ────────────────────────────────────────────────────────────
+function updateAnalysis() {
+  const grp = groupBy(filteredData, 'bandeira');
+  const ranked = Object.entries(grp).map(([b, rows]) => ({
+    name: b,
+    count: rows.length,
+    shareAvg: avg(rows, 'share_reais_sku_dimensao') * 100,
+    diffAvg: avg(rows, 'percentual_diff_media_dimensao'),
+    oportTotal: rows.reduce((s,r) => s + parseFloat(r.oportunidade_dimensao||0), 0),
+  }));
+
+  const winBandeiras = ranked.filter(r => r.diffAvg > 3).sort((a,b) => b.diffAvg - a.diffAvg).slice(0,3);
+  const loseBandeiras = ranked.filter(r => r.diffAvg < -3).sort((a,b) => a.diffAvg - b.diffAvg).slice(0,3);
+  const bestOport = ranked.sort((a,b) => b.oportTotal - a.oportTotal).slice(0,3);
+
+  const totalPDVs = filteredData.length;
+  const winCount = filteredData.filter(r => parseFloat(r.percentual_diff_media_dimensao||0) > 2).length;
+  const loseCount = filteredData.filter(r => parseFloat(r.percentual_diff_media_dimensao||0) < -2).length;
+  const winPct = totalPDVs ? (winCount / totalPDVs * 100).toFixed(0) : 0;
+  const losePct = totalPDVs ? (loseCount / totalPDVs * 100).toFixed(0) : 0;
+
+  const cards = [
+    {
+      icon: '📈',
+      title: 'Onde a marca ganha share',
+      body: winBandeiras.length
+        ? `A marca está <span class="analysis-highlight win">acima da média</span> em ${winCount} PDVs (${winPct}% do total). ${winBandeiras.length ? `Melhor performance em: <span class="analysis-highlight">${winBandeiras.map(b => _escForHtml(b.name)).join(', ')}</span>.` : ''}`
+        : `Nenhuma bandeira com performance significativamente acima da média nos filtros selecionados.`
+    },
+    {
+      icon: '📉',
+      title: 'Onde a marca perde share',
+      body: loseBandeiras.length
+        ? `A marca está <span class="analysis-highlight lose">abaixo da média</span> em ${loseCount} PDVs (${losePct}% do total). Risco concentrado em: <span class="analysis-highlight">${loseBandeiras.map(b => _escForHtml(b.name)).join(', ')}</span>.`
+        : `Nenhuma bandeira com performance significativamente abaixo da média.`
+    },
+    {
+      icon: '🎯',
+      title: 'Maior oportunidade de investimento',
+      body: bestOport.length
+        ? `Priorizando bandeiras com maior score de oportunidade: <span class="analysis-highlight">${bestOport.map(b => `${_escForHtml(b.name)} (${b.count} PDVs)`).join(', ')}</span>. Esses PDVs têm maior potencial de crescimento de share.`
+        : `Sem dados de oportunidade disponíveis.`
+    },
+    {
+      icon: '⚖️',
+      title: 'Balanço geral',
+      body: `De ${totalPDVs.toLocaleString('pt-BR')} PDVs visíveis, <span class="analysis-highlight win">${winPct}% ganham</span> e <span class="analysis-highlight lose">${losePct}% perdem</span> share vs. a média da dimensão. ${parseFloat(winPct) > parseFloat(losePct) ? 'Cenário <span class="analysis-highlight win">favorável</span> para a marca.' : 'Há espaço relevante para <span class="analysis-highlight">recuperação de share</span>.'}`
+    }
+  ];
+
+  document.getElementById('analysis-cards').innerHTML = cards.map(c => `
+    <div class="analysis-card">
+      <div class="analysis-card-header">
+        <span class="analysis-card-icon">${c.icon}</span>
+        <span class="analysis-card-title">${c.title}</span>
+      </div>
+      <div class="analysis-card-body">${c.body}</div>
+    </div>
+  `).join('');
+
+  // Win/Lose chart
+  const wlData = ranked.slice(0, 10);
+  renderWinLoseChart('chart-winlose',
+    wlData.map(r => r.name),
+    wlData.map(r => Math.max(r.diffAvg, 0)),
+    wlData.map(r => Math.min(r.diffAvg, 0))
+  );
+
+  // UF ranking
+  const ufGrp = groupBy(filteredData, 'uf');
+  const ufRanked = Object.entries(ufGrp)
+    .map(([uf, rows]) => ({ name: uf, count: rows.length, shareAvg: avg(rows, 'share_reais_sku_dimensao') * 100 }))
+    .sort((a,b) => b.count - a.count).slice(0, 10);
+  const maxUf = Math.max(...ufRanked.map(r => r.count), 1);
+  document.getElementById('rank-uf').innerHTML = ufRanked.map((item, i) => `
+    <div class="rank-item">
+      <span class="rank-num">${i+1}</span>
+      <span class="rank-name">${_escForHtml(item.name)}</span>
+      <div class="rank-bar-wrap"><div class="rank-bar" style="width:${item.count/maxUf*100}%;background:var(--accent)"></div></div>
+      <span class="rank-val" style="color:var(--text-dim)">${item.count}</span>
+      <span class="rank-badge neutral">${item.shareAvg.toFixed(1)}%</span>
+    </div>
+  `).join('');
+}
+
+// ─── Charts ──────────────────────────────────────────────────────────────────
+var chartDefaults = {
+  plugins: { legend: { display: false }, tooltip: {
+    backgroundColor: _cssVar('--surface-solid'), borderColor: _cssVar('--border'), borderWidth: 1,
+    titleColor: _cssVar('--text'), bodyColor: _cssVar('--text-dim'), padding: 10, cornerRadius: 6,
+  }},
+  scales: {},
+};
+
+function destroyChart(id) {
+  if (charts[id]) { charts[id].destroy(); delete charts[id]; }
+}
+
+function renderBarChart(id, labels, data, colors) {
+  destroyChart(id);
+  const ctx = document.getElementById(id).getContext('2d');
+  charts[id] = new Chart(ctx, {
+    type: 'bar',
+    data: { labels, datasets: [{ data, backgroundColor: colors, borderRadius: 4, borderSkipped: false }] },
+    options: { ...chartDefaults, responsive: true, maintainAspectRatio: false,
+      scales: { x: { grid: { color: _cssVar('--surface-subtle') }, ticks: { color: _cssVar('--text-muted'), font: { size: 10 } } },
+        y: { grid: { color: _cssVar('--surface-subtle') }, ticks: { color: _cssVar('--text-muted'), font: { size: 10 }, callback: v => v.toFixed(1) + '%' } } }
+    }
+  });
+}
+
+function renderHorizBarChart(id, labels, data) {
+  destroyChart(id);
+  const ctx = document.getElementById(id).getContext('2d');
+  charts[id] = new Chart(ctx, {
+    type: 'bar',
+    data: { labels, datasets: [{ data, backgroundColor: _cssVar('--accent'), borderRadius: 3, borderSkipped: false }] },
+    options: { ...chartDefaults, indexAxis: 'y', responsive: true, maintainAspectRatio: false,
+      scales: {
+        x: { grid: { color: _cssVar('--surface-subtle') }, ticks: { color: _cssVar('--text-muted'), font: { size: 10 } } },
+        y: { grid: { display: false }, ticks: { color: _cssVar('--text-dim'), font: { size: 10 }, callback: v => v.length > 14 ? v.slice(0,14)+'…' : v } }
+      }
+    }
+  });
+}
+
+function renderHistChart(id, labels, data) {
+  destroyChart(id);
+  const ctx = document.getElementById(id).getContext('2d');
+  charts[id] = new Chart(ctx, {
+    type: 'bar',
+    data: { labels, datasets: [{ data, backgroundColor: _cssVar('--accent-chart'), borderRadius: 2 }] },
+    options: { ...chartDefaults, responsive: true, maintainAspectRatio: false,
+      scales: { x: { grid: { display: false }, ticks: { color: _cssVar('--text-muted'), font: { size: 9 }, maxRotation: 45 } },
+        y: { grid: { color: _cssVar('--surface-subtle') }, ticks: { color: _cssVar('--text-muted'), font: { size: 10 } } } }
+    }
+  });
+}
+
+function renderWinLoseChart(id, labels, wins, loses) {
+  destroyChart(id);
+  const ctx = document.getElementById(id).getContext('2d');
+  charts[id] = new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels,
+      datasets: [
+        { label: 'Ganho', data: wins, backgroundColor: _cssVar('--win-chart'), borderRadius: 3 },
+        { label: 'Perda', data: loses, backgroundColor: _cssVar('--lose-chart'), borderRadius: 3 },
+      ]
+    },
+    options: { ...chartDefaults, indexAxis: 'y', responsive: true, maintainAspectRatio: false,
+      plugins: { ...chartDefaults.plugins, legend: { display: true, labels: { color: _cssVar('--text-dim'), font: { size: 10 } } } },
+      scales: {
+        x: { stacked: false, grid: { color: _cssVar('--surface-subtle') }, ticks: { color: _cssVar('--text-muted'), font: { size: 10 } } },
+        y: { grid: { display: false }, ticks: { color: _cssVar('--text-dim'), font: { size: 10 }, callback: v => v.length > 12 ? v.slice(0,12)+'…' : v } }
+      }
+    }
+  });
+}
+
+// ─── Tab System ──────────────────────────────────────────────────────────────
+function setTab(name) {
+  document.querySelectorAll('.panel-tab').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('.panel-tab-content').forEach(t => t.classList.remove('active'));
+  document.getElementById('tab-' + name)?.classList.add('active');
+  document.getElementById('tc-' + name)?.classList.add('active');
+}
+
+// ─── Load Data ───────────────────────────────────────────────────────────────
+async function loadData(data) {
+  // Remover linha de totais
+  data = data.filter(r => r.cnpj && !r.cnpj.toUpperCase().includes('TODOS OS CNPJS'));
+
+  allData = data.filter(r => r.lat && r.lon && parseFloat(r.lat) && parseFloat(r.lon));
+  filteredData = [...allData];
+
+  document.getElementById('upload-zone').classList.add('hidden');
+  document.getElementById('app').style.display = 'flex';
+  await new Promise(r => setTimeout(r, 50));
+  if (!map) initMap();
+  await new Promise(r => setTimeout(r, 100));
+  if (map) map.resize();
+
+  // Fit bounds
+  setTimeout(() => {
+    const validPts = allData.filter(r => r.lat && r.lon);
+    if (validPts.length) {
+      if (!validPts.length) return;
+      const bounds = validPts.reduce((b, r) => b.extend([parseFloat(r.lon), parseFloat(r.lat)]),
+        new maplibregl.LngLatBounds([parseFloat(validPts[0].lon), parseFloat(validPts[0].lat)], [parseFloat(validPts[0].lon), parseFloat(validPts[0].lat)]));
+      map.fitBounds(bounds, { padding: 40, animate: true });
+    }
+  }, 200);
+
+  populateFilters();
+  renderMarkers();
+  updatePanels();
+  updateOverlay();
+}
+
+// ─── Auth — Supabase Email + Senha ──────────────────────────────────────────
+var SUPABASE_URL  = 'https://qfyqvcxhcmduhknbpofx.supabase.co';
+var SUPABASE_ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFmeXF2Y3hoY21kdWhrbmJwb2Z4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM0Mjk1NjAsImV4cCI6MjA4OTAwNTU2MH0.k92V1LN4OqqdtfF86iml4L-gVg0AabENKt7S5vlP2dk';
+// Inicializar imediatamente — supabase.js já carregou (script síncrono no <head>)
+var _supa = null;
+var currentUser = null;
 
 async function initAuth() {
   if (!_supa && window.supabase) {
@@ -1473,12 +1373,518 @@ async function handleLoggedIn(user) {
   showGallery();
 }
 
+function supaLogout() {
+  try { sessionStorage.removeItem('hypr_last_map'); } catch(e) {}
+  _supa.auth.signOut();
+  currentUser = null;
+  document.getElementById('login-screen').style.display = '';
+  document.getElementById('gallery-screen').classList.add('hidden');
+}
+
+// Criar versão debounced de applyFilters (150ms) para sliders
+var _debouncedFilter = debounce(applyFilters, 150);
+
+// ─── Estado do tipo de mapa atual ─────────────────────────────────────────────
+var currentMapType = 'varejo360'; // 'geocoder' | 'reverse_geocoder' | 'varejo360' | 'places_discovery'
+
+// Aplica modo visual correto — sempre chamar ao mudar de mapa
+function applyMapMode(type) {
+  currentMapType = type || 'varejo360';
+  const app = document.getElementById('app');
+  if (!app) return;
+  const isGeo = currentMapType !== 'varejo360' && currentMapType !== 'places_discovery';
+  const isPlaces = currentMapType === 'places_discovery';
+  // Forçar remoção antes de adicionar — garante estado limpo
+  app.classList.remove('mode-geo', 'mode-places');
+  if (isGeo) app.classList.add('mode-geo');
+  if (isPlaces) app.classList.add('mode-places');
+  // Explicitly hide/show places-panel based on mode
+  var placesPanel = document.getElementById('places-panel');
+  if (placesPanel) {
+    if (!isPlaces) {
+      placesPanel.style.display = 'none';
+    }
+  }
+  // Clear GeoJSON source when switching modes to prevent stale data on map
+  if (map && map.getSource('pdvs') && !isPlaces) {
+    // Don't clear if loading saved map data (allData may be populated by openSavedMap)
+  }
+  // Subtítulo do header
+  const labels = { geocoder:'📍 Lat/Lon Generator', reverse_geocoder:'🔄 Address Generator', varejo360:'📊 Varejo 360 Analysis', places_discovery:'🔎 Places Discovery' };
+  const sub = document.getElementById('logo-map-type');
+  if (sub) sub.textContent = labels[currentMapType] || 'by HYPR°';
+  // View toggle buttons
+  const vt = document.getElementById('view-toggle-btns');
+  if (vt) vt.style.display = (isGeo || isPlaces) ? 'flex' : 'none';
+}
+
+// ─── Modal de seleção de tipo ─────────────────────────────────────────────────
+function openMapTypeModal() {
+  const m = document.getElementById('map-type-modal');
+  m.style.display = 'flex';
+  m.style.opacity = '1';
+  m.style.pointerEvents = 'all';
+  m.classList.add('active');
+}
+function closeMapTypeModal() {
+  const m = document.getElementById('map-type-modal');
+  m.classList.remove('active');
+  m.style.display = 'none';
+  m.style.opacity = '0';
+  m.style.pointerEvents = 'none';
+}
+// Fechar modal ao clicar no backdrop
+document.addEventListener('click', e => {
+  const modal = document.getElementById('map-type-modal');
+  if (modal?.classList.contains('active') && e.target === modal) closeMapTypeModal();
+});
+function selectMapType(type) {
+  currentMapType = type;
+  closeMapTypeModal();
+  // Limpar dados do mapa anterior — evita sobrescrever mapa existente
+  allData = [];
+  filteredData = [];
+  rawCSVData = [];
+  window._pendingMapName = null;
+  window._pendingMapDesc = null;
+  window._pendingMapType = type;
+  window._pendingPeriodo = null;
+
+  // Adaptar UI conforme o tipo
+  const periodoEl = document.getElementById('step2-periodo');
+  const uploadSub = document.querySelector('#upload-zone .upload-sub');
+  const formatsMsg = document.getElementById('upload-formats-msg');
+  const startBtn = document.getElementById('btn-start-geo');
+  const uploadTitle = document.querySelector('#drop-zone .upload-title');
+
+  if (type === 'geocoder') {
+    if (uploadTitle) uploadTitle.textContent = 'Gerar Lat/Lon';
+    if (uploadSub) uploadSub.textContent = 'Suba um CSV com endereços. O sistema geocodifica cada linha e gera as coordenadas (lat/lon).';
+    if (formatsMsg) formatsMsg.textContent = 'Aceita endereço por extenso com cidade e UF';
+    if (startBtn) startBtn.textContent = 'Iniciar geocodificação →';
+    if (periodoEl) periodoEl.style.display = 'none';
+    renderUploadTemplate('geocoder');
+  } else if (type === 'reverse_geocoder') {
+    if (uploadTitle) uploadTitle.textContent = 'Gerar Endereços';
+    if (uploadSub) uploadSub.textContent = 'Suba um CSV com colunas lat e lon. O sistema busca o endereço completo de cada coordenada via reverse geocoding.';
+    if (formatsMsg) formatsMsg.textContent = 'Colunas obrigatórias: lat · lon — opcionais: nome · categoria';
+    if (startBtn) startBtn.textContent = 'Iniciar reverse geocoding →';
+    if (periodoEl) periodoEl.style.display = 'none';
+    renderUploadTemplate('reverse_geocoder');
+  } else if (type === 'places_discovery') {
+    // Places Discovery: abrir setup overlay em vez do upload zone
+    showPlacesSetup();
+    return; // não chamar showUploadZone()
+  } else {
+    if (uploadTitle) uploadTitle.textContent = 'Mapa de Share por PDV';
+    if (uploadSub) uploadSub.innerHTML = 'Exporte do Varejo 360 o share da marca aberto por <strong>Loja (CNPJ)</strong>. O sistema geocodifica cada PDV e plota o share no mapa.';
+    if (formatsMsg) formatsMsg.textContent = 'Formato HYPR/Kantar · CSV com cnpj + share · CNPJ raiz (8 dígitos)';
+    if (startBtn) startBtn.textContent = 'Iniciar geocodificação →';
+    if (periodoEl) periodoEl.style.display = 'flex';
+    renderUploadTemplate('varejo360');
+  }
+
+  // Mostrar view toggle só para geocoder
+  const vtBtns = document.getElementById('view-toggle-btns');
+  if (vtBtns) vtBtns.style.display = type !== 'varejo360' ? 'flex' : 'none';
+
+  showUploadZone();
+}
+
+// ─── Template preview e download por tipo de mapa ────────────────────────────
+var _uploadTemplates = {
+  geocoder: {
+    label: 'Formato esperado do CSV',
+    headers: ['endereco', 'nome'],
+    rows: [
+      ['RUA DO COMERCIO, 150, CENTRO, RECIFE, PE', 'Loja Centro'],
+      ['AV PAULISTA, 1000, BELA VISTA, SAO PAULO, SP', 'Filial SP'],
+      ['ROD BR-101, KM 45, CAMAÇARI, BA', 'CD Bahia'],
+    ],
+    tip: 'Inclua cidade e UF para maior precisão na geocodificação.',
+    filename: 'template_geocoder.csv',
+  },
+  reverse_geocoder: {
+    label: 'Formato esperado do CSV',
+    headers: ['lat', 'lon', 'nome'],
+    rows: [
+      ['-23.56132', '-46.65618', 'Ponto A'],
+      ['-22.90680', '-43.17290', 'Ponto B'],
+      ['-19.91910', '-43.93860', 'Ponto C'],
+    ],
+    tip: 'Use coordenadas decimais (WGS84). A coluna "nome" é opcional.',
+    filename: 'template_reverse_geocoder.csv',
+  },
+  varejo360: {
+    label: 'Formato Varejo 360 — Share por Loja (CNPJ)',
+    headers: ['marca', 'cnpj', 'percentual_dimensao', 'percentual_marca_dimensao', 'tickets_amostra'],
+    displayHeaders: ['marca', 'cnpj', '% dimensão', '% marca', 'tickets'],
+    rows: [
+      ['ITALAC', '44480747000160 - PARADA PINTO, 2262 - V.N. CACHOEIRINHA', '0.47', '3.14', '9187'],
+      ['ITALAC', '43559079000602 - LUIS STAMATIS, 431 - SAO PAULO/SP', '0.38', '20.78', '6168'],
+      ['ITALAC', '06057223054697 - AV ANA COSTA, 340 - SANTOS/SP', '0.32', '22.89', '5234'],
+    ],
+    tip: 'No Varejo 360, exporte o share da marca aberto por dimensão <strong>Loja (CNPJ)</strong>.',
+    filename: 'template_varejo360_share.csv',
+  },
+};
+
+function renderUploadTemplate(type) {
+  var tpl = _uploadTemplates[type];
+  var preview = document.getElementById('upload-tpl-preview');
+  var dlBtn = document.getElementById('upload-tpl-dl');
+  if (!tpl || !preview) { if (preview) preview.style.display = 'none'; if (dlBtn) dlBtn.style.display = 'none'; return; }
+
+  var html = '<div class="tpl-label"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg> ' + tpl.label + '</div>';
+  var displayH = tpl.displayHeaders || tpl.headers;
+  html += '<table><thead><tr>' + displayH.map(function(h) { return '<th>' + h + '</th>'; }).join('') + '</tr></thead><tbody>';
+  tpl.rows.forEach(function(row) {
+    html += '<tr>' + row.map(function(v) { return '<td>' + v + '</td>'; }).join('') + '</tr>';
+  });
+  html += '</tbody></table>';
+  if (tpl.tip) html += '<div style="margin-top:8px;font-size:11px;color:var(--text-muted);line-height:1.5;text-align:left;">💡 ' + tpl.tip + '</div>';
+
+  preview.innerHTML = html;
+  preview.style.display = 'block';
+  if (dlBtn) { dlBtn.style.display = 'inline-flex'; dlBtn.setAttribute('data-type', type); }
+}
+
+function downloadTemplate(e) {
+  if (e) e.stopPropagation();
+  var btn = document.getElementById('upload-tpl-dl');
+  var type = btn?.getAttribute('data-type') || 'geocoder';
+  var tpl = _uploadTemplates[type];
+  if (!tpl) return;
+
+  var csvRows = [tpl.headers.join(',')];
+  tpl.rows.forEach(function(row) {
+    csvRows.push(row.map(function(v) { return '"' + String(v).replace(/"/g, '""') + '"'; }).join(','));
+  });
+  var blob = new Blob([csvRows.join('\r\n')], { type: 'text/csv;charset=utf-8;' });
+  var url = URL.createObjectURL(blob);
+  var a = document.createElement('a');
+  a.href = url; a.download = tpl.filename; a.click();
+  URL.revokeObjectURL(url);
+}
+
+// ─── Varejo 360: Sub-modal de seleção ────────────────────────────────────────
+function openVarejoSubModal() {
+  closeMapTypeModal();
+  var m = document.getElementById('varejo-sub-modal');
+  m.style.display = 'flex';
+  m.style.opacity = '1';
+  m.style.pointerEvents = 'all';
+  m.classList.add('active');
+}
+function closeVarejoSubModal() {
+  var m = document.getElementById('varejo-sub-modal');
+  m.classList.remove('active');
+  m.style.display = 'none';
+  m.style.opacity = '0';
+  m.style.pointerEvents = 'none';
+}
+document.addEventListener('click', function(e) {
+  var modal = document.getElementById('varejo-sub-modal');
+  if (modal && modal.classList.contains('active') && e.target === modal) closeVarejoSubModal();
+});
+function selectVarejoSubType(subType) {
+  closeVarejoSubModal();
+  if (subType === 'comparativo') {
+    window.location.href = '/comparativo.html';
+  } else {
+    selectMapType('varejo360');
+  }
+}
+
+// ─── View toggle mapa/lista ───────────────────────────────────────────────────
+var currentView = 'map';
+function setMapView(view) {
+  currentView = view;
+  const listEl = document.getElementById('geocoder-list-view');
+  const btnMap  = document.getElementById('btn-view-map');
+  const btnList = document.getElementById('btn-view-list');
+
+  if (btnMap) btnMap.classList.toggle('active', view === 'map');
+  if (btnList) btnList.classList.toggle('active', view === 'list');
+
+  if (view === 'list') {
+    if (listEl) {
+      listEl.style.display = 'block';
+      // Garantir que a lista está ACIMA do mapa (z-index)
+      listEl.style.zIndex = '50';
+      listEl.style.position = 'absolute';
+      listEl.style.inset = '0';
+      listEl.style.background = 'var(--bg)';
+      listEl.style.overflowY = 'auto';
+      listEl.style.padding = '16px';
+    }
+    renderGeocoderList();
+  } else {
+    if (listEl) listEl.style.display = 'none';
+    setTimeout(() => map && map.resize(), 100);
+  }
+}
+
+function renderGeocoderList() {
+  const thead = document.getElementById('geocoder-thead');
+  const tbody = document.getElementById('geocoder-tbody');
+  const countEl = document.getElementById('list-count');
+  if (!thead || !tbody) return;
+
+  const data = filteredData.length ? filteredData : allData;
+  const failCount = data.filter(r => r._geocodeFailed).length;
+  const mismatchCount = data.filter(r => r._ufMismatch).length;
+  let summaryParts = [`${data.length.toLocaleString('pt-BR')} pontos`];
+  if (failCount > 0)    summaryParts.push(`<span style="color:var(--lose);">${failCount.toLocaleString('pt-BR')} não identificados</span>`);
+  if (mismatchCount > 0) summaryParts.push(`<span style="color:var(--neutral);">${mismatchCount.toLocaleString('pt-BR')} UF divergente</span>`);
+  countEl.innerHTML = summaryParts.join(' · ');
+
+  // Colunas conforme tipo — mostrar apenas dados relevantes
+  let cols = [];
+  const isGeoMode = currentMapType === 'geocoder' || currentMapType === 'reverse_geocoder';
+  if (currentMapType === 'geocoder') {
+    cols = ['_input', 'lat', 'lon', 'geo_address', '_status'];
+  } else if (currentMapType === 'reverse_geocoder') {
+    cols = ['nome', 'input_lat', 'input_lon', 'geo_address', '_status'];
+  } else if (currentMapType === 'places_discovery') {
+    cols = ['nome', 'geo_address', 'lat', 'lon', 'place_types', 'place_status'];
+  } else {
+    // Varejo 360: full columns including bandeira and CNPJ
+    cols = ['bandeira', 'lat', 'lon', 'geo_address', 'cnpj'];
+  }
+
+  const labels = { nome: 'Nome', bandeira: 'Bandeira/Rede', lat: 'Latitude', lon: 'Longitude',
+    geo_address: 'Endereço Geocodificado', cnpj: 'CNPJ', input_lat: 'Lat input', input_lon: 'Lon input',
+    place_types: 'Tipos', place_status: 'Status', place_id: 'Place ID', _status: 'Status',
+    _input: 'Endereço Original' };
+
+  thead.innerHTML = cols.map(c => `<th style="padding:8px 10px;text-align:left;font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:0.5px;color:var(--text-muted);border-bottom:1px solid var(--border);">${labels[c]||c}</th>`).join('');
+
+  // Sort: falhas primeiro, depois mismatches, depois OK
+  const sorted = [...data].sort((a, b) => {
+    const aW = a._geocodeFailed ? 2 : (a._ufMismatch ? 1 : 0);
+    const bW = b._geocodeFailed ? 2 : (b._ufMismatch ? 1 : 0);
+    return bW - aW;
+  });
+
+  tbody.innerHTML = sorted.slice(0, 500).map((r, i) => {
+    const isFail = r._geocodeFailed;
+    const isMismatch = !isFail && r._ufMismatch;
+    const rowStyle = isFail ? 'border-bottom:1px solid var(--border);background:rgba(239,68,68,0.06);'
+      : isMismatch ? 'border-bottom:1px solid var(--border);background:rgba(245,158,11,0.06);'
+      : 'border-bottom:1px solid var(--border);';
+    return `<tr style="${rowStyle}">
+      ${cols.map(c => {
+        if (c === '_status') {
+          if (isFail) return '<td style="padding:7px 10px;font-size:11px;"><span style="color:var(--lose);font-weight:500;">✗ Não identificado</span></td>';
+          if (isMismatch) return `<td style="padding:7px 10px;font-size:11px;"><span style="color:var(--neutral);font-weight:500;" title="Esperava ${r._expectedUF}, HERE retornou ${r.uf}">⚠ UF: ${r._expectedUF}→${r.uf}</span></td>`;
+          return '<td style="padding:7px 10px;font-size:11px;"><span style="color:var(--win);">✓ OK</span></td>';
+        }
+        if (c === '_input') {
+          // Endereço original: usar endereco_geocode, _endereco_livre, ou campo endereco do CSV
+          var inputAddr = r.endereco_geocode || r._endereco_livre || r.endereco || r['endereço'] || r.address || '';
+          var inputName = r.nome || r.marca || '';
+          var display = inputName ? inputName + (inputAddr ? ' — ' + inputAddr : '') : inputAddr;
+          return `<td style="padding:7px 10px;color:${isFail ? 'var(--lose)' : 'var(--text-dim)'};font-size:12px;" title="${display ? _escForHtml(display) : ''}">${display ? _escForHtml(String(display).slice(0,80)) : '—'}</td>`;
+        }
+        return `<td style="padding:7px 10px;color:${isFail ? 'var(--lose)' : 'var(--text-dim)'};font-size:12px;">${r[c] != null && r[c] !== '' ? _escForHtml(String(r[c]).slice(0,60)) : '—'}</td>`;
+      }).join('')}
+    </tr>`;
+  }).join('');
+
+  if (data.length > 500) {
+    tbody.innerHTML += `<tr><td colspan="${cols.length}" style="padding:12px;text-align:center;color:var(--text-muted);font-size:11px;">Mostrando primeiros 500 de ${data.length.toLocaleString('pt-BR')}. Exporte o CSV para ver todos.</td></tr>`;
+  }
+}
+
+// ─── Download CSV geocodificado ────────────────────────────────────────────────
+function downloadGeocoderCSV() {
+  const data = allData.length ? allData : [];
+  if (!data.length) { alert('Nenhum dado para exportar.'); return; }
+
+  let cols, labels;
+  if (currentMapType === 'geocoder') {
+    cols   = ['_input', 'lat', 'lon', 'geo_address', 'uf', 'cep', '_status'];
+    labels = ['Endereco_Original', 'Latitude', 'Longitude', 'Endereco_Geocodificado', 'UF', 'CEP', 'Status'];
+  } else if (currentMapType === 'reverse_geocoder') {
+    cols   = ['nome', 'input_lat', 'input_lon', 'geo_address', 'uf', 'cep', '_status'];
+    labels = ['Nome', 'Lat_Input', 'Lon_Input', 'Endereco', 'UF', 'CEP', 'Status'];
+  } else if (currentMapType === 'places_discovery') {
+    cols   = ['nome', 'geo_address', 'lat', 'lon', 'place_id', 'place_types', 'place_status'];
+    labels = ['Nome', 'Endereco', 'Latitude', 'Longitude', 'Google_Place_ID', 'Tipos', 'Status'];
+  } else {
+    // Varejo 360: full columns with CNPJ, bandeira, receita data
+    cols   = ['bandeira', 'cnpj', 'lat', 'lon', 'geo_address', 'uf', 'nome_fantasia', 'razao_social', 'cep'];
+    labels = ['Bandeira', 'CNPJ', 'Latitude', 'Longitude', 'Endereco', 'UF', 'Nome_Fantasia', 'Razao_Social', 'CEP'];
+  }
+
+  const esc = v => v == null ? '' : `"${String(v).replace(/"/g, '""')}"`;
+  const rows = [labels.join(','), ...data.map(r => cols.map(c => {
+    if (c === '_status') return esc(r._geocodeFailed ? 'Não identificado' : (r._ufMismatch ? 'UF Mismatch (' + r._expectedUF + '→' + (r.uf||'?') + ')' : 'OK'));
+    if (c === '_input') return esc(r.endereco_geocode || r._endereco_livre || r.endereco || r['endereço'] || r.address || '');
+    return esc(r[c]);
+  }).join(','))];
+  const blob = new Blob([rows.join('\r\n')], { type: 'text/csv;charset=utf-8;' });
+  const url  = URL.createObjectURL(blob);
+  const a    = Object.assign(document.createElement('a'), { href: url, download: `geocodify_${currentMapType}_${Date.now()}.csv` });
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+// ─── Reverse Geocoding (lat/lon → endereço) ───────────────────────────────────
+async function reverseGeocodeHERE(lat, lon) {
+  const resp = await fetch(
+    `/api/geocode?action=reverse&at=${lat},${lon}&lang=pt-BR&limit=1`
+  );
+  if (!resp.ok) return null;
+  const d = await resp.json();
+  const item = d.items?.[0];
+  if (!item) return null;
+  return {
+    geo_address: item.address?.label || '',
+    uf: item.address?.stateCode || '',
+    cep: item.address?.postalCode || '',
+  };
+}
+
+// ─── Resize e Colapso dos Painéis ────────────────────────────────────────────
+function initResizablePanels() {
+  // Restaurar larguras salvas
+  try {
+    const sw = localStorage.getItem('hypr_sidebar_w');
+    const pw = localStorage.getItem('hypr_panel_w');
+    if (sw) document.getElementById('sidebar').style.width = sw;
+    if (pw) document.getElementById('right-panel').style.width = pw;
+  } catch(e) {}
+
+  // Resize sidebar (handle esquerdo)
+  setupResizer('sidebar-resizer', 'sidebar', 'right', 160, 420, 'hypr_sidebar_w');
+  // Resize painel direito (handle direito)
+  setupResizer('panel-resizer', 'right-panel', 'left', 200, 520, 'hypr_panel_w');
+}
+
+function setupResizer(handleId, panelId, direction, minW, maxW, storageKey) {
+  const handle = document.getElementById(handleId);
+  const panel  = document.getElementById(panelId);
+  if (!handle || !panel) return;
+
+  let startX, startW;
+
+  handle.addEventListener('mousedown', e => {
+    startX = e.clientX;
+    startW = panel.getBoundingClientRect().width;
+    handle.classList.add('dragging');
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+
+    const onMove = e => {
+      const delta = direction === 'right' ? e.clientX - startX : startX - e.clientX;
+      const newW = Math.min(maxW, Math.max(minW, startW + delta));
+      panel.style.width = newW + 'px';
+      if (map) map.resize();
+    };
+
+    const onUp = () => {
+      handle.classList.remove('dragging');
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+      try { localStorage.setItem(storageKey, panel.style.width); } catch(e) {}
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+      if (map) map.resize();
+    };
+
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+    e.preventDefault();
+  });
+
+  // Touch support para mobile
+  handle.addEventListener('touchstart', e => {
+    startX = e.touches[0].clientX;
+    startW = panel.getBoundingClientRect().width;
+    const onMove = e => {
+      const delta = direction === 'right' ? e.touches[0].clientX - startX : startX - e.touches[0].clientX;
+      const newW = Math.min(maxW, Math.max(minW, startW + delta));
+      panel.style.width = newW + 'px';
+    };
+    const onEnd = () => {
+      try { localStorage.setItem(storageKey, panel.style.width); } catch(e) {}
+      handle.removeEventListener('touchmove', onMove);
+      handle.removeEventListener('touchend', onEnd);
+      if (map) map.resize();
+    };
+    handle.addEventListener('touchmove', onMove);
+    handle.addEventListener('touchend', onEnd);
+  }, { passive: true });
+}
+
+function toggleFullMap() {
+  const app = document.getElementById('app');
+  const btn = document.getElementById('btn-fullmap');
+  const isFullMap = app.classList.toggle('map-only');
+  btn.classList.toggle('active', isFullMap);
+  btn.innerHTML = isFullMap
+    ? '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="4 14 10 14 10 20"/><polyline points="20 10 14 10 14 4"/><line x1="10" y1="14" x2="3" y2="21"/><line x1="21" y1="3" x2="14" y2="10"/></svg> Recolher'
+    : '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/></svg> Expandir';
+  try { localStorage.setItem('hypr_fullmap', isFullMap); } catch(e) {}
+  setTimeout(() => map && map.resize(), 250);
+}
+
+function toggleSidebar() {
+  const sidebar = document.getElementById('sidebar');
+  const btn = document.getElementById('sidebar-collapse');
+  const collapsed = sidebar.classList.toggle('collapsed');
+  btn.textContent = collapsed ? '›' : '‹';
+  try { localStorage.setItem('hypr_sidebar_collapsed', collapsed); } catch(e) {}
+  setTimeout(() => map && map.resize(), 220);
+}
+
+function togglePanel() {
+  const panel = document.getElementById('right-panel');
+  const btn = document.getElementById('panel-collapse');
+  const collapsed = panel.classList.toggle('collapsed');
+  btn.textContent = collapsed ? '‹' : '›';
+  try { localStorage.setItem('hypr_panel_collapsed', collapsed); } catch(e) {}
+  setTimeout(() => map && map.resize(), 220);
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  initResizablePanels();
+  // Restaurar estado de colapso
+  try {
+    if (localStorage.getItem('hypr_sidebar_collapsed') === 'true') toggleSidebar();
+    if (localStorage.getItem('hypr_panel_collapsed') === 'true') togglePanel();
+    if (localStorage.getItem('hypr_fullmap') === 'true') toggleFullMap();
+  } catch(e) {}
+
+  // Atalho de teclado: F = toggle tela cheia do mapa
+  document.addEventListener('keydown', e => {
+    if (e.key === 'f' || e.key === 'F') {
+      // Não disparar se estiver em input/textarea
+      if (['INPUT','TEXTAREA','SELECT'].includes(document.activeElement?.tagName)) return;
+      toggleFullMap();
+    }
+    // ESC sai do modo tela cheia ou fecha modal/toast
+    if (e.key === 'Escape') {
+      var geoToast = document.getElementById('geo-toast');
+      if (geoToast && geoToast.classList.contains('active')) { dismissGeoToast(); return; }
+      var vsm = document.getElementById('varejo-sub-modal');
+      if (vsm && vsm.classList.contains('active')) { closeVarejoSubModal(); return; }
+      const modal = document.getElementById('map-type-modal');
+      if (modal?.classList.contains('active')) { closeMapTypeModal(); return; }
+      const app = document.getElementById('app');
+      if (app.classList.contains('map-only')) toggleFullMap();
+    }
+  });
+
+  initAuth();
+});
 var rawCSVData = [];
 var geocodingCancelled = false;
 var geocodingActive = false;
 
 // ─── Step Navigation ─────────────────────────────────────────────────────────
-
 function goToStep(n) {
   document.getElementById('drop-zone').style.display = n === 1 ? 'block' : 'none';
   document.getElementById('step-apikey-box').style.display = n === 2 ? 'block' : 'none';
@@ -1493,7 +1899,6 @@ function goToStep(n) {
 }
 
 // ─── Address Parser ───────────────────────────────────────────────────────────
-
 function extrairEndereco(cnpjCol) {
   // Formato: "CNPJ - RUA, NUM - BAIRRO - CIDADE/UF"
   const partes = cnpjCol.split(' - ');
@@ -1526,7 +1931,6 @@ function extrairEndereco(cnpjCol) {
 }
 
 // ─── Tabela de bandeiras por CNPJ Raiz ───────────────────────────────────────
-
 // ATENÇÃO: Esta tabela é usada APENAS como placeholder visual temporário enquanto
 // a Receita Federal ainda não respondeu. O nome real (nome_fantasia da Receita)
 // SEMPRE sobrescreve este valor. Nunca confiar nesta tabela como fonte de verdade.
@@ -1567,7 +1971,6 @@ function aplicarReceita(row, receita) {
 }
 
 // ─── Geocoding HERE (endereço → lat/lon) ─────────────────────────────────────
-
 // Usa structured geocoding (qq=) quando cidade/UF disponíveis para forçar
 // localidade correta. Fallback para freeform (q=) quando sem contexto.
 // Valida UF retornada vs esperada; busca até 5 resultados para cross-check.
@@ -1769,7 +2172,186 @@ async function geocodeHERE(address, opts) {
 }
 
 // ─── API CNPJ.ws (Receita Federal) ─────────────────────────────────────────
+// Usa cnpj.ws — sem rate limit agressivo, dados direto da Receita Federal
+var _receitaCache = {};
+var _receitaInFlight = 0;    // throttle de requisições simultâneas
+var _receitaPending = 0;     // total de requisições pendentes (para aguardar antes do save)
 
+async function buscarReceitaEstab(estab, razaoSocial) {
+  // Nome fantasia é preferido; fallback para razão social — nunca retornar string vazia
+  const nomeFantasia = (estab.nome_fantasia || '').trim();
+  const razao        = (razaoSocial || estab.razao_social || '').trim();
+  const logradouro   = [estab.tipo_logradouro, estab.logradouro, estab.numero, estab.complemento]
+    .filter(Boolean).join(' ');
+  const bairro = (estab.bairro || '').trim();
+  const cidade = estab.cidade?.nome || '';
+  const uf     = estab.estado?.sigla || '';
+  const cep    = (estab.cep || '').replace(/\D/g, '');
+  return {
+    nome_fantasia:    nomeFantasia,
+    razao_social:     razao,
+    nome_exibicao:    nomeFantasia || razao,  // fonte de verdade para row.bandeira
+    endereco_receita: [logradouro, bairro, cidade, uf, 'Brasil'].filter(Boolean).join(', '),
+    municipio:        cidade,
+    uf_receita:       uf,
+    cep,
+    situacao:         estab.situacao_cadastral || '',
+    atividade:        estab.atividade_principal?.descricao || estab.cnae_fiscal_descricao || '',
+    logradouro,
+    bairro,
+    numero:           estab.numero || '',
+  };
+}
+
+// Busca CNPJ completo na Receita Federal via publica.cnpj.ws com fallback para BrasilAPI.
+// Para CNPJ raiz (8 dígitos): busca via /estabelecimentos e usa a filial mais representativa
+// (a que tiver mais funcionários ou a primeira ativa), NÃO a primeira filial aleatória.
+// Garantias: (1) sempre usa CNPJ completo de 14 dígitos para identificação de filial,
+//            (2) razão social é fallback obrigatório quando nome_fantasia ausente,
+//            (3) BrasilAPI como segunda fonte se cnpj.ws falhar.
+async function buscarReceita(cnpjCol, _retries) {
+  if (_retries === undefined) _retries = 0;
+  var MAX_RETRIES = 3;
+  const cnpjNum = (cnpjCol.split(' - ')[0] || '').replace(/\D/g, '').slice(0, 14);
+  if (!cnpjNum) return null;
+
+  // CNPJ Raiz (8 dígitos) — busca a primeira filial ativa via /estabelecimentos
+  if (cnpjNum.length === 8) {
+    const cacheKey = 'raiz_' + cnpjNum;
+    if (_receitaCache[cacheKey] !== undefined) return _receitaCache[cacheKey];
+    if (_receitaInFlight >= 5) await new Promise(r => setTimeout(r, 300));
+    _receitaInFlight++;
+    try {
+      const controller = new AbortController();
+      const tid = setTimeout(() => controller.abort(), 10000);
+      const resp = await fetch(`https://publica.cnpj.ws/cnpj/${cnpjNum}/estabelecimentos?quantidade=5`, {
+        signal: controller.signal,
+        headers: { 'Accept': 'application/json' }
+      });
+      clearTimeout(tid);
+      if (resp.status === 429) {
+        _receitaInFlight--;
+        if (_retries >= MAX_RETRIES) { _receitaCache[cacheKey] = null; return null; }
+        await new Promise(r => setTimeout(r, 2000 * (_retries + 1)));
+        return buscarReceita(cnpjCol, _retries + 1);
+      }
+      if (!resp.ok) { _receitaCache[cacheKey] = null; _receitaInFlight--; return null; }
+      const d = await resp.json();
+      // Escolher a primeira filial ativa (situacao_cadastral = "Ativa" ou "ATIVA")
+      const estabs = Array.isArray(d) ? d : (d.estabelecimentos || d.data || []);
+      const ativa = estabs.find(e => /ativa/i.test(e.situacao_cadastral || '')) || estabs[0];
+      if (!ativa) { _receitaCache[cacheKey] = null; _receitaInFlight--; return null; }
+      const result = await buscarReceitaEstab(ativa, d.razao_social || ativa.razao_social || '');
+      _receitaCache[cacheKey] = result;
+      _receitaInFlight--;
+      _receitaPending = Math.max(0, _receitaPending - 1);
+      return result;
+    } catch {
+      _receitaCache['raiz_' + cnpjNum] = null;
+      _receitaInFlight = Math.max(0, _receitaInFlight - 1);
+      _receitaPending  = Math.max(0, _receitaPending - 1);
+      return null;
+    }
+  }
+
+  if (cnpjNum.length < 14) return null;
+
+  // Cache por CNPJ completo (14 dígitos) — cada filial tem endereço único
+  if (_receitaCache[cnpjNum] !== undefined) return _receitaCache[cnpjNum];
+
+  // Throttle: máx 5 requisições simultâneas
+  if (_receitaInFlight >= 5) {
+    await new Promise(r => setTimeout(r, 300));
+  }
+  _receitaInFlight++;
+
+  try {
+    // PRIMARY: BrasilAPI (faster, more stable)
+    const result = await buscarReceitaBrasilAPI(cnpjNum);
+    if (result) {
+      _receitaCache[cnpjNum] = result;
+      _receitaInFlight--;
+      _receitaPending = Math.max(0, _receitaPending - 1);
+      return result;
+    }
+    // FALLBACK: publica.cnpj.ws
+    const controller = new AbortController();
+    const tid = setTimeout(() => controller.abort(), 8000);
+    const resp = await fetch(`https://publica.cnpj.ws/cnpj/${cnpjNum}`, {
+      signal: controller.signal,
+      headers: { 'Accept': 'application/json' }
+    });
+    clearTimeout(tid);
+
+    if (resp.status === 429) {
+      _receitaInFlight--;
+      if (_retries >= MAX_RETRIES) { _receitaCache[cnpjNum] = null; return null; }
+      await new Promise(r => setTimeout(r, 2000 * (_retries + 1)));
+      return buscarReceita(cnpjCol, _retries + 1);
+    }
+    if (!resp.ok) {
+      _receitaCache[cnpjNum] = null;
+      _receitaInFlight--;
+      _receitaPending = Math.max(0, _receitaPending - 1);
+      return null;
+    }
+
+    const d = await resp.json();
+    const estab = d.estabelecimento || {};
+    const fallback = await buscarReceitaEstab(estab, d.razao_social || '');
+    _receitaCache[cnpjNum] = fallback;
+    _receitaInFlight--;
+    _receitaPending = Math.max(0, _receitaPending - 1);
+    return fallback;
+  } catch {
+    _receitaCache[cnpjNum] = null;
+    _receitaInFlight = Math.max(0, _receitaInFlight - 1);
+    _receitaPending = Math.max(0, _receitaPending - 1);
+    return null;
+  }
+}
+
+// Fallback: BrasilAPI (fonte: Receita Federal, endpoint alternativo)
+async function buscarReceitaBrasilAPI(cnpjNum) {
+  try {
+    const controller = new AbortController();
+    const tid = setTimeout(() => controller.abort(), 8000);
+    const resp = await fetch(`https://brasilapi.com.br/api/cnpj/v1/${cnpjNum}`, {
+      signal: controller.signal,
+      headers: { 'Accept': 'application/json' }
+    });
+    clearTimeout(tid);
+    if (!resp.ok) return null;
+    const d = await resp.json();
+    // BrasilAPI retorna formato diferente — normalizar
+    const nomeFantasia = (d.nome_fantasia || '').trim();
+    const razao = (d.razao_social || '').trim();
+    const logradouro = [d.descricao_tipo_logradouro, d.logradouro, d.numero, d.complemento]
+      .filter(Boolean).join(' ');
+    const bairro = (d.bairro || '').trim();
+    const cidade = (d.municipio || '').trim();
+    const uf = (d.uf || '').trim();
+    const cep = (d.cep || '').replace(/\D/g, '');
+    return {
+      nome_fantasia:    nomeFantasia,
+      razao_social:     razao,
+      nome_exibicao:    nomeFantasia || razao,
+      endereco_receita: [logradouro, bairro, cidade, uf, 'Brasil'].filter(Boolean).join(', '),
+      municipio:        cidade,
+      uf_receita:       uf,
+      cep,
+      situacao:         d.descricao_situacao_cadastral || '',
+      atividade:        d.cnae_fiscal_descricao || '',
+      logradouro,
+      bairro,
+      numero:           d.numero || '',
+    };
+  } catch {
+    return null;
+  }
+}
+
+// ─── Start Geocoding ──────────────────────────────────────────────────────────
 function startGeocodingFromStep2() {
   const nameInput = document.getElementById('map-name-input');
   const name = (nameInput?.value || '').trim();
@@ -2028,7 +2610,6 @@ async function startGeocoding() {
   showGeoToast(ok, fail, mismatchCount, total);
 
   // ─── FASE 2: Enriquecimento de nomes via BrasilAPI ──────────────────────
-
   var needsEnrich = allData.filter(r => r.cnpj && (!r.bandeira || r.bandeira === 'Carregando...' || r.bandeira === 'Não identificado' || r.bandeira === 'Desconhecido'));
   if (needsEnrich.length > 0) {
     var overlay2 = document.getElementById('geocoding-overlay');
@@ -2339,7 +2920,6 @@ function cancelGeocoding() {
 }
 
 // ─── Toast pós-geocoding ────────────────────────────────────────────────────
-
 var _geoToastTimer = null;
 
 function showGeoToast(okCount, failCount, mismatchCount, total) {
@@ -2395,122 +2975,6 @@ function openSaveModalFromToast() {
 }
 
 // ─── File Upload ─────────────────────────────────────────────────────────────
-
-
-// ═══════════════════════════════════════════════════════════════════════════════
-// ═══ UPLOAD ═══════════════════════════════════════════════════════════════════
-// ═══════════════════════════════════════════════════════════════════════════════
-
-async function loadData(data) {
-  // Remover linha de totais
-  data = data.filter(r => r.cnpj && !r.cnpj.toUpperCase().includes('TODOS OS CNPJS'));
-
-  allData = data.filter(r => r.lat && r.lon && parseFloat(r.lat) && parseFloat(r.lon));
-  filteredData = [...allData];
-
-  document.getElementById('upload-zone').classList.add('hidden');
-  document.getElementById('app').style.display = 'flex';
-  await new Promise(r => setTimeout(r, 50));
-  if (!map) initMap();
-  await new Promise(r => setTimeout(r, 100));
-  if (map) map.resize();
-
-  // Fit bounds
-  setTimeout(() => {
-    const validPts = allData.filter(r => r.lat && r.lon);
-    if (validPts.length) {
-      if (!validPts.length) return;
-      const bounds = validPts.reduce((b, r) => b.extend([parseFloat(r.lon), parseFloat(r.lat)]),
-        new maplibregl.LngLatBounds([parseFloat(validPts[0].lon), parseFloat(validPts[0].lat)], [parseFloat(validPts[0].lon), parseFloat(validPts[0].lat)]));
-      map.fitBounds(bounds, { padding: 40, animate: true });
-    }
-  }, 200);
-
-  populateFilters();
-  renderMarkers();
-  updatePanels();
-  updateOverlay();
-}
-
-// ─── Auth — Supabase Email + Senha ──────────────────────────────────────────
-
-var _uploadTemplates = {
-  geocoder: {
-    label: 'Formato esperado do CSV',
-    headers: ['endereco', 'nome'],
-    rows: [
-      ['RUA DO COMERCIO, 150, CENTRO, RECIFE, PE', 'Loja Centro'],
-      ['AV PAULISTA, 1000, BELA VISTA, SAO PAULO, SP', 'Filial SP'],
-      ['ROD BR-101, KM 45, CAMAÇARI, BA', 'CD Bahia'],
-    ],
-    tip: 'Inclua cidade e UF para maior precisão na geocodificação.',
-    filename: 'template_geocoder.csv',
-  },
-  reverse_geocoder: {
-    label: 'Formato esperado do CSV',
-    headers: ['lat', 'lon', 'nome'],
-    rows: [
-      ['-23.56132', '-46.65618', 'Ponto A'],
-      ['-22.90680', '-43.17290', 'Ponto B'],
-      ['-19.91910', '-43.93860', 'Ponto C'],
-    ],
-    tip: 'Use coordenadas decimais (WGS84). A coluna "nome" é opcional.',
-    filename: 'template_reverse_geocoder.csv',
-  },
-  varejo360: {
-    label: 'Formato Varejo 360 — Share por Loja (CNPJ)',
-    headers: ['marca', 'cnpj', 'percentual_dimensao', 'percentual_marca_dimensao', 'tickets_amostra'],
-    displayHeaders: ['marca', 'cnpj', '% dimensão', '% marca', 'tickets'],
-    rows: [
-      ['ITALAC', '44480747000160 - PARADA PINTO, 2262 - V.N. CACHOEIRINHA', '0.47', '3.14', '9187'],
-      ['ITALAC', '43559079000602 - LUIS STAMATIS, 431 - SAO PAULO/SP', '0.38', '20.78', '6168'],
-      ['ITALAC', '06057223054697 - AV ANA COSTA, 340 - SANTOS/SP', '0.32', '22.89', '5234'],
-    ],
-    tip: 'No Varejo 360, exporte o share da marca aberto por dimensão <strong>Loja (CNPJ)</strong>.',
-    filename: 'template_varejo360_share.csv',
-  },
-};
-
-function renderUploadTemplate(type) {
-  var tpl = _uploadTemplates[type];
-  var preview = document.getElementById('upload-tpl-preview');
-  var dlBtn = document.getElementById('upload-tpl-dl');
-  if (!tpl || !preview) { if (preview) preview.style.display = 'none'; if (dlBtn) dlBtn.style.display = 'none'; return; }
-
-  var html = '<div class="tpl-label"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg> ' + tpl.label + '</div>';
-  var displayH = tpl.displayHeaders || tpl.headers;
-  html += '<table><thead><tr>' + displayH.map(function(h) { return '<th>' + h + '</th>'; }).join('') + '</tr></thead><tbody>';
-  tpl.rows.forEach(function(row) {
-    html += '<tr>' + row.map(function(v) { return '<td>' + v + '</td>'; }).join('') + '</tr>';
-  });
-  html += '</tbody></table>';
-  if (tpl.tip) html += '<div style="margin-top:8px;font-size:11px;color:var(--text-muted);line-height:1.5;text-align:left;">💡 ' + tpl.tip + '</div>';
-
-  preview.innerHTML = html;
-  preview.style.display = 'block';
-  if (dlBtn) { dlBtn.style.display = 'inline-flex'; dlBtn.setAttribute('data-type', type); }
-}
-
-function downloadTemplate(e) {
-  if (e) e.stopPropagation();
-  var btn = document.getElementById('upload-tpl-dl');
-  var type = btn?.getAttribute('data-type') || 'geocoder';
-  var tpl = _uploadTemplates[type];
-  if (!tpl) return;
-
-  var csvRows = [tpl.headers.join(',')];
-  tpl.rows.forEach(function(row) {
-    csvRows.push(row.map(function(v) { return '"' + String(v).replace(/"/g, '""') + '"'; }).join(','));
-  });
-  var blob = new Blob([csvRows.join('\r\n')], { type: 'text/csv;charset=utf-8;' });
-  var url = URL.createObjectURL(blob);
-  var a = document.createElement('a');
-  a.href = url; a.download = tpl.filename; a.click();
-  URL.revokeObjectURL(url);
-}
-
-// ─── Varejo 360: Sub-modal de seleção ────────────────────────────────────────
-
 function handleCSVFile(file) {
   const isXLSX = /\.xlsx?$/i.test(file.name);
   const reader = new FileReader();
@@ -2693,121 +3157,33 @@ dropZone.addEventListener('drop', e => {
 });
 
 // ─── Supabase DB helpers ──────────────────────────────────────────────────────
-
-
-// ═══════════════════════════════════════════════════════════════════════════════
-// ═══ MODALS ═══════════════════════════════════════════════════════════════════
-// ═══════════════════════════════════════════════════════════════════════════════
-
-function openMapTypeModal() {
-  const m = document.getElementById('map-type-modal');
-  m.style.display = 'flex';
-  m.style.opacity = '1';
-  m.style.pointerEvents = 'all';
-  m.classList.add('active');
-}
-function closeMapTypeModal() {
-  const m = document.getElementById('map-type-modal');
-  m.classList.remove('active');
-  m.style.display = 'none';
-  m.style.opacity = '0';
-  m.style.pointerEvents = 'none';
-}
-// Fechar modal ao clicar no backdrop
-document.addEventListener('click', e => {
-  const modal = document.getElementById('map-type-modal');
-  if (modal?.classList.contains('active') && e.target === modal) closeMapTypeModal();
-});
-function selectMapType(type) {
-  currentMapType = type;
-  closeMapTypeModal();
-  // Limpar dados do mapa anterior — evita sobrescrever mapa existente
-  allData = [];
-  filteredData = [];
-  rawCSVData = [];
-  window._pendingMapName = null;
-  window._pendingMapDesc = null;
-  window._pendingMapType = type;
-  window._pendingPeriodo = null;
-
-  // Adaptar UI conforme o tipo
-  const periodoEl = document.getElementById('step2-periodo');
-  const uploadSub = document.querySelector('#upload-zone .upload-sub');
-  const formatsMsg = document.getElementById('upload-formats-msg');
-  const startBtn = document.getElementById('btn-start-geo');
-  const uploadTitle = document.querySelector('#drop-zone .upload-title');
-
-  if (type === 'geocoder') {
-    if (uploadTitle) uploadTitle.textContent = 'Gerar Lat/Lon';
-    if (uploadSub) uploadSub.textContent = 'Suba um CSV com endereços. O sistema geocodifica cada linha e gera as coordenadas (lat/lon).';
-    if (formatsMsg) formatsMsg.textContent = 'Aceita endereço por extenso com cidade e UF';
-    if (startBtn) startBtn.textContent = 'Iniciar geocodificação →';
-    if (periodoEl) periodoEl.style.display = 'none';
-    renderUploadTemplate('geocoder');
-  } else if (type === 'reverse_geocoder') {
-    if (uploadTitle) uploadTitle.textContent = 'Gerar Endereços';
-    if (uploadSub) uploadSub.textContent = 'Suba um CSV com colunas lat e lon. O sistema busca o endereço completo de cada coordenada via reverse geocoding.';
-    if (formatsMsg) formatsMsg.textContent = 'Colunas obrigatórias: lat · lon — opcionais: nome · categoria';
-    if (startBtn) startBtn.textContent = 'Iniciar reverse geocoding →';
-    if (periodoEl) periodoEl.style.display = 'none';
-    renderUploadTemplate('reverse_geocoder');
-  } else if (type === 'places_discovery') {
-    // Places Discovery: abrir setup overlay em vez do upload zone
-    showPlacesSetup();
-    return; // não chamar showUploadZone()
-  } else {
-    if (uploadTitle) uploadTitle.textContent = 'Mapa de Share por PDV';
-    if (uploadSub) uploadSub.innerHTML = 'Exporte do Varejo 360 o share da marca aberto por <strong>Loja (CNPJ)</strong>. O sistema geocodifica cada PDV e plota o share no mapa.';
-    if (formatsMsg) formatsMsg.textContent = 'Formato HYPR/Kantar · CSV com cnpj + share · CNPJ raiz (8 dígitos)';
-    if (startBtn) startBtn.textContent = 'Iniciar geocodificação →';
-    if (periodoEl) periodoEl.style.display = 'flex';
-    renderUploadTemplate('varejo360');
-  }
-
-  // Mostrar view toggle só para geocoder
-  const vtBtns = document.getElementById('view-toggle-btns');
-  if (vtBtns) vtBtns.style.display = type !== 'varejo360' ? 'flex' : 'none';
-
-  showUploadZone();
-}
-
-// ─── Template preview e download por tipo de mapa ────────────────────────────
-
-function openVarejoSubModal() {
-  closeMapTypeModal();
-  var m = document.getElementById('varejo-sub-modal');
-  m.style.display = 'flex';
-  m.style.opacity = '1';
-  m.style.pointerEvents = 'all';
-  m.classList.add('active');
-}
-function closeVarejoSubModal() {
-  var m = document.getElementById('varejo-sub-modal');
-  m.classList.remove('active');
-  m.style.display = 'none';
-  m.style.opacity = '0';
-  m.style.pointerEvents = 'none';
-}
-document.addEventListener('click', function(e) {
-  var modal = document.getElementById('varejo-sub-modal');
-  if (modal && modal.classList.contains('active') && e.target === modal) closeVarejoSubModal();
-});
-function selectVarejoSubType(subType) {
-  closeVarejoSubModal();
-  if (subType === 'comparativo') {
-    window.location.href = '/comparativo.html';
-  } else {
-    selectMapType('varejo360');
+async function sbFetch(path, opts = {}) {
+  const controller = new AbortController();
+  const tid = setTimeout(() => controller.abort(), 15000); // 15s timeout
+  // Usar token do usuário logado se disponível, senão usar anon key
+  const authToken = (await _supa.auth.getSession()).data.session?.access_token || SUPABASE_ANON;
+  const headers = {
+    'apikey': SUPABASE_ANON,
+    'Authorization': `Bearer ${authToken}`,
+    'Content-Type': 'application/json',
+    'Prefer': 'return=representation',
+    ...(opts.headers || {}),
+  };
+  try {
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, {
+      ...opts, headers, signal: controller.signal
+    });
+    clearTimeout(tid);
+    if (!res.ok) throw new Error(await res.text());
+    const text = await res.text();
+    return text ? JSON.parse(text) : null;
+  } catch(e) {
+    clearTimeout(tid);
+    throw e;
   }
 }
 
-// ─── View toggle mapa/lista ───────────────────────────────────────────────────
-
-
-// ═══════════════════════════════════════════════════════════════════════════════
-// ═══ GALLERY ══════════════════════════════════════════════════════════════════
-// ═══════════════════════════════════════════════════════════════════════════════
-
+// ─── Galeria ──────────────────────────────────────────────────────────────────
 var THUMB_COLORS = ['#7C3AED','#2563EB','#059669','#DC2626','#D97706','#0891B2','#9333EA'];
 
 function showGallery() {
@@ -3013,6 +3389,10 @@ function buildPageNumbers(current, total) {
   return pages;
 }
 
+function escHtml(s) {
+  return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
 function buildMapCard(m) {
   const card = document.createElement('div');
   card.className = 'map-card';
@@ -3168,12 +3548,6 @@ async function openSavedMap(mapId, name, mapType) {
 }
 
 // ─── Modal Salvar ─────────────────────────────────────────────────────────────
-
-
-// ═══════════════════════════════════════════════════════════════════════════════
-// ═══ SAVE ═════════════════════════════════════════════════════════════════════
-// ═══════════════════════════════════════════════════════════════════════════════
-
 function showSaveMapDialog() {
   if (!currentUser || allData.length === 0) {
     console.warn('Cannot save: currentUser=', currentUser, 'allData.length=', allData.length);
@@ -3300,12 +3674,6 @@ async function saveMapToSupabase() {
   }
 }
 // ─── Places Discovery ─────────────────────────────────────────────────────────
-
-
-// ═══════════════════════════════════════════════════════════════════════════════
-// ═══ PLACES ═══════════════════════════════════════════════════════════════════
-// ═══════════════════════════════════════════════════════════════════════════════
-
 // Brazilian state centroids and bounding boxes for grid generation
 var BR_STATES = {
   'BR': { label: 'Brasil inteiro', lat: -14.24, lon: -51.93, bbox: [-73.98,-33.75,-34.79,5.27] },
@@ -4270,186 +4638,185 @@ function resetPlacesForNewSearch() {
 })();
 
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// ═══ WINDOW EXPORTS (for HTML onclick handlers) ═══════════════════════════════
-// ═══════════════════════════════════════════════════════════════════════════════
 
-window.BR_CAPITALS = BR_CAPITALS;
-window.BR_CITIES = BR_CITIES;
-window.BR_STATES = BR_STATES;
-window.MAP_STYLES = MAP_STYLES;
-window.SUPABASE_ANON = SUPABASE_ANON;
-window.SUPABASE_URL = SUPABASE_URL;
-window.THUMB_COLORS = THUMB_COLORS;
-window.UF_REGIONS = UF_REGIONS;
-window._GEO_SCORE_MIN = _GEO_SCORE_MIN;
-window._appendMode = _appendMode;
-window._buildDarkStyle = _buildDarkStyle;
-window._buildLightMapStyle = _buildLightMapStyle;
-window._buildSatelliteStyle = _buildSatelliteStyle;
-window._cleanCommercialAddress = _cleanCommercialAddress;
-window._cssVar = _cssVar;
-window._debouncedFilter = _debouncedFilter;
-window._galleryMaps = _galleryMaps;
-window._geoCache = _geoCache;
-window._hereItemToResult = _hereItemToResult;
-window._initMapStyles = _initMapStyles;
-window._initSupa = _initSupa;
-window._onThemeChange = _onThemeChange;
-window._placesMode = _placesMode;
-window._radiusPins = _radiusPins;
-window._receitaCache = _receitaCache;
-window._receitaInFlight = _receitaInFlight;
-window._receitaPending = _receitaPending;
-window._selectedStates = _selectedStates;
-window._setupMapInteractions = _setupMapInteractions;
-window._setupMapSources = _setupMapSources;
-window._supa = _supa;
-window.activeLayer = activeLayer;
-window.addRadiusPin = addRadiusPin;
-window.allData = allData;
-window.aplicarReceita = aplicarReceita;
-window.applyFilters = applyFilters;
-window.applyGalleryFilters = applyGalleryFilters;
-window.applyMapMode = applyMapMode;
-window.autoSaveAndNotify = autoSaveAndNotify;
-window.autoSaveExpandedPlaces = autoSaveExpandedPlaces;
-window.buildMapCard = buildMapCard;
-window.buildPageNumbers = buildPageNumbers;
-window.buildStateGrid = buildStateGrid;
-window.buscarReceita = buscarReceita;
-window.buscarReceitaBrasilAPI = buscarReceitaBrasilAPI;
-window.buscarReceitaEstab = buscarReceitaEstab;
-window.cancelGeocoding = cancelGeocoding;
-window.charts = charts;
-window.clearAllPins = clearAllPins;
-window.closeMapTypeModal = closeMapTypeModal;
-window.closeSaveModal = closeSaveModal;
-window.closeVarejoSubModal = closeVarejoSubModal;
-window.currentMapType = currentMapType;
-window.currentUser = currentUser;
-window.currentView = currentView;
-window.debounce = debounce;
-window.deleteMap = deleteMap;
-window.destroyChart = destroyChart;
-window.disablePinMode = disablePinMode;
-window.dismissGeoToast = dismissGeoToast;
-window.doGoogleLogin = doGoogleLogin;
-window.downloadGeocoderCSV = downloadGeocoderCSV;
-window.downloadTemplate = downloadTemplate;
-window.dropZone = dropZone;
-window.enablePinMode = enablePinMode;
-window.enrichBatch = enrichBatch;
-window.enrichRow = enrichRow;
-window.extrairEndereco = extrairEndereco;
-window.filterMultiSelect = filterMultiSelect;
-window.filteredData = filteredData;
-window.finishPlacesDiscovery = finishPlacesDiscovery;
-window.generateCircleGeoJSON = generateCircleGeoJSON;
-window.geocodeHERE = geocodeHERE;
-window.geocodingActive = geocodingActive;
-window.geocodingCancelled = geocodingCancelled;
-window.getSearchAreas = getSearchAreas;
-window.goToStep = goToStep;
-window.handleCSVFile = handleCSVFile;
-window.handleLoggedIn = handleLoggedIn;
-window.identificarBandeira = identificarBandeira;
-window.initAuth = initAuth;
-window.initMap = initMap;
-window.initMultiSelect = initMultiSelect;
-window.loadData = loadData;
-window.loadGallery = loadGallery;
-window.map = map;
-window.msClearAll = msClearAll;
-window.msGetSelected = msGetSelected;
-window.msReset = msReset;
-window.msSelectAll = msSelectAll;
-window.openMapTypeModal = openMapTypeModal;
-window.openSaveModalFromToast = openSaveModalFromToast;
-window.openSavedMap = openSavedMap;
-window.openVarejoSubModal = openVarejoSubModal;
-window.populateFilters = populateFilters;
-window.rawCSVData = rawCSVData;
-window.removeRadiusPin = removeRadiusPin;
-window.renderBarChart = renderBarChart;
-window.renderGalleryPage = renderGalleryPage;
-window.renderGeocoderList = renderGeocoderList;
-window.renderHistChart = renderHistChart;
-window.renderHorizBarChart = renderHorizBarChart;
-window.renderRadiusPinTags = renderRadiusPinTags;
-window.renderRankList = renderRankList;
-window.renderUploadTemplate = renderUploadTemplate;
-window.renderWinLoseChart = renderWinLoseChart;
-window.resetFilters = resetFilters;
-window.resetPlacesForNewSearch = resetPlacesForNewSearch;
-window.retryPendingIds = retryPendingIds;
-window.reverseGeocodeHERE = reverseGeocodeHERE;
-window.runTask = runTask;
-window.saveMapToSupabase = saveMapToSupabase;
-window.sbFetch = sbFetch;
-window.selectMapType = selectMapType;
-window.selectVarejoSubType = selectVarejoSubType;
-window.setMapView = setMapView;
-window.setPlacesMode = setPlacesMode;
-window.setRegionFilter = setRegionFilter;
-window.showGallery = showGallery;
-window.showGeoToast = showGeoToast;
-window.showPlacesSetup = showPlacesSetup;
-window.showSaveMapDialog = showSaveMapDialog;
-window.showUploadZone = showUploadZone;
-window.startExpandSearch = startExpandSearch;
-window.startGeocoding = startGeocoding;
-window.startGeocodingFromStep2 = startGeocodingFromStep2;
-window.startPlacesDiscovery = startPlacesDiscovery;
-window.startReverseGeocoding = startReverseGeocoding;
-window.supaLogout = supaLogout;
-window.syncTicketRange = syncTicketRange;
-window.toggleAdvancedFilters = toggleAdvancedFilters;
-window.toggleBadge = toggleBadge;
-window.toggleMultiSelect = toggleMultiSelect;
-window.togglePlacesPanel = togglePlacesPanel;
-window.toggleState = toggleState;
-window.toggleTheme = toggleTheme;
-window.updateAnalysis = updateAnalysis;
-window.updateEnrichUI = updateEnrichUI;
-window.updateHeader = updateHeader;
-window.updateMsDisplay = updateMsDisplay;
-window.updateOverview = updateOverview;
-window.updatePlacesBadge = updatePlacesBadge;
-window.updatePlacesEstimate = updatePlacesEstimate;
-window.updateRangeLabel = updateRangeLabel;
-window.updateRanking = updateRanking;
 
-// Shared state
-window.allData = allData;
-window.filteredData = filteredData;
-window.map = map;
-window.currentMapType = currentMapType;
-window.currentView = currentView;
-window.currentUser = currentUser;
-window._supa = _supa;
-window.MAP_STYLES = MAP_STYLES;
-window.charts = charts;
-window.activeLayer = activeLayer;
-window.rawCSVData = rawCSVData;
-window.geocodingActive = geocodingActive;
-window.geocodingCancelled = geocodingCancelled;
-window.SUPABASE_URL = SUPABASE_URL;
-window.SUPABASE_ANON = SUPABASE_ANON;
-window.THUMB_COLORS = THUMB_COLORS;
-window.BR_STATES = BR_STATES;
-window.BR_CITIES = BR_CITIES;
-window.UF_REGIONS = UF_REGIONS;
-window.BR_CAPITALS = BR_CAPITALS;
-window._galleryMaps = _galleryMaps;
-window._selectedStates = _selectedStates;
-window._radiusPins = _radiusPins;
-window._placesMode = _placesMode;
-window._appendMode = _appendMode;
-window._geoCache = _geoCache;
-window._receitaCache = _receitaCache;
-window._receitaInFlight = _receitaInFlight;
-window._receitaPending = _receitaPending;
-window._GEO_SCORE_MIN = _GEO_SCORE_MIN;
-window._debouncedFilter = _debouncedFilter;
-window.dropZone = dropZone;
+// ─── WINDOW EXPORTS ─────────────────────────────────────────────────────────
+// Expose functions + state to window for HTML onclick handlers.
+// try/catch because some functions are inside callbacks (not module scope).
+
+(function _exportAll() {
+  try { window._buildDarkStyle = _buildDarkStyle; } catch(e) {}
+  try { window._buildLightMapStyle = _buildLightMapStyle; } catch(e) {}
+  try { window._buildSatelliteStyle = _buildSatelliteStyle; } catch(e) {}
+  try { window._cleanCommercialAddress = _cleanCommercialAddress; } catch(e) {}
+  try { window._cssVar = _cssVar; } catch(e) {}
+  try { window._escForHtml = _escForHtml; } catch(e) {}
+  try { window._hereItemToResult = _hereItemToResult; } catch(e) {}
+  try { window._initMapStyles = _initMapStyles; } catch(e) {}
+  try { window._initSupa = _initSupa; } catch(e) {}
+  try { window._onThemeChange = _onThemeChange; } catch(e) {}
+  try { window._setupMapInteractions = _setupMapInteractions; } catch(e) {}
+  try { window._setupMapSources = _setupMapSources; } catch(e) {}
+  try { window.addRadiusPin = addRadiusPin; } catch(e) {}
+  try { window.aplicarReceita = aplicarReceita; } catch(e) {}
+  try { window.applyFilters = applyFilters; } catch(e) {}
+  try { window.applyGalleryFilters = applyGalleryFilters; } catch(e) {}
+  try { window.applyMapMode = applyMapMode; } catch(e) {}
+  try { window.autoSaveAndNotify = autoSaveAndNotify; } catch(e) {}
+  try { window.autoSaveExpandedPlaces = autoSaveExpandedPlaces; } catch(e) {}
+  try { window.avg = avg; } catch(e) {}
+  try { window.buildBandeiraGroups = buildBandeiraGroups; } catch(e) {}
+  try { window.buildMapCard = buildMapCard; } catch(e) {}
+  try { window.buildPageNumbers = buildPageNumbers; } catch(e) {}
+  try { window.buildPopup = buildPopup; } catch(e) {}
+  try { window.buildStateGrid = buildStateGrid; } catch(e) {}
+  try { window.buscarReceita = buscarReceita; } catch(e) {}
+  try { window.buscarReceitaBrasilAPI = buscarReceitaBrasilAPI; } catch(e) {}
+  try { window.buscarReceitaEstab = buscarReceitaEstab; } catch(e) {}
+  try { window.cancelGeocoding = cancelGeocoding; } catch(e) {}
+  try { window.clearAllPins = clearAllPins; } catch(e) {}
+  try { window.closeMapTypeModal = closeMapTypeModal; } catch(e) {}
+  try { window.closeSaveModal = closeSaveModal; } catch(e) {}
+  try { window.closeVarejoSubModal = closeVarejoSubModal; } catch(e) {}
+  try { window.debounce = debounce; } catch(e) {}
+  try { window.deleteMap = deleteMap; } catch(e) {}
+  try { window.destroyChart = destroyChart; } catch(e) {}
+  try { window.detectAndNormalize = detectAndNormalize; } catch(e) {}
+  try { window.disablePinMode = disablePinMode; } catch(e) {}
+  try { window.dismissGeoToast = dismissGeoToast; } catch(e) {}
+  try { window.doGoogleLogin = doGoogleLogin; } catch(e) {}
+  try { window.downloadGeocoderCSV = downloadGeocoderCSV; } catch(e) {}
+  try { window.downloadTemplate = downloadTemplate; } catch(e) {}
+  try { window.enablePinMode = enablePinMode; } catch(e) {}
+  try { window.enrichBatch = enrichBatch; } catch(e) {}
+  try { window.enrichRow = enrichRow; } catch(e) {}
+  try { window.escHtml = escHtml; } catch(e) {}
+  try { window.extrairEndereco = extrairEndereco; } catch(e) {}
+  try { window.filterMultiSelect = filterMultiSelect; } catch(e) {}
+  try { window.finishPlacesDiscovery = finishPlacesDiscovery; } catch(e) {}
+  try { window.generateCircleGeoJSON = generateCircleGeoJSON; } catch(e) {}
+  try { window.geocodeHERE = geocodeHERE; } catch(e) {}
+  try { window.getSearchAreas = getSearchAreas; } catch(e) {}
+  try { window.goToStep = goToStep; } catch(e) {}
+  try { window.groupBy = groupBy; } catch(e) {}
+  try { window.handleCSVFile = handleCSVFile; } catch(e) {}
+  try { window.handleLoggedIn = handleLoggedIn; } catch(e) {}
+  try { window.identificarBandeira = identificarBandeira; } catch(e) {}
+  try { window.initAuth = initAuth; } catch(e) {}
+  try { window.initMap = initMap; } catch(e) {}
+  try { window.initMultiSelect = initMultiSelect; } catch(e) {}
+  try { window.initResizablePanels = initResizablePanels; } catch(e) {}
+  try { window.loadData = loadData; } catch(e) {}
+  try { window.loadGallery = loadGallery; } catch(e) {}
+  try { window.msClearAll = msClearAll; } catch(e) {}
+  try { window.msGetSelected = msGetSelected; } catch(e) {}
+  try { window.msReset = msReset; } catch(e) {}
+  try { window.msSelectAll = msSelectAll; } catch(e) {}
+  try { window.normalizeBandeira = normalizeBandeira; } catch(e) {}
+  try { window.openMapTypeModal = openMapTypeModal; } catch(e) {}
+  try { window.openSaveModalFromToast = openSaveModalFromToast; } catch(e) {}
+  try { window.openSavedMap = openSavedMap; } catch(e) {}
+  try { window.openVarejoSubModal = openVarejoSubModal; } catch(e) {}
+  try { window.parseCSV = parseCSV; } catch(e) {}
+  try { window.parseLine = parseLine; } catch(e) {}
+  try { window.pct = pct; } catch(e) {}
+  try { window.pctRaw = pctRaw; } catch(e) {}
+  try { window.pinColor = pinColor; } catch(e) {}
+  try { window.populateFilters = populateFilters; } catch(e) {}
+  try { window.removeRadiusPin = removeRadiusPin; } catch(e) {}
+  try { window.renderBarChart = renderBarChart; } catch(e) {}
+  try { window.renderGalleryPage = renderGalleryPage; } catch(e) {}
+  try { window.renderGeocoderList = renderGeocoderList; } catch(e) {}
+  try { window.renderHistChart = renderHistChart; } catch(e) {}
+  try { window.renderHorizBarChart = renderHorizBarChart; } catch(e) {}
+  try { window.renderMarkers = renderMarkers; } catch(e) {}
+  try { window.renderRadiusPinTags = renderRadiusPinTags; } catch(e) {}
+  try { window.renderRankList = renderRankList; } catch(e) {}
+  try { window.renderUploadTemplate = renderUploadTemplate; } catch(e) {}
+  try { window.renderWinLoseChart = renderWinLoseChart; } catch(e) {}
+  try { window.resetFilters = resetFilters; } catch(e) {}
+  try { window.resetPlacesForNewSearch = resetPlacesForNewSearch; } catch(e) {}
+  try { window.retryPendingIds = retryPendingIds; } catch(e) {}
+  try { window.reverseGeocodeHERE = reverseGeocodeHERE; } catch(e) {}
+  try { window.runTask = runTask; } catch(e) {}
+  try { window.saveMapToSupabase = saveMapToSupabase; } catch(e) {}
+  try { window.sbFetch = sbFetch; } catch(e) {}
+  try { window.selectMapType = selectMapType; } catch(e) {}
+  try { window.selectVarejoSubType = selectVarejoSubType; } catch(e) {}
+  try { window.setMapView = setMapView; } catch(e) {}
+  try { window.setPlacesMode = setPlacesMode; } catch(e) {}
+  try { window.setRegionFilter = setRegionFilter; } catch(e) {}
+  try { window.setTab = setTab; } catch(e) {}
+  try { window.setupResizer = setupResizer; } catch(e) {}
+  try { window.showGallery = showGallery; } catch(e) {}
+  try { window.showGeoToast = showGeoToast; } catch(e) {}
+  try { window.showPlacesSetup = showPlacesSetup; } catch(e) {}
+  try { window.showSaveMapDialog = showSaveMapDialog; } catch(e) {}
+  try { window.showUploadZone = showUploadZone; } catch(e) {}
+  try { window.startExpandSearch = startExpandSearch; } catch(e) {}
+  try { window.startGeocoding = startGeocoding; } catch(e) {}
+  try { window.startGeocodingFromStep2 = startGeocodingFromStep2; } catch(e) {}
+  try { window.startPlacesDiscovery = startPlacesDiscovery; } catch(e) {}
+  try { window.startReverseGeocoding = startReverseGeocoding; } catch(e) {}
+  try { window.supaLogout = supaLogout; } catch(e) {}
+  try { window.syncTicketRange = syncTicketRange; } catch(e) {}
+  try { window.throttle = throttle; } catch(e) {}
+  try { window.toggleAdvancedFilters = toggleAdvancedFilters; } catch(e) {}
+  try { window.toggleBadge = toggleBadge; } catch(e) {}
+  try { window.toggleFullMap = toggleFullMap; } catch(e) {}
+  try { window.toggleMultiSelect = toggleMultiSelect; } catch(e) {}
+  try { window.togglePanel = togglePanel; } catch(e) {}
+  try { window.togglePlacesPanel = togglePlacesPanel; } catch(e) {}
+  try { window.toggleSidebar = toggleSidebar; } catch(e) {}
+  try { window.toggleState = toggleState; } catch(e) {}
+  try { window.toggleTheme = toggleTheme; } catch(e) {}
+  try { window.updateAnalysis = updateAnalysis; } catch(e) {}
+  try { window.updateEnrichUI = updateEnrichUI; } catch(e) {}
+  try { window.updateHeader = updateHeader; } catch(e) {}
+  try { window.updateMsDisplay = updateMsDisplay; } catch(e) {}
+  try { window.updateOverlay = updateOverlay; } catch(e) {}
+  try { window.updateOverview = updateOverview; } catch(e) {}
+  try { window.updatePanels = updatePanels; } catch(e) {}
+  try { window.updatePlacesBadge = updatePlacesBadge; } catch(e) {}
+  try { window.updatePlacesEstimate = updatePlacesEstimate; } catch(e) {}
+  try { window.updateRangeLabel = updateRangeLabel; } catch(e) {}
+  try { window.updateRanking = updateRanking; } catch(e) {}
+
+  // Shared state
+  try { window.allData = allData; } catch(e) {}
+  try { window.filteredData = filteredData; } catch(e) {}
+  try { window.map = map; } catch(e) {}
+  try { window.currentMapType = currentMapType; } catch(e) {}
+  try { window.currentView = currentView; } catch(e) {}
+  try { window.currentUser = currentUser; } catch(e) {}
+  try { window._supa = _supa; } catch(e) {}
+  try { window.MAP_STYLES = MAP_STYLES; } catch(e) {}
+  try { window.charts = charts; } catch(e) {}
+  try { window.activeLayer = activeLayer; } catch(e) {}
+  try { window.rawCSVData = rawCSVData; } catch(e) {}
+  try { window.geocodingActive = geocodingActive; } catch(e) {}
+  try { window.geocodingCancelled = geocodingCancelled; } catch(e) {}
+  try { window.SUPABASE_URL = SUPABASE_URL; } catch(e) {}
+  try { window.SUPABASE_ANON = SUPABASE_ANON; } catch(e) {}
+  try { window.THUMB_COLORS = THUMB_COLORS; } catch(e) {}
+  try { window.BR_STATES = BR_STATES; } catch(e) {}
+  try { window.BR_CITIES = BR_CITIES; } catch(e) {}
+  try { window.UF_REGIONS = UF_REGIONS; } catch(e) {}
+  try { window.BR_CAPITALS = BR_CAPITALS; } catch(e) {}
+  try { window._galleryMaps = _galleryMaps; } catch(e) {}
+  try { window._selectedStates = _selectedStates; } catch(e) {}
+  try { window._radiusPins = _radiusPins; } catch(e) {}
+  try { window._placesMode = _placesMode; } catch(e) {}
+  try { window._appendMode = _appendMode; } catch(e) {}
+  try { window._geoCache = _geoCache; } catch(e) {}
+  try { window._receitaCache = _receitaCache; } catch(e) {}
+  try { window._receitaInFlight = _receitaInFlight; } catch(e) {}
+  try { window._receitaPending = _receitaPending; } catch(e) {}
+  try { window._GEO_SCORE_MIN = _GEO_SCORE_MIN; } catch(e) {}
+  try { window._debouncedFilter = _debouncedFilter; } catch(e) {}
+  try { window.dropZone = dropZone; } catch(e) {}
+  try { window._escForHtml = _escForHtml; } catch(e) {}
+  try { window._cssVar = _cssVar; } catch(e) {}
+  try { window.sbFetch = sbFetch; } catch(e) {}
+  try { window.escHtml = escHtml; } catch(e) {}
+})();
