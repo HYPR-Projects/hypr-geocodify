@@ -102,32 +102,65 @@ export default async function handler(req, res) {
   return res.json({ results, cached: batch.length - uncached.length, fetched: uncached.length });
 }
 
-// Try BrasilAPI first, fallback to OpenCNPJ
+// ─── Round-robin across 4 APIs — each gets ~25% of volume ───
+let _apiIndex = 0;
+
+const API_ENDPOINTS = [
+  cnpj => `https://brasilapi.com.br/api/cnpj/v1/${cnpj}`,
+  cnpj => `https://api.opencnpj.org/${cnpj}`,
+  cnpj => `https://receitaws.com.br/v1/cnpj/${cnpj}`,
+  cnpj => `https://publica.cnpj.ws/cnpj/${cnpj}`,
+];
+
+function pickAPI() {
+  const idx = _apiIndex % API_ENDPOINTS.length;
+  _apiIndex++;
+  return idx;
+}
+
 async function lookupCNPJ(cnpj) {
   if (cnpj.length <= 8) {
     return lookupCNPJws(cnpj.padStart(8, '0')).catch(() => null);
   }
-  // BrasilAPI (primary)
+  // Pick primary API via round-robin
+  const primaryIdx = pickAPI();
+  // Try primary
   try {
-    const r = await fetchAPI(`https://brasilapi.com.br/api/cnpj/v1/${cnpj}`);
+    const r = await fetchAPI(API_ENDPOINTS[primaryIdx](cnpj), primaryIdx);
     if (r) return r;
   } catch {}
-  // OpenCNPJ (fallback)
+  // Try next API as fallback (round-robin +1)
+  const fallbackIdx = (primaryIdx + 1) % API_ENDPOINTS.length;
   try {
-    const r = await fetchAPI(`https://api.opencnpj.org/${cnpj}`);
+    const r = await fetchAPI(API_ENDPOINTS[fallbackIdx](cnpj), fallbackIdx);
     if (r) return r;
   } catch {}
   return null;
 }
 
-async function fetchAPI(url) {
+async function fetchAPI(url, apiIdx) {
   const resp = await fetch(url, {
     headers: { 'Accept': 'application/json', 'User-Agent': 'HYPRGeocodify/1.0' },
     signal: AbortSignal.timeout(4000),
   });
-  if (resp.status === 429) { await sleep(500); return null; }
+  if (resp.status === 429) { await sleep(300); return null; }
   if (!resp.ok) return null;
   const d = await resp.json();
+  // cnpj.ws (idx 3) has different response structure
+  if (apiIdx === 3 && d.estabelecimento) {
+    const est = d.estabelecimento;
+    const nome = (est.nome_fantasia || '').trim();
+    const razao = (d.razao_social || '').trim();
+    if (!nome && !razao) return null;
+    return {
+      nome_fantasia: nome || null, razao_social: razao || null,
+      nome_exibicao: nome || razao || null,
+      municipio: est.cidade?.nome || (d.municipio || '').trim() || null,
+      uf: est.estado?.sigla || (d.uf || '').trim() || null,
+      cep: (est.cep || '').replace(/\D/g, '') || null,
+      situacao: est.situacao_cadastral || null, atividade: null,
+    };
+  }
   return normalize(d);
 }
 
