@@ -3911,6 +3911,17 @@ async function startReenrich() {
   });
   if (needsEnrich.length === 0) { dismissReenrich(); return; }
 
+  // Show the geocoding overlay with re-enrich context
+  document.getElementById('geo-title-text').textContent = 'Atualizando nomes';
+  document.getElementById('geo-fill').style.width = '0%';
+  document.getElementById('geo-pct').textContent = '0%';
+  document.getElementById('geo-ok').textContent = '';
+  document.getElementById('geo-fail').textContent = '';
+  document.getElementById('geo-eta').textContent = '';
+  document.getElementById('geo-current').textContent = needsEnrich.length + ' CNPJs para atualizar...';
+  document.getElementById('geocoding-overlay').classList.add('active');
+  geocodingCancelled = false;
+
   // Extract unique CNPJ keys
   function _cacheKey(row) {
     var raw = (row.cnpj || '').split(' - ')[0].replace(/\D/g, '');
@@ -3928,9 +3939,12 @@ async function startReenrich() {
 
   var keys = Object.keys(groups);
   var ok = 0, fail = 0, done = 0;
+  var total = needsEnrich.length;
+  var startTime = Date.now();
   var BATCH = 25;
 
   for (var i = 0; i < keys.length; i += BATCH * 2) {
+    if (geocodingCancelled) break;
     var batches = [];
     for (var p = 0; p < 2; p++) {
       var start = i + p * BATCH;
@@ -3972,14 +3986,32 @@ async function startReenrich() {
       });
     }
 
-    btn.textContent = ok + ' atualizados · ' + Math.round(done / needsEnrich.length * 100) + '%';
+    // Update overlay with same format as geocoding
+    var pct = Math.round(done / total * 100);
+    document.getElementById('geo-fill').style.width = pct + '%';
+    document.getElementById('geo-pct').textContent = pct + '%';
+    document.getElementById('geo-ok').textContent = ok + ' nomes';
+    document.getElementById('geo-fail').textContent = fail > 0 ? fail + ' ✗' : '';
+    var elapsed = (Date.now() - startTime) / 1000;
+    var rate = done / elapsed;
+    var remaining = (total - done) / rate;
+    if (remaining > 0 && isFinite(remaining)) {
+      document.getElementById('geo-eta').textContent = remaining > 60 ? '~' + Math.ceil(remaining / 60) + 'min' : '~' + Math.round(remaining) + 's';
+    }
+    document.getElementById('geo-current').textContent = ok + ' identificados · ' + done + '/' + total;
+
+    // Periodic render
+    if ((i + BATCH * 2) % 100 === 0 || i + BATCH * 2 >= keys.length) {
+      filteredData = [...allData]; populateFilters(); applyFilters(); updatePanels();
+    }
   }
 
-  // Update UI
+  // Final render
   filteredData = [...allData];
   populateFilters(); applyFilters(); updatePanels(); renderMarkers();
 
-  // Save updated PDVs to Supabase if map is saved
+  // Save updated PDVs to Supabase
+  document.getElementById('geo-current').textContent = 'Salvando no banco...';
   var mapId = window._currentOpenMapId;
   if (mapId && ok > 0) {
     try {
@@ -3997,10 +4029,11 @@ async function startReenrich() {
     } catch(e) {}
   }
 
-  btn.textContent = ok + ' nomes atualizados';
-  btn.style.borderColor = 'var(--win)';
-  btn.style.color = 'var(--win)';
-  setTimeout(function() { checkReenrichBar(); btn.disabled = false; btn.textContent = 'Atualizar nomes'; btn.style.borderColor = ''; btn.style.color = ''; }, 3000);
+  // Hide overlay
+  document.getElementById('geocoding-overlay').classList.remove('active');
+  btn.disabled = false;
+  btn.textContent = 'Atualizar nomes';
+  checkReenrichBar();
 }
 // ─── Places Discovery ─────────────────────────────────────────────────────────
 // Brazilian state centroids and bounding boxes for grid generation
