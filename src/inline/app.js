@@ -7,6 +7,8 @@ window._supa = null;
 window.currentUser = null;
 window.MAP_STYLES = null;
 window._supaReady = false;
+var _supa = null;
+var currentUser = null;
 document.addEventListener('DOMContentLoaded', function() {
   // 1. Supabase client (may not be ready yet if defer scripts still loading)
   function _initSupa() {
