@@ -390,17 +390,34 @@ function _setupMapInteractions() {
 }
 
 // ─── Pin Color ───────────────────────────────────────────────────────────────
+// _pinColors: cache de CSS vars lido uma vez por renderMarkers() — evita
+// getComputedStyle() por row (era ~15k chamadas em mapas grandes).
+var _pinColors = null;
+
+function _refreshPinColors() {
+  _pinColors = {
+    win: _cssVar('--win'),
+    lose: _cssVar('--lose'),
+    neutral: _cssVar('--neutral'),
+    purple: _cssVar('--purple') || '#a855f7',
+  };
+}
+
 function pinColor(row) {
-  if (currentMapType === 'places_discovery') return _cssVar('--purple') || '#a855f7';
+  if (!_pinColors) _refreshPinColors();
+  if (currentMapType === 'places_discovery') return _pinColors.purple;
   const diff = parseFloat(row.percentual_diff_media_dimensao || 0);
-  if (diff > 2) return _cssVar('--win');
-  if (diff < -2) return _cssVar('--lose');
-  return _cssVar('--neutral');
+  if (diff > 2) return _pinColors.win;
+  if (diff < -2) return _pinColors.lose;
+  return _pinColors.neutral;
 }
 
 // ─── Render Markers (GeoJSON source update) ──────────────────────────────────
 function renderMarkers() {
   if (!map) return;
+
+  // Refresh color cache once per render pass (theme may have changed)
+  _refreshPinColors();
 
   const _doRender = () => {
     if (!map.getSource('pdvs')) {
@@ -925,7 +942,7 @@ function resetFilters() {
     badges.forEach(b => b.classList.remove('active'));
     badges[0]?.classList.add('active');
   });
-  filteredData = [...allData];
+  filteredData = allData.slice();
   renderMarkers();
   updatePanels();
   updateOverlay();
@@ -1250,7 +1267,7 @@ async function loadData(data) {
   data = data.filter(r => r.cnpj && !r.cnpj.toUpperCase().includes('TODOS OS CNPJS'));
 
   allData = data.filter(r => r.lat && r.lon && parseFloat(r.lat) && parseFloat(r.lon));
-  filteredData = [...allData];
+  filteredData = allData.slice();
 
   document.getElementById('upload-zone').classList.add('hidden');
   document.getElementById('app').style.display = 'flex';
@@ -2541,9 +2558,9 @@ async function startGeocoding() {
           // Plot pin em tempo real — usuário já pode interagir
           allData.push(row);
 
-          // Atualizar mapa a cada 50 novos pins (batch GeoJSON update é mais eficiente)
-          if (allData.length % 100 === 0) {
-            filteredData = [...allData];
+          // Atualizar mapa a cada 200 novos pins (batch GeoJSON update é mais eficiente)
+          if (allData.length % 200 === 0) {
+            filteredData = allData.slice();
             renderMarkers();
             updatePanels();
           }
@@ -2588,7 +2605,7 @@ async function startGeocoding() {
   window.removeEventListener('beforeunload', window._unloadHandler);
   document.removeEventListener('visibilitychange', window._visibilityHandler);
 
-  filteredData = [...allData];
+  filteredData = allData.slice();
   document.getElementById('geocoding-overlay').classList.remove('active');
 
   if (allData.length === 0) {
@@ -2604,7 +2621,7 @@ async function startGeocoding() {
     map.fitBounds(bounds, { padding: 40, animate: true });
   }
 
-  filteredData = [...allData];
+  filteredData = allData.slice();
   // Renderizar pins no mapa
   if (map.isStyleLoaded() && map.getSource('pdvs')) {
     renderMarkers();
@@ -2711,7 +2728,7 @@ async function startGeocoding() {
     // Update UI after cache step
     if (enrichOk > 0) {
       document.getElementById('geo-current').textContent = enrichOk + ' do cache · consultando APIs...';
-      filteredData = [...allData]; populateFilters(); applyFilters(); updatePanels();
+      filteredData = allData.slice(); populateFilters(); applyFilters(); updatePanels();
     }
 
     // ── STEP 3: Enrich via server-side batch proxy /api/cnpj-enrich ──
@@ -2777,7 +2794,7 @@ async function startGeocoding() {
 
       // Periodic render so user sees progress on map
       if ((ei + ENRICH_BATCH) % 100 === 0 || ei + ENRICH_BATCH >= remainingKeys.length) {
-        filteredData = [...allData]; populateFilters(); applyFilters(); updatePanels();
+        filteredData = allData.slice(); populateFilters(); applyFilters(); updatePanels();
       }
 
       await new Promise(function(r) { setTimeout(r, ENRICH_DELAY); });
@@ -2859,7 +2876,7 @@ async function startGeocoding() {
     // Cache save is handled by the proxy — no client-side save needed
 
     // Final render
-    filteredData = [...allData];
+    filteredData = allData.slice();
     populateFilters();
     applyFilters();
     updatePanels();
@@ -2944,7 +2961,7 @@ async function startReverseGeocoding() {
     document.getElementById('geo-current').textContent = `${done.toLocaleString('pt-BR')} / ${total.toLocaleString('pt-BR')} pontos`;
 
     if (done % 100 === 0) {
-      filteredData = [...allData];
+      filteredData = allData.slice();
       renderMarkers();
     }
     await new Promise(r => setTimeout(r, DELAY));
@@ -2954,7 +2971,7 @@ async function startReverseGeocoding() {
   geocodingActive = false;
   window.removeEventListener('beforeunload', window._unloadHandler);
   document.removeEventListener('visibilitychange', window._visibilityHandler);
-  filteredData = [...allData];
+  filteredData = allData.slice();
   renderMarkers();
   updatePanels(); updateOverlay();
 
@@ -2973,7 +2990,7 @@ function cancelGeocoding() {
     window.removeEventListener('beforeunload', window._unloadHandler);
     document.getElementById('geocoding-overlay').classList.remove('active');
     if (allData.length > 0) {
-      filteredData = [...allData];
+      filteredData = allData.slice();
       renderMarkers();
       const pts = allData.filter(r => r.lat && r.lon);
       if (pts.length) {
@@ -2995,7 +3012,7 @@ function cancelGeocoding() {
   document.getElementById('geocoding-overlay').classList.remove('active');
 
   if (allData.length > 0) {
-    filteredData = [...allData];
+    filteredData = allData.slice();
     const validCancel = allData.filter(r => parseFloat(r.lat) && parseFloat(r.lon));
     if (validCancel.length > 0) {
       const bounds = validCancel.reduce((b, r) => b.extend([parseFloat(r.lon), parseFloat(r.lat)]), new maplibregl.LngLatBounds([parseFloat(validCancel[0].lon), parseFloat(validCancel[0].lat)], [parseFloat(validCancel[0].lon), parseFloat(validCancel[0].lat)]));
@@ -3620,7 +3637,7 @@ async function openSavedMap(mapId, name, mapType) {
     }
 
     overlay.classList.remove('active');
-  filteredData = [...allData];
+  filteredData = allData.slice();
   if (allData.length > 0) {
       const _pts = allData.filter(r => r.lat && r.lon);
       if (!_pts.length) return;
@@ -3926,7 +3943,7 @@ async function initSharedMode() {
       r.lat = parseFloat(r.lat); r.lon = parseFloat(r.lon);
       return r;
     }).filter(function(r) { return r.lat && r.lon; });
-    filteredData = [...allData];
+    filteredData = allData.slice();
 
     populateFilters(); applyFilters(); updatePanels(); renderMarkers(); updateOverlay();
 
@@ -4076,7 +4093,7 @@ async function startReenrich() {
 
     // Periodic render
     if ((i + BATCH * 2) % 100 === 0 || i + BATCH * 2 >= keys.length) {
-      filteredData = [...allData]; populateFilters(); applyFilters(); updatePanels();
+      filteredData = allData.slice(); populateFilters(); applyFilters(); updatePanels();
     }
   }
 
@@ -4144,7 +4161,7 @@ async function startReenrich() {
   }
 
   // Final render
-  filteredData = [...allData];
+  filteredData = allData.slice();
   populateFilters(); applyFilters(); updatePanels(); renderMarkers();
 
   // Save updated PDVs to Supabase
@@ -5149,6 +5166,8 @@ function resetPlacesForNewSearch() {
   try { window._buildSatelliteStyle = _buildSatelliteStyle; } catch(e) {}
   try { window._cleanCommercialAddress = _cleanCommercialAddress; } catch(e) {}
   try { window._cssVar = _cssVar; } catch(e) {}
+  try { window._refreshPinColors = _refreshPinColors; } catch(e) {}
+  try { window._pinColors = _pinColors; } catch(e) {}
   try { window._escForHtml = _escForHtml; } catch(e) {}
   try { window._hereItemToResult = _hereItemToResult; } catch(e) {}
   try { window._initMapStyles = _initMapStyles; } catch(e) {}
