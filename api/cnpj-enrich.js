@@ -70,7 +70,7 @@ export default async function handler(req, res) {
 
   // Step 2: Fetch uncached — 5 concurrent, each with 4s timeout
   if (uncached.length > 0) {
-    const CONCURRENT = 5;
+    const CONCURRENT = 15;
     const newEntries = [];
 
     for (let i = 0; i < uncached.length; i += CONCURRENT) {
