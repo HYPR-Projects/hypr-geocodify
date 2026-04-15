@@ -758,6 +758,8 @@ function buildBandeiraGroups() {
 var _msState = {}; // id → { options: [{value, label, count}], selected: Set }
 
 function initMultiSelect(id, options) {
+  // Ordenar por count desc (mais frequentes primeiro)
+  options.sort(function(a, b) { return b.count - a.count; });
   _msState[id] = { options: options, selected: new Set() };
   var wrap = document.getElementById(id);
   var optContainer = wrap.querySelector('.ms-options');
@@ -767,19 +769,57 @@ function initMultiSelect(id, options) {
     div.className = 'ms-opt';
     div.dataset.value = opt.value;
     div.dataset.search = opt.label.toLowerCase();
-    div.innerHTML = '<input type="checkbox" tabindex="-1"><span class="ms-opt-label">' + _escForHtml(opt.label) + '</span><span class="ms-opt-count">' + opt.count + '</span>';
+    div.innerHTML = '<input type="checkbox" tabindex="-1"><span class="ms-opt-label">' + _escForHtml(opt.label) + '</span><span class="ms-opt-count">' + opt.count.toLocaleString('pt-BR') + '</span>';
     div.onclick = function(e) {
       e.stopPropagation();
       var cb = div.querySelector('input');
       cb.checked = !cb.checked;
-      if (cb.checked) _msState[id].selected.add(opt.value);
-      else _msState[id].selected.delete(opt.value);
+      if (cb.checked) {
+        _msState[id].selected.add(opt.value);
+        div.classList.add('selected');
+      } else {
+        _msState[id].selected.delete(opt.value);
+        div.classList.remove('selected');
+      }
+      _updateMsSelectionBar(id);
       updateMsDisplay(id);
       applyFilters();
     };
     optContainer.appendChild(div);
   });
+  _updateMsSelectionBar(id);
   updateMsDisplay(id);
+}
+
+function _updateMsSelectionBar(id) {
+  var bar = document.getElementById(id + '-bar');
+  var countEl = document.getElementById(id + '-count');
+  if (!bar || !countEl) return;
+  var n = _msState[id].selected.size;
+  if (n > 0) {
+    bar.style.display = 'flex';
+    countEl.textContent = n + ' selecionada' + (n > 1 ? 's' : '');
+  } else {
+    bar.style.display = 'none';
+  }
+  // Atualizar badge no header do sidebar
+  var badge = document.getElementById('filter-active-count');
+  if (badge) {
+    var totalActive = n;
+    // Contar outros filtros ativos
+    if (document.getElementById('f-uf').value) totalActive++;
+    if (parseFloat(document.getElementById('f-share-min').value) > 0) totalActive++;
+    var ticketsEl = document.getElementById('f-tickets-min');
+    if (ticketsEl && parseInt(ticketsEl.value) > 0) totalActive++;
+    if (document.querySelector('#f-oport .badge.active[data-v]:not([data-v=""])')) totalActive++;
+    if (document.querySelector('#f-perf .badge.active[data-v]:not([data-v=""])')) totalActive++;
+    if (totalActive > 0) {
+      badge.textContent = totalActive;
+      badge.style.display = '';
+    } else {
+      badge.style.display = 'none';
+    }
+  }
 }
 
 function updateMsDisplay(id) {
@@ -827,13 +867,17 @@ function filterMultiSelect(id, query) {
 function msSelectAll(id) {
   var wrap = document.getElementById(id);
   _msState[id].selected.clear();
-  wrap.querySelectorAll('.ms-opt input').forEach(function(cb) { cb.checked = false; });
+  wrap.querySelectorAll('.ms-opt').forEach(function(opt) {
+    opt.classList.remove('selected');
+    opt.querySelector('input').checked = false;
+  });
+  _updateMsSelectionBar(id);
   updateMsDisplay(id);
   applyFilters();
 }
 
 function msClearAll(id) {
-  msSelectAll(id); // "Limpar" = voltar para "Todas"
+  msSelectAll(id);
 }
 
 function msGetSelected(id) {
@@ -844,7 +888,13 @@ function msReset(id) {
   if (!_msState[id]) return;
   _msState[id].selected.clear();
   var wrap = document.getElementById(id);
-  if (wrap) wrap.querySelectorAll('.ms-opt input').forEach(function(cb) { cb.checked = false; });
+  if (wrap) {
+    wrap.querySelectorAll('.ms-opt').forEach(function(opt) {
+      opt.classList.remove('selected');
+      opt.querySelector('input').checked = false;
+    });
+  }
+  _updateMsSelectionBar(id);
   updateMsDisplay(id);
 }
 
@@ -859,15 +909,26 @@ document.addEventListener('click', function(e) {
 function populateFilters() {
   // ── Bandeira multi-select com normalização ──
   var groups = buildBandeiraGroups();
-  // Também contar "Não identificado" e "Carregando..."
-  var naoIdCount = allData.filter(function(r) { return !r.bandeira || r.bandeira === 'Não identificado' || r.bandeira === 'Carregando...'; }).length;
 
+  // Contar "Não identificado" e variantes (vazio, Carregando, null)
+  var naoIdCount = allData.filter(function(r) {
+    return !r.bandeira || r.bandeira === 'Não identificado' || r.bandeira === 'Carregando...' || r.bandeira.trim() === '';
+  }).length;
+
+  // Construir options ordenadas por count (desc)
   var options = Object.keys(groups).sort().map(function(key) {
     return { value: groups[key].display, label: groups[key].display, count: groups[key].count };
   });
+
+  // Filtrar options com label vazia ou só espaços
+  options = options.filter(function(opt) {
+    return opt.label && opt.label.trim().length > 0;
+  });
+
   if (naoIdCount > 0) {
     options.push({ value: 'Não identificado', label: 'Não identificado', count: naoIdCount });
   }
+
   initMultiSelect('ms-bandeira', options);
 
   const selUf = document.getElementById('f-uf');
@@ -916,9 +977,14 @@ function applyFilters() {
 
   filteredData = allData.filter(r => {
     if (selBandeiras.size > 0) {
+      var bandeira = r.bandeira;
+      // Tratar variantes de não identificado
+      if (!bandeira || bandeira === 'Carregando...' || bandeira.trim() === '') {
+        bandeira = 'Não identificado';
+      }
       // Checar pelo nome agrupado (display) via _bandeiraGroupMap
-      const grouped = _bandeiraGroupMap[r.bandeira] || r.bandeira;
-      if (!selBandeiras.has(grouped)) return false;
+      const grouped = _bandeiraGroupMap[bandeira] || bandeira;
+      if (!selBandeiras.has(grouped) && !selBandeiras.has(bandeira)) return false;
     }
     if (uf && r.uf !== uf) return false;
     if (parseFloat(r.share_reais_sku_dimensao || 0) < shareMin) return false;
@@ -940,6 +1006,8 @@ function applyFilters() {
   renderMarkers();
   updatePanels();
   updateOverlay();
+  // Atualizar badge de filtros ativos
+  _updateMsSelectionBar('ms-bandeira');
 }
 
 function syncTicketRange() {
@@ -5247,6 +5315,7 @@ function resetPlacesForNewSearch() {
   try { window.initAuth = initAuth; } catch(e) {}
   try { window.initMap = initMap; } catch(e) {}
   try { window.initMultiSelect = initMultiSelect; } catch(e) {}
+  try { window._updateMsSelectionBar = _updateMsSelectionBar; } catch(e) {}
   try { window.initResizablePanels = initResizablePanels; } catch(e) {}
   try { window.loadData = loadData; } catch(e) {}
   try { window.loadGallery = loadGallery; } catch(e) {}

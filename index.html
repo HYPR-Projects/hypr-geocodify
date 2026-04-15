@@ -482,6 +482,7 @@
       <button id="sidebar-collapse" class="collapse-btn" onclick="toggleSidebar()" title="Colapsar filtros">‹</button>
       <div class="sidebar-header" onclick="if(window.innerWidth<=768)toggleSidebar()">
         <div class="sidebar-title">Filtros</div>
+        <span class="sidebar-count" id="filter-active-count" style="display:none">0</span>
       </div>
       <div class="sidebar-body">
 
@@ -491,10 +492,17 @@
           <div class="ms-wrap" id="ms-bandeira">
             <div class="ms-trigger" onclick="toggleMultiSelect('ms-bandeira')">
               <span class="ms-display">Todas as bandeiras</span>
-              <svg width="12" height="12" viewBox="0 0 12 12"><path fill="#6b7280" d="M6 8L1 3h10z"/></svg>
+              <svg width="12" height="12" viewBox="0 0 12 12"><path fill="currentColor" d="M6 8L1 3h10z"/></svg>
             </div>
             <div class="ms-dropdown">
-              <input type="text" class="ms-search" placeholder="Buscar bandeira..." oninput="filterMultiSelect('ms-bandeira', this.value)">
+              <div class="ms-search-wrap">
+                <svg class="ms-search-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+                <input type="text" class="ms-search" placeholder="Buscar bandeira..." oninput="filterMultiSelect('ms-bandeira', this.value)">
+              </div>
+              <div class="ms-selection-bar" id="ms-bandeira-bar" style="display:none">
+                <span class="ms-sel-count" id="ms-bandeira-count">0 selecionadas</span>
+                <button class="ms-sel-clear" onclick="msClearAll('ms-bandeira')">Limpar</button>
+              </div>
               <div class="ms-options"></div>
               <div class="ms-footer">
                 <button class="ms-btn" onclick="msSelectAll('ms-bandeira')">Todas</button>
@@ -514,7 +522,7 @@
 
         <!-- Share -->
         <div class="filter-group filter-group-share">
-          <div class="filter-label">Share mínimo (%)</div>
+          <div class="filter-label">Share mínimo</div>
           <div class="range-row">
             <input type="range" id="f-share-min" aria-label="Share mínimo" min="0" max="100" value="0" step="1" oninput="updateRangeLabel('f-share-min','lbl-share-min'); _debouncedFilter()">
             <span class="range-label" id="lbl-share-min">0%</span>
@@ -561,7 +569,7 @@
           </div>
         </div>
 
-        <button class="reset-btn" onclick="resetFilters()">↺ Limpar filtros</button>
+        <button class="reset-btn" onclick="resetFilters()">Limpar todos os filtros</button>
       </div>
     </div>
 
