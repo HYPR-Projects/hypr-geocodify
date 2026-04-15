@@ -1284,6 +1284,31 @@ input[type="range"]::-webkit-slider-thumb {
 .shared-mode #upload-zone,
 .shared-mode #geo-toast,
 .shared-mode #save-modal,
+.shared-mode #reenrich-bar,
 .shared-mode .map-card-del,
 .shared-mode .map-card-share,
 .shared-mode .gallery-btn-new { display: none !important; }
+
+/* Re-enrich bar */
+#reenrich-bar {
+  background: var(--surface2); border-bottom: 1px solid var(--border);
+  padding: 0; overflow: hidden; backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
+}
+.reenrich-inner {
+  display: flex; align-items: center; gap: 12px;
+  padding: 8px 24px; max-width: 100%;
+}
+.reenrich-text { font-size: 13px; color: var(--text-muted); flex: 1; }
+.reenrich-text span { color: var(--text); font-weight: 500; }
+.reenrich-btn {
+  font-size: 12px; font-weight: 500; padding: 5px 14px; border-radius: 6px;
+  border: 1px solid var(--accent); color: var(--accent-light); background: transparent;
+  cursor: pointer; white-space: nowrap; transition: background 0.15s;
+}
+.reenrich-btn:hover { background: var(--accent-glow, rgba(0,106,199,0.12)); }
+.reenrich-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.reenrich-dismiss {
+  background: none; border: none; color: var(--text-muted); font-size: 18px;
+  cursor: pointer; padding: 0 4px; line-height: 1; opacity: 0.5;
+}
+.reenrich-dismiss:hover { opacity: 1; }

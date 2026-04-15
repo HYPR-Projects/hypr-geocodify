@@ -3561,7 +3561,7 @@ async function openSavedMap(mapId, name, mapType) {
       map.fitBounds(bounds, { padding:[40,40] });
     }
     populateFilters(); updatePanels(); updateOverlay();
-    // If this is a Places Discovery map, show the results panel (not the search form)
+    checkReenrichBar();
     if (currentMapType === 'places_discovery' && allData.length > 0) {
       document.getElementById('places-panel').style.display = 'block';
       document.getElementById('places-results-section').style.display = 'block';
@@ -3879,6 +3879,129 @@ async function initSharedMode() {
 
 // ─── Show share button when a saved map is open ─────────────────────────────
 window._currentOpenMapId = null;
+
+// ─── Re-enrich: detect and update unidentified PDVs ──────────────────────
+function checkReenrichBar() {
+  if (_isSharedMode || !currentUser) return;
+  var bar = document.getElementById('reenrich-bar');
+  if (!bar) return;
+  var unidentified = allData.filter(function(r) {
+    return r.cnpj && (!r.bandeira || r.bandeira === 'Não identificado' || r.bandeira === 'Carregando...' || r.bandeira === 'Desconhecido');
+  });
+  if (unidentified.length > 5) {
+    document.getElementById('reenrich-count').textContent = unidentified.length;
+    bar.style.display = '';
+  } else {
+    bar.style.display = 'none';
+  }
+}
+
+function dismissReenrich() {
+  var bar = document.getElementById('reenrich-bar');
+  if (bar) bar.style.display = 'none';
+}
+
+async function startReenrich() {
+  var btn = document.getElementById('reenrich-btn');
+  btn.disabled = true;
+  btn.textContent = 'Atualizando...';
+
+  var needsEnrich = allData.filter(function(r) {
+    return r.cnpj && (!r.bandeira || r.bandeira === 'Não identificado' || r.bandeira === 'Carregando...' || r.bandeira === 'Desconhecido');
+  });
+  if (needsEnrich.length === 0) { dismissReenrich(); return; }
+
+  // Extract unique CNPJ keys
+  function _cacheKey(row) {
+    var raw = (row.cnpj || '').split(' - ')[0].replace(/\D/g, '');
+    if (raw.length >= 14) return raw.slice(0, 14);
+    if (raw.length >= 8) return 'raiz_' + raw.padStart(8, '0');
+    return null;
+  }
+  var groups = {};
+  needsEnrich.forEach(function(row) {
+    var key = _cacheKey(row);
+    if (!key) return;
+    if (!groups[key]) groups[key] = [];
+    groups[key].push(row);
+  });
+
+  var keys = Object.keys(groups);
+  var ok = 0, fail = 0, done = 0;
+  var BATCH = 25;
+
+  for (var i = 0; i < keys.length; i += BATCH * 2) {
+    var batches = [];
+    for (var p = 0; p < 2; p++) {
+      var start = i + p * BATCH;
+      if (start >= keys.length) break;
+      batches.push(keys.slice(start, start + BATCH));
+    }
+
+    var responses = await Promise.allSettled(batches.map(function(batchKeys) {
+      var cnpjNums = batchKeys.map(function(k) { return k.startsWith('raiz_') ? k.slice(5) : k; });
+      return fetch('/api/cnpj-enrich', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ cnpjs: cnpjNums }),
+      }).then(function(r) { return r.ok ? r.json() : null; }).catch(function() { return null; });
+    }));
+
+    for (var pi = 0; pi < batches.length; pi++) {
+      var batchKeys = batches[pi];
+      var data = responses[pi].status === 'fulfilled' ? responses[pi].value : null;
+      var results = data ? (data.results || {}) : {};
+
+      batchKeys.forEach(function(key) {
+        var rows = groups[key];
+        if (!rows) return;
+        var lookupKey = key.startsWith('raiz_') ? key.slice(5) : key;
+        var result = results[lookupKey];
+        if (result && (result.nome_exibicao || result.nome_fantasia || result.razao_social)) {
+          var receita = {
+            nome_fantasia: result.nome_fantasia || '', razao_social: result.razao_social || '',
+            nome_exibicao: result.nome_exibicao || '', municipio: result.municipio || '',
+            uf_receita: result.uf || '', cep: result.cep || '',
+            situacao: result.situacao || '', atividade: result.atividade || '',
+          };
+          rows.forEach(function(row) { aplicarReceita(row, receita); });
+          ok += rows.length;
+        } else {
+          fail += rows.length;
+        }
+        done += rows.length;
+      });
+    }
+
+    btn.textContent = ok + ' atualizados · ' + Math.round(done / needsEnrich.length * 100) + '%';
+  }
+
+  // Update UI
+  filteredData = [...allData];
+  populateFilters(); applyFilters(); updatePanels(); renderMarkers();
+
+  // Save updated PDVs to Supabase if map is saved
+  var mapId = window._currentOpenMapId;
+  if (mapId && ok > 0) {
+    try {
+      var updated = allData.filter(function(r) { return r.id && r.bandeira && r.bandeira !== 'Não identificado' && r.bandeira !== 'Carregando...'; });
+      var CHUNK = 200;
+      for (var si = 0; si < updated.length; si += CHUNK) {
+        var chunk = updated.slice(si, si + CHUNK).filter(function(r) { return r.id; });
+        await Promise.allSettled(chunk.map(function(r) {
+          return sbFetch('map_pdvs?id=eq.' + r.id, {
+            method: 'PATCH',
+            body: JSON.stringify({ bandeira: r.bandeira, nome_fantasia: r.nome_fantasia || null, razao_social: r.razao_social || null }),
+          });
+        }));
+      }
+    } catch(e) {}
+  }
+
+  btn.textContent = ok + ' nomes atualizados';
+  btn.style.borderColor = 'var(--win)';
+  btn.style.color = 'var(--win)';
+  setTimeout(function() { checkReenrichBar(); btn.disabled = false; btn.textContent = 'Atualizar nomes'; btn.style.borderColor = ''; btn.style.color = ''; }, 3000);
+}
 // ─── Places Discovery ─────────────────────────────────────────────────────────
 // Brazilian state centroids and bounding boxes for grid generation
 var BR_STATES = {
@@ -4959,6 +5082,9 @@ function resetPlacesForNewSearch() {
   try { window.showPlacesSetup = showPlacesSetup; } catch(e) {}
   try { window.showSaveMapDialog = showSaveMapDialog; } catch(e) {}
   try { window.openShareModal = openShareModal; } catch(e) {}
+  try { window.startReenrich = startReenrich; } catch(e) {}
+  try { window.dismissReenrich = dismissReenrich; } catch(e) {}
+  try { window.checkReenrichBar = checkReenrichBar; } catch(e) {}
   try { window.openShareModalFromCard = openShareModalFromCard; } catch(e) {}
   try { window.closeShareModal = closeShareModal; } catch(e) {}
   try { window.copyShareLink = copyShareLink; } catch(e) {}

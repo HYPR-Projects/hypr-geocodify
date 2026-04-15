@@ -457,6 +457,18 @@
     </button>
   </div>
 
+  <!-- Re-enrich bar — appears only when map has unidentified PDVs -->
+  <div id="reenrich-bar" style="display:none;">
+    <div class="reenrich-inner">
+      <span class="reenrich-text">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:-2px;margin-right:4px;opacity:0.6"><path d="M1 4v6h6"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg>
+        <span id="reenrich-count">0</span> PDVs sem nome identificado
+      </span>
+      <button class="reenrich-btn" id="reenrich-btn" onclick="startReenrich()">Atualizar nomes</button>
+      <button class="reenrich-dismiss" onclick="dismissReenrich()" title="Fechar">&times;</button>
+    </div>
+  </div>
+
   <!-- Main -->
   <div id="main">
     <!-- Left Sidebar -->
