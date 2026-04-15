@@ -2,8 +2,9 @@
 // HERE API via proxy server-side /api/geocode. Key nunca sai do server.
 // Suporta structured, freeform, reverse, com fallbacks e cache.
 
+import { GEO_SCORE_MIN } from '../config.js';
+
 const _cache = {};
-const GEO_SCORE_MIN = 0.5;
 
 /** Limpa cache (chamar entre sessões de geocoding) */
 export function clearGeoCache() {

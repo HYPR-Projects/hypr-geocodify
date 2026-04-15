@@ -5,7 +5,7 @@
 // ── Geocoding ──
 export const GEO_BATCH_SIZE = 8;
 export const GEO_BATCH_DELAY_MS = 80;
-export const GEO_SCORE_MIN = 0.6;
+export const GEO_SCORE_MIN = 0.5;
 export const GEO_TIMEOUT_MS = 8000;
 
 // ── Receita Federal ──
