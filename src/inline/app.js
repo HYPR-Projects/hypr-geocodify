@@ -4074,6 +4074,69 @@ async function startReenrich() {
     }
   }
 
+  // ── RETRY: wait 20s for rate limits to reset, then retry failed ones ──
+  var retryKeys = keys.filter(function(key) {
+    var rows = groups[key];
+    return rows && rows.some(function(r) { return r.bandeira === 'Não identificado' || r.bandeira === 'Carregando...' || r.bandeira === 'Desconhecido'; });
+  });
+  if (retryKeys.length > 0 && !geocodingCancelled) {
+    document.getElementById('geo-title-text').textContent = 'Aguardando reset de APIs...';
+    document.getElementById('geo-current').textContent = retryKeys.length + ' CNPJs para retry em 20s';
+    for (var cd = 20; cd > 0 && !geocodingCancelled; cd--) {
+      document.getElementById('geo-eta').textContent = cd + 's';
+      await new Promise(function(r) { setTimeout(r, 1000); });
+    }
+    if (!geocodingCancelled) {
+      document.getElementById('geo-title-text').textContent = 'Retry — recuperando nomes';
+      fail = 0;
+      var retryDone = 0;
+      for (var ri = 0; ri < retryKeys.length; ri += BATCH * 2) {
+        if (geocodingCancelled) break;
+        var retryBatches = [];
+        for (var rp = 0; rp < 2; rp++) {
+          var rStart = ri + rp * BATCH;
+          if (rStart >= retryKeys.length) break;
+          retryBatches.push(retryKeys.slice(rStart, rStart + BATCH));
+        }
+        var retryResponses = await Promise.allSettled(retryBatches.map(function(batchKeys) {
+          var cnpjNums = batchKeys.map(function(k) { return k.startsWith('raiz_') ? k.slice(5) : k; });
+          return fetch('/api/cnpj-enrich', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ cnpjs: cnpjNums }),
+          }).then(function(r) { return r.ok ? r.json() : null; }).catch(function() { return null; });
+        }));
+        for (var rpi = 0; rpi < retryBatches.length; rpi++) {
+          var rBatchKeys = retryBatches[rpi];
+          var rData = retryResponses[rpi].status === 'fulfilled' ? retryResponses[rpi].value : null;
+          var rResults = rData ? (rData.results || {}) : {};
+          rBatchKeys.forEach(function(key) {
+            var rows = groups[key];
+            if (!rows) return;
+            var lookupKey = key.startsWith('raiz_') ? key.slice(5) : key;
+            var result = rResults[lookupKey];
+            if (result && (result.nome_exibicao || result.nome_fantasia || result.razao_social)) {
+              var receita = {
+                nome_fantasia: result.nome_fantasia || '', razao_social: result.razao_social || '',
+                nome_exibicao: result.nome_exibicao || '', municipio: result.municipio || '',
+                uf_receita: result.uf || '', cep: result.cep || '',
+                situacao: result.situacao || '', atividade: result.atividade || '',
+              };
+              rows.forEach(function(row) { aplicarReceita(row, receita); });
+              ok += rows.length;
+            } else {
+              fail += rows.length;
+            }
+            retryDone += rows.length;
+          });
+        }
+        document.getElementById('geo-ok').textContent = ok + ' nomes';
+        document.getElementById('geo-fail').textContent = fail > 0 ? fail + ' ✗' : '';
+        document.getElementById('geo-current').textContent = ok + ' identificados · retry ' + retryDone + '/' + retryKeys.length;
+        await new Promise(function(r) { setTimeout(r, 80); });
+      }
+    }
+  }
+
   // Final render
   filteredData = [...allData];
   populateFilters(); applyFilters(); updatePanels(); renderMarkers();
