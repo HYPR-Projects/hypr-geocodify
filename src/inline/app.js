@@ -773,7 +773,10 @@ function initMultiSelect(id, options) {
     div.onclick = function(e) {
       e.stopPropagation();
       var cb = div.querySelector('input');
-      cb.checked = !cb.checked;
+      // Se o click foi direto no checkbox, o browser já togglou — não inverter de novo
+      if (e.target !== cb) {
+        cb.checked = !cb.checked;
+      }
       if (cb.checked) {
         _msState[id].selected.add(opt.value);
         div.classList.add('selected');
