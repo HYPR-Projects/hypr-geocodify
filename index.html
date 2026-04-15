@@ -895,15 +895,6 @@ function debounce(fn, ms) {
   let tid;
   return function(...args) { clearTimeout(tid); tid = setTimeout(() => fn.apply(this, args), ms); };
 }
-function throttle(fn, ms) {
-  let last = 0;
-  return function(...args) { const now = Date.now(); if (now - last >= ms) { last = now; fn.apply(this, args); } };
-}
-
-// ─── HTML Escape (XSS prevention) ────────────────────────────────────────────
-function _escForHtml(s) {
-  return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
-}
 
 // ─── State ───────────────────────────────────────────────────────────────────
 var STATE_NAME_TO_UF = {'Acre':'AC','Alagoas':'AL','Amapá':'AP','Amazonas':'AM','Bahia':'BA','Ceará':'CE','Distrito Federal':'DF','Espírito Santo':'ES','Goiás':'GO','Maranhão':'MA','Mato Grosso do Sul':'MS','Mato Grosso':'MT','Minas Gerais':'MG','Pará':'PA','Paraíba':'PB','Paraná':'PR','Pernambuco':'PE','Piauí':'PI','Rio de Janeiro':'RJ','Rio Grande do Norte':'RN','Rio Grande do Sul':'RS','Rondônia':'RO','Roraima':'RR','Santa Catarina':'SC','São Paulo':'SP','Sergipe':'SE','Tocantins':'TO'};
@@ -1164,321 +1155,9 @@ function _setupMapInteractions() {
   map.on('mouseleave', 'pdv-points', () => map.getCanvas().style.cursor = '');
 }
 
-// ─── Pin Color ───────────────────────────────────────────────────────────────
-function pinColor(row) {
-  if (currentMapType === 'places_discovery') return _cssVar('--purple') || '#a855f7';
-  const diff = parseFloat(row.percentual_diff_media_dimensao || 0);
-  if (diff > 2) return _cssVar('--win');
-  if (diff < -2) return _cssVar('--lose');
-  return _cssVar('--neutral');
-}
-
-// ─── Render Markers (GeoJSON source update) ──────────────────────────────────
-function renderMarkers() {
-  if (!map) return;
-
-  const _doRender = () => {
-    if (!map.getSource('pdvs')) {
-      _setupMapSources();
-      _setupMapInteractions();
-    }
-
-    const features = filteredData
-      .filter(r => parseFloat(r.lat) && parseFloat(r.lon))
-      .map((r, i) => {
-        if (r._mapId === undefined) r._mapId = i;
-        return {
-          type: 'Feature',
-          geometry: { type: 'Point', coordinates: [parseFloat(r.lon), parseFloat(r.lat)] },
-          properties: { color: pinColor(r), _mapId: r._mapId },
-        };
-      });
-
-    try {
-      map.getSource('pdvs').setData({ type: 'FeatureCollection', features });
-    } catch(e) {
-      // Source ainda não existe — tentar novamente
-      setTimeout(_doRender, 200);
-    }
-  };
-
-  // Se o mapa ainda está carregando o style, aguardar
-  if (!map.isStyleLoaded()) {
-    map.once('styledata', _doRender);
-  } else {
-    _doRender();
-  }
-}
-
-// ─── Popup Builder ───────────────────────────────────────────────────────────
-function pct(v) { return v != null ? (parseFloat(v) * 100).toFixed(1) + '%' : '—'; }
-function pctRaw(v) { return v != null ? parseFloat(v).toFixed(1) + '%' : '—'; }
-function buildPopup(row) {
-  // Places Discovery: simplified popup with name, address, type, status
-  if (row.place_id) {
-    return `<div class="popup-inner">
-      <div class="popup-header">
-        <div class="popup-bandeira">${row.nome || row.bandeira || ''}</div>
-        <div class="popup-address">${row.geo_address || ''}</div>
-        ${row.place_types ? `<div style="font-size:11px;color:var(--text-muted);margin-top:6px;">${row.place_types}</div>` : ''}
-        ${row.place_status ? `<div style="font-size:11px;margin-top:3px;color:${row.place_status === 'Aberto' ? 'var(--win)' : 'var(--text-muted)'}">${row.place_status}</div>` : ''}
-      </div>
-    </div>`;
-  }
-
-  // Geocoder / Reverse Geocoder: show name, address, coordinates
-  if (currentMapType === 'geocoder' || currentMapType === 'reverse_geocoder') {
-    // Nome: preferir nome/marca; nunca mostrar endereço como nome
-    var name = row.nome || row.marca || row.nome_fantasia || '';
-    if (!name || name === 'Carregando...' || name === 'Não identificado' || name === 'Desconhecido') {
-      name = row.razao_social || '';
-    }
-    // Se bandeira contém " - " (formato HYPR) ou é igual ao endereço, não usar como nome
-    var bnd = row.bandeira || '';
-    if (bnd && bnd !== 'Carregando...' && bnd !== 'Não identificado' && bnd !== 'Desconhecido'
-        && !bnd.includes(' - ') && bnd !== row.geo_address && bnd !== (row._endereco_livre || '')) {
-      name = name || bnd;
-    }
-    var addr = row.geo_address || '';
-    // Só mostrar CNPJ se é realmente um CNPJ (14 dígitos)
-    var cnpjRaw = (row.cnpj || '').split(' - ')[0].replace(/\D/g, '');
-    var cnpjDisplay = cnpjRaw.length >= 11 ? cnpjRaw : '';
-    // Coordenadas
-    var coords = (row.lat && row.lon) ? parseFloat(row.lat).toFixed(6) + ', ' + parseFloat(row.lon).toFixed(6) : '';
-    return `<div class="popup-inner">
-      <div class="popup-header" style="margin-bottom:0;padding-bottom:0;border-bottom:none;">
-        ${name ? `<div class="popup-bandeira">${name}</div>` : ''}
-        ${addr ? `<div class="popup-address">${addr}</div>` : ''}
-        ${cnpjDisplay ? `<div style="font-size:11px;color:var(--text-muted);font-family:var(--mono);margin-top:6px;">CNPJ ${cnpjDisplay}</div>` : ''}
-        ${coords ? `<div style="font-size:10px;color:var(--text-muted);font-family:var(--mono);margin-top:4px;">${coords}</div>` : ''}
-      </div>
-    </div>`;
-  }
-
-  // Varejo 360: full popup with metrics
-  const diff = parseFloat(row.percentual_diff_media_dimensao || 0);
-  const diffClass = diff > 2 ? 'positive' : diff < -2 ? 'negative' : '';
-  const diffLabel = diff > 0 ? `+${diff.toFixed(1)}%` : `${diff.toFixed(1)}%`;
-
-  const shareReis = parseFloat(row.share_reais_sku_dimensao || 0) * 100;
-  const shareVol = parseFloat(row.share_volume_sku_dimensao || 0) * 100;
-  const shareUn = parseFloat(row.share_unidades_sku_dimensao || 0) * 100;
-
-  const maxShare = Math.max(shareReis, shareVol, shareUn, 1);
-
-  const v360CnpjDisplay = row.cnpj_completo || (row.cnpj || '').split(' - ')[0];
-  const addrDisplay = (row.cnpj || '').split(' - ').slice(1).join(' - ');
-
-  return `<div class="popup-inner">
-    <div class="popup-header">
-      <div class="popup-bandeira">${row.bandeira || 'Bandeira desconhecida'}</div>
-      ${row.razao_social && row.razao_social !== row.bandeira ? `<div class="popup-fantasia">${row.razao_social}</div>` : ''}
-      <div class="popup-address">${row.geo_address || addrDisplay}</div>
-      <div class="popup-cnpj">CNPJ ${v360CnpjDisplay}${row.situacao && row.situacao !== 'ATIVA' ? ` · <span style="color:var(--lose)">${row.situacao}</span>` : ''}${row.atividade ? `<div style="font-size:9px;color:var(--text-muted);margin-top:2px">${row.atividade.slice(0,60)}${row.atividade.length>60?'…':''}</div>` : ''}</div>
-    </div>
-    <div class="popup-metrics">
-      <div class="popup-metric">
-        <div class="popup-metric-val ${diffClass}">${diffLabel}</div>
-        <div class="popup-metric-label">Diff vs. média dimensão</div>
-      </div>
-      <div class="popup-metric">
-        <div class="popup-metric-val">${parseFloat(row.oportunidade_dimensao || 0).toFixed(2)}</div>
-        <div class="popup-metric-label">Score oportunidade</div>
-      </div>
-      <div class="popup-metric">
-        <div class="popup-metric-val">${pctRaw(row.percentual_dimensao)}</div>
-        <div class="popup-metric-label">% dimensão total</div>
-      </div>
-      <div class="popup-metric">
-        <div class="popup-metric-val">${pctRaw(row.percentual_marca_dimensao)}</div>
-        <div class="popup-metric-label">% marca/dimensão</div>
-      </div>
-    </div>
-    <div class="popup-section-title">Share da marca neste PDV</div>
-    <div class="popup-share-bars">
-      <div class="share-bar-row">
-        <span class="share-bar-label">Reais</span>
-        <div class="share-bar-track"><div class="share-bar-fill ${shareReis >= 10 ? 'win' : shareReis < 5 ? 'lose' : ''}" style="width:${Math.min(shareReis / maxShare * 100, 100)}%"></div></div>
-        <span class="share-bar-val">${shareReis.toFixed(1)}%</span>
-      </div>
-      <div class="share-bar-row">
-        <span class="share-bar-label">Volume</span>
-        <div class="share-bar-track"><div class="share-bar-fill" style="width:${Math.min(shareVol / maxShare * 100, 100)}%"></div></div>
-        <span class="share-bar-val">${shareVol.toFixed(1)}%</span>
-      </div>
-      <div class="share-bar-row">
-        <span class="share-bar-label">Unidades</span>
-        <div class="share-bar-track"><div class="share-bar-fill" style="width:${Math.min(shareUn / maxShare * 100, 100)}%"></div></div>
-        <span class="share-bar-val">${shareUn.toFixed(1)}%</span>
-      </div>
-    </div>
-    <div class="popup-tickets">
-      <span class="popup-tickets-label">Tickets na amostra</span>
-      <span class="popup-tickets-val">${parseInt(row.tickets_amostra || 0).toLocaleString('pt-BR')}</span>
-    </div>
-  </div>`;
-}
-
-// ─── CSV Parser ───────────────────────────────────────────────────────────────
-// ─── CSV Parser com detecção automática de formato ───────────────────────────
-// Suporta: HYPR/Kantar · lat/lon · endereços livres · CNPJs puros · separador ; ou ,
-function parseCSV(text) {
-  const lines = text.trim().split('\n');
-
-  // Encontrar linha do header
-  let headerIdx = 0;
-  for (let i = 0; i < Math.min(lines.length, 5); i++) {
-    const clean = lines[i].replace(/^\uFEFF/, '').toLowerCase();
-    if (clean.includes('marca') || clean.includes('lat') || clean.includes('lon') ||
-        clean.includes('cnpj') || clean.includes('enderec') || clean.includes('address') ||
-        clean.includes('nome') || clean.includes('name')) {
-      headerIdx = i; break;
-    }
-  }
-
-  const raw = lines[headerIdx].replace(/^\uFEFF/, '');
-  const sep = (raw.match(/;/g) || []).length > (raw.match(/,/g) || []).length ? ';' : ',';
-  const header = raw.split(sep).map(h => h.trim().replace(/"/g,'').toLowerCase()
-    .normalize('NFD').replace(/[\u0300-\u036f]/g,''));
-
-  function parseLine(line) {
-    const values = []; let cur = '', inQ = false;
-    for (let i = 0; i < line.length; i++) {
-      if (line[i] === '"') { inQ = !inQ; continue; }
-      if (line[i] === sep && !inQ) { values.push(cur.trim()); cur = ''; continue; }
-      cur += line[i];
-    }
-    values.push(cur.trim());
-    const obj = {};
-    header.forEach((h, i) => obj[h] = values[i] || '');
-    return obj;
-  }
-
-  return lines.slice(headerIdx + 1).filter(l => l.trim()).map(parseLine);
-}
-
-// Detectar formato e normalizar para estrutura interna
-function detectAndNormalize(rows) {
-  if (!rows.length) return { rows: [], formato: 'vazio', info: 'Sem dados' };
-  const keys = Object.keys(rows[0]);
-
-  const find = (...terms) => keys.find(k => terms.some(t => k.includes(t)));
-
-  const latKey      = find('lat', 'latitude');
-  const lonKey      = find('lon', 'lng', 'longitude');
-  const cnpjRaizKey = keys.find(k => k === 'cnpj_raiz');          // coluna exata cnpj_raiz
-  const cnpjKey     = !cnpjRaizKey ? find('cnpj') : null;         // só busca 'cnpj' se não tiver raiz
-  const endKey      = find('endereco', 'endereço', 'address', 'logradouro', 'rua');
-  const nomeKey     = find('nome', 'name', 'marca', 'brand', 'loja', 'razao', 'fantasia');
-
-  // Formato 0: Varejo 360 com cnpj_raiz — base de share por PDV (ex: Varejo 360 / Kantar)
-  if (cnpjRaizKey && rows.some(r => (r[cnpjRaizKey] || '').replace(/\D/g,'').length >= 8)) {
-    const marcaKey = keys.find(k => k === 'marca') || nomeKey;
-    const norm = rows.map(r => ({
-      cnpj:       r[cnpjRaizKey],
-      _cnpj_raiz: (r[cnpjRaizKey] || '').replace(/\D/g,'').padStart(8,'0'),
-      marca:      r[marcaKey] || '',
-      bandeira:   'Carregando...',
-      ...r,
-    }));
-    return { rows: norm, formato: 'cnpj_raiz', info: `${norm.length} PDVs por CNPJ Raiz — endereços via Receita Federal` };
-  }
-
-  // Formato 1: lat/lon direto — plota sem geocodificar
-  if (latKey && lonKey && rows.some(r => parseFloat(r[latKey]) && parseFloat(r[lonKey]))) {
-    const norm = rows.map(r => ({
-      cnpj: r[cnpjKey] || '',
-      nome: r[nomeKey] || '',
-      marca: r[nomeKey] || '',
-      bandeira: r[nomeKey] || 'Desconhecido',
-      lat: parseFloat(r[latKey]), lon: parseFloat(r[lonKey]),
-      geo_address: r[endKey] || '',
-      ...r,
-    }));
-    return { rows: norm, formato: 'latlon', info: `${norm.length} pontos com coordenadas — plotando direto` };
-  }
-
-  // Formato 2: HYPR/Kantar — campo cnpj contém endereço embutido ("CNPJ - RUA - CIDADE/UF")
-  if (cnpjKey && rows.some(r => (r[cnpjKey] || '').includes(' - '))) {
-    const marcaKeyH = keys.find(k => k === 'marca') || nomeKey;
-    const normH = rows.map(r => ({ ...r, marca: r[marcaKeyH] || '', bandeira: 'Carregando...' }));
-    return { rows: normH, formato: 'hypr', info: `${normH.length} PDVs no formato HYPR/Kantar` };
-  }
-
-  // Formato 3: Endereço livre — tem coluna de endereço mas não cnpj com " - "
-  if (endKey) {
-    const norm = rows.map(r => ({
-      cnpj: r[cnpjKey] || '',
-      _endereco_livre: [r[endKey], r[find('bairro','neighborhood')||''], r[find('cidade','city','municipio')||''], r[find('uf','estado','state')||''], 'Brasil'].filter(Boolean).join(', '),
-      nome: r[nomeKey] || '',
-      marca: r[nomeKey] || '',
-      bandeira: r[nomeKey] || 'Desconhecido',
-      ...r,
-    }));
-    return { rows: norm, formato: 'endereco', info: `${norm.length} endereços livres detectados` };
-  }
-
-  // Formato 4: CNPJ puro (14 dígitos) — busca endereço na Receita Federal
-  if (cnpjKey && rows.some(r => r[cnpjKey]?.replace(/\D/g,'').length >= 8)) {
-    const norm = rows.map(r => ({
-      cnpj: r[cnpjKey],
-      marca: r[nomeKey] || '',
-      bandeira: r[nomeKey] || r[cnpjKey] || 'Desconhecido',
-      ...r,
-    }));
-    return { rows: norm, formato: 'cnpj_puro', info: `${norm.length} CNPJs — endereços serão buscados na Receita Federal` };
-  }
-
-  // Fallback genérico
-  return { rows, formato: 'hypr', info: `${rows.length} linhas (formato genérico)` };
-}
-
 // ─── Filters ─────────────────────────────────────────────────────────────────
 // ─── Normalização de nomes de bandeira ──────────────────────────────────────
 var _bandeiraGroupMap = {}; // mapa: nome original → nome normalizado
-function normalizeBandeira(nome) {
-  if (!nome) return nome;
-  var n = nome.toUpperCase().trim();
-  // Remover complemento após hífen/travessão: "ATACADAO SOUZA - COMERCIO DE PRODUTOS..."
-  n = n.replace(/\s*[-–—]\s*(COMERCIO|COMÉRCIO|COM\.?|DIST\.?|IND\.?)\s+DE\s+.+$/i, '');
-  // Remover sufixos jurídicos e descritivos (loop até estabilizar)
-  var prev = '';
-  while (prev !== n) {
-    prev = n;
-    n = n.replace(/\s+(LTDA\.?|ME\.?|EPP\.?|EIRELI\.?|SLU\.?|SS\.?|S\.?\s*A\.?|S\/A|CIA\.?)\.?$/i, '');
-    n = n.replace(/\s+(COMERCIAL|DISTRIBUIDORA|SUPERMERCADOS?|HIPERMERCADOS?|ATACADISTA|ATACADO|VAREJO|VAREJISTA|MERCADO|MERCEARIA|EMPORIO|MINIMERCADO)$/i, '');
-    n = n.replace(/\s+(COMERCIO|COMÉRCIO|COM\.?)\s+(DE|E)\s+.+$/i, '');
-    n = n.replace(/\s+(ALIMENTOS|BEBIDAS|PRODUTOS|GENEROS|GÊNEROS|CEREAIS|FRIOS|HORTIFRUTI).*$/i, '');
-    n = n.replace(/\s+(IND\.?\s*(E|&)\s*COM\.?|COM\.?\s*(E|&)\s*IND\.?).*$/i, '');
-  }
-  // Remover pontuação final e normalizar espaços
-  n = n.replace(/[\.\,\-]+$/, '').trim();
-  n = n.replace(/\s+/g, ' ');
-  return n;
-}
-
-function buildBandeiraGroups() {
-  _bandeiraGroupMap = {};
-  var groups = {}; // chave normalizada → { display: nome mais curto, originals: [...] }
-  allData.forEach(function(r) {
-    if (!r.bandeira || r.bandeira === 'Não identificado' || r.bandeira === 'Carregando...') return;
-    var key = normalizeBandeira(r.bandeira);
-    if (!groups[key]) groups[key] = { display: null, originals: new Set(), count: 0 };
-    groups[key].originals.add(r.bandeira);
-    groups[key].count++;
-    // Usar o nome mais curto como display (mais limpo)
-    if (!groups[key].display || r.bandeira.length < groups[key].display.length) {
-      groups[key].display = r.bandeira;
-    }
-  });
-  // Construir mapa reverso: original → display
-  Object.values(groups).forEach(function(g) {
-    g.originals.forEach(function(orig) {
-      _bandeiraGroupMap[orig] = g.display;
-    });
-  });
-  return groups;
-}
 
 // ─── Multi-select component ─────────────────────────────────────────────────
 var _msState = {}; // id → { options: [{value, label, count}], selected: Set }
@@ -1704,21 +1383,6 @@ function resetFilters() {
   renderMarkers();
   updatePanels();
   updateOverlay();
-}
-
-// ─── Stats & Panels ───────────────────────────────────────────────────────────
-function avg(arr, key) {
-  const vals = arr.map(r => parseFloat(r[key] || 0)).filter(v => !isNaN(v));
-  return vals.length ? vals.reduce((a,b) => a+b, 0) / vals.length : 0;
-}
-
-function groupBy(arr, key) {
-  return arr.reduce((acc, r) => {
-    const k = r[key] || 'Outros';
-    if (!acc[k]) acc[k] = [];
-    acc[k].push(r);
-    return acc;
-  }, {});
 }
 
 function updateOverlay() {
@@ -2011,14 +1675,6 @@ function renderWinLoseChart(id, labels, wins, loses) {
   });
 }
 
-// ─── Tab System ──────────────────────────────────────────────────────────────
-function setTab(name) {
-  document.querySelectorAll('.panel-tab').forEach(t => t.classList.remove('active'));
-  document.querySelectorAll('.panel-tab-content').forEach(t => t.classList.remove('active'));
-  document.getElementById('tab-' + name)?.classList.add('active');
-  document.getElementById('tc-' + name)?.classList.add('active');
-}
-
 // ─── Load Data ───────────────────────────────────────────────────────────────
 async function loadData(data) {
   // Remover linha de totais
@@ -2057,98 +1713,6 @@ var SUPABASE_ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS
 // Inicializar imediatamente — supabase.js já carregou (script síncrono no <head>)
 var _supa = null;
 var currentUser = null;
-
-async function initAuth() {
-  if (!_supa && window.supabase) {
-    _supa = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON);
-  }
-  // Check existing session
-  var sessionResult = await _supa.auth.getSession();
-  var session = sessionResult.data ? sessionResult.data.session : null;
-  if (session && session.user) {
-    handleLoggedIn(session.user);
-    return;
-  }
-  // Listen for auth changes (OAuth redirect callback)
-  _supa.auth.onAuthStateChange(function(event, sess) {
-    if (event === 'SIGNED_IN' && sess && sess.user) {
-      handleLoggedIn(sess.user);
-    }
-    if (event === 'SIGNED_OUT') {
-      currentUser = null;
-      document.getElementById('login-screen').style.display = '';
-      document.getElementById('gallery-screen').classList.add('hidden');
-    }
-  });
-  // No session - show login
-  document.getElementById('login-screen').style.display = '';
-}
-
-async function doGoogleLogin() {
-  if (!_supa) return;
-  var btn = document.getElementById('login-google-btn');
-  var errEl = document.getElementById('login-error');
-  errEl.innerHTML = ''; errEl.classList.remove('visible');
-  btn.disabled = true; btn.textContent = 'Conectando...';
-  var result = await _supa.auth.signInWithOAuth({
-    provider: 'google',
-    options: {
-      redirectTo: window.location.origin,
-      queryParams: { hd: 'hypr.mobi' }
-    }
-  });
-  if (result.error) {
-    btn.disabled = false;
-    btn.innerHTML = 'Entrar com Google';
-    errEl.innerHTML = 'Erro: ' + escHtml(result.error.message);
-    errEl.classList.add('visible');
-  }
-}
-
-async function handleLoggedIn(user) {
-  if (!user || !user.email || !user.email.endsWith('@hypr.mobi')) {
-    await _supa.auth.signOut();
-    var errEl = document.getElementById('login-error');
-    if (errEl) {
-      errEl.innerHTML = 'Acesso restrito a <strong>@hypr.mobi</strong>. Você entrou com: ' + escHtml(user ? user.email : 'desconhecido');
-      errEl.classList.add('visible');
-    }
-    document.getElementById('login-screen').style.display = '';
-    return;
-  }
-  currentUser = user;
-  document.getElementById('login-screen').style.display = 'none';
-  var emailEl = document.getElementById('gallery-user-email');
-  var subEl = document.getElementById('gallery-user-sub');
-  if (emailEl) emailEl.textContent = user.email;
-  if (subEl) subEl.textContent = 'Seus mapas geocodificados';
-  // Restore context
-  try {
-    var urlMapId = new URLSearchParams(location.search).get('map');
-    var saved = sessionStorage.getItem('hypr_last_map');
-    var targetId = urlMapId || (saved ? JSON.parse(saved).mapId : null);
-    if (targetId) {
-      if (allData.length > 0) {
-        document.getElementById('gallery-screen').classList.add('hidden');
-        document.getElementById('app').style.display = 'flex';
-        await new Promise(function(r) { setTimeout(r, 50); });
-        if (!map) initMap(); else map.resize();
-        renderMarkers(); populateFilters(); updatePanels(); updateOverlay();
-        return;
-      }
-      _supa.from('saved_maps').select('id,name,map_type').eq('id', targetId).single()
-        .then(function(res) { if (res.data) openSavedMap(res.data.id, res.data.name, res.data.map_type); else showGallery(); })
-        .catch(function() { showGallery(); });
-      return;
-    }
-  } catch(e) {}
-  if (window._pendingGeocodingAfterLogin && rawCSVData.length > 0) {
-    window._pendingGeocodingAfterLogin = false;
-    startGeocoding();
-    return;
-  }
-  showGallery();
-}
 
 function supaLogout() {
   try { sessionStorage.removeItem('hypr_last_map'); } catch(e) {}
@@ -2657,6 +2221,99 @@ document.addEventListener('DOMContentLoaded', () => {
 
   initAuth();
 });
+
+async function initAuth() {
+  if (!_supa && window.supabase) {
+    _supa = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON);
+  }
+  // Check existing session
+  var sessionResult = await _supa.auth.getSession();
+  var session = sessionResult.data ? sessionResult.data.session : null;
+  if (session && session.user) {
+    handleLoggedIn(session.user);
+    return;
+  }
+  // Listen for auth changes (OAuth redirect callback)
+  _supa.auth.onAuthStateChange(function(event, sess) {
+    if (event === 'SIGNED_IN' && sess && sess.user) {
+      handleLoggedIn(sess.user);
+    }
+    if (event === 'SIGNED_OUT') {
+      currentUser = null;
+      document.getElementById('login-screen').style.display = '';
+      document.getElementById('gallery-screen').classList.add('hidden');
+    }
+  });
+  // No session - show login
+  document.getElementById('login-screen').style.display = '';
+}
+
+async function doGoogleLogin() {
+  if (!_supa) return;
+  var btn = document.getElementById('login-google-btn');
+  var errEl = document.getElementById('login-error');
+  errEl.innerHTML = ''; errEl.classList.remove('visible');
+  btn.disabled = true; btn.textContent = 'Conectando...';
+  var result = await _supa.auth.signInWithOAuth({
+    provider: 'google',
+    options: {
+      redirectTo: window.location.origin,
+      queryParams: { hd: 'hypr.mobi' }
+    }
+  });
+  if (result.error) {
+    btn.disabled = false;
+    btn.innerHTML = 'Entrar com Google';
+    errEl.innerHTML = 'Erro: ' + escHtml(result.error.message);
+    errEl.classList.add('visible');
+  }
+}
+
+async function handleLoggedIn(user) {
+  if (!user || !user.email || !user.email.endsWith('@hypr.mobi')) {
+    await _supa.auth.signOut();
+    var errEl = document.getElementById('login-error');
+    if (errEl) {
+      errEl.innerHTML = 'Acesso restrito a <strong>@hypr.mobi</strong>. Você entrou com: ' + escHtml(user ? user.email : 'desconhecido');
+      errEl.classList.add('visible');
+    }
+    document.getElementById('login-screen').style.display = '';
+    return;
+  }
+  currentUser = user;
+  document.getElementById('login-screen').style.display = 'none';
+  var emailEl = document.getElementById('gallery-user-email');
+  var subEl = document.getElementById('gallery-user-sub');
+  if (emailEl) emailEl.textContent = user.email;
+  if (subEl) subEl.textContent = 'Seus mapas geocodificados';
+  // Restore context
+  try {
+    var urlMapId = new URLSearchParams(location.search).get('map');
+    var saved = sessionStorage.getItem('hypr_last_map');
+    var targetId = urlMapId || (saved ? JSON.parse(saved).mapId : null);
+    if (targetId) {
+      if (allData.length > 0) {
+        document.getElementById('gallery-screen').classList.add('hidden');
+        document.getElementById('app').style.display = 'flex';
+        await new Promise(function(r) { setTimeout(r, 50); });
+        if (!map) initMap(); else map.resize();
+        renderMarkers(); populateFilters(); updatePanels(); updateOverlay();
+        return;
+      }
+      _supa.from('saved_maps').select('id,name,map_type').eq('id', targetId).single()
+        .then(function(res) { if (res.data) openSavedMap(res.data.id, res.data.name, res.data.map_type); else showGallery(); })
+        .catch(function() { showGallery(); });
+      return;
+    }
+  } catch(e) {}
+  if (window._pendingGeocodingAfterLogin && rawCSVData.length > 0) {
+    window._pendingGeocodingAfterLogin = false;
+    startGeocoding();
+    return;
+  }
+  showGallery();
+}
+
 var rawCSVData = [];
 var geocodingCancelled = false;
 var geocodingActive = false;
@@ -4160,10 +3817,6 @@ function buildPageNumbers(current, total) {
   if (current < total - 2) pages.push('...');
   pages.push(total);
   return pages;
-}
-
-function escHtml(s) {
-  return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
 function buildMapCard(m) {
