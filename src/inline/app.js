@@ -3657,20 +3657,21 @@ async function openSavedMap(mapId, name, mapType) {
 
 // ─── Modal Salvar ─────────────────────────────────────────────────────────────
 function showSaveMapDialog() {
-  if (!currentUser || allData.length === 0) {
-    console.warn('Cannot save: currentUser=', currentUser, 'allData.length=', allData.length);
-    return;
-  }
-  // Pré-preencher com o nome digitado no step 2
-  document.getElementById('save-name').value = window._pendingMapName || '';
-  document.getElementById('save-desc').value = window._pendingMapDesc || '';
-  document.getElementById('save-status').textContent = '';
-  document.getElementById('save-btn').disabled = false;
-  // Se já tem nome (Places Discovery always has one), salvar automaticamente
+  if (!currentUser || allData.length === 0) return;
+  // Se já tem nome (step 2 ou Places Discovery), salvar automaticamente sem modal
   if (window._pendingMapName) {
+    document.getElementById('save-name').value = window._pendingMapName;
+    document.getElementById('save-desc').value = window._pendingMapDesc || '';
     autoSaveAndNotify();
     return;
   }
+  // Se o mapa já foi salvo (auto-save), não mostrar modal
+  if (window._currentOpenMapId) return;
+  // Mostrar modal para o usuário dar nome
+  document.getElementById('save-name').value = '';
+  document.getElementById('save-desc').value = '';
+  document.getElementById('save-status').textContent = '';
+  document.getElementById('save-btn').disabled = false;
   document.getElementById('save-modal').classList.add('active');
 }
 
