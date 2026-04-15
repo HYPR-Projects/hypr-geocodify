@@ -1104,180 +1104,277 @@ function updatePanels() {
 }
 
 // ─── Overview Tab ────────────────────────────────────────────────────────────
+function _median(arr) {
+  if (!arr.length) return 0;
+  var s = arr.slice().sort(function(a,b) { return a - b; });
+  var mid = Math.floor(s.length / 2);
+  return s.length % 2 ? s[mid] : (s[mid - 1] + s[mid]) / 2;
+}
+
 function updateOverview() {
-  const shareAvg = avg(filteredData, 'share_reais_sku_dimensao') * 100;
-  const diffAvg = avg(filteredData, 'percentual_diff_media_dimensao');
+  var shares = filteredData.map(function(r) { return parseFloat(r.share_reais_sku_dimensao || 0) * 100; });
+  var sharesNonZero = shares.filter(function(v) { return v > 0.01; });
+  var shareAvg = shares.length ? shares.reduce(function(a,b) { return a+b; }, 0) / shares.length : 0;
+  var shareMedian = _median(shares);
+  var shareAvgNZ = sharesNonZero.length ? sharesNonZero.reduce(function(a,b) { return a+b; }, 0) / sharesNonZero.length : 0;
+
+  var diffAvg = avg(filteredData, 'percentual_diff_media_dimensao');
+
   document.getElementById('ov-share-val').textContent = shareAvg.toFixed(1);
-  const deltaEl = document.getElementById('ov-share-delta');
+  var deltaEl = document.getElementById('ov-share-delta');
   deltaEl.textContent = (diffAvg > 0 ? '+' : '') + diffAvg.toFixed(1) + '% vs. média';
   deltaEl.className = 'share-delta ' + (diffAvg >= 0 ? 'pos' : 'neg');
 
+  // Métricas complementares
+  var detailEl = document.getElementById('ov-share-detail');
+  if (detailEl) {
+    var zeroCount = shares.length - sharesNonZero.length;
+    var parts = [];
+    parts.push('Mediana: ' + shareMedian.toFixed(1) + '%');
+    if (sharesNonZero.length < shares.length) {
+      parts.push('Excl. zeros: ' + shareAvgNZ.toFixed(1) + '%');
+      parts.push(zeroCount.toLocaleString('pt-BR') + ' PDVs sem presença');
+    }
+    detailEl.textContent = parts.join(' · ');
+  }
+
   // Chart: shares (reais, volume, unidades)
-  const shareR = avg(filteredData, 'share_reais_sku_dimensao') * 100;
-  const shareV = avg(filteredData, 'share_volume_sku_dimensao') * 100;
-  const shareU = avg(filteredData, 'share_unidades_sku_dimensao') * 100;
+  var shareR = shareAvg;
+  var shareV = avg(filteredData, 'share_volume_sku_dimensao') * 100;
+  var shareU = avg(filteredData, 'share_unidades_sku_dimensao') * 100;
   renderBarChart('chart-shares',
     ['Reais', 'Volume', 'Unidades'],
     [shareR, shareV, shareU],
     [_cssVar('--accent'), _cssVar('--accent-light'), _cssVar('--blue-light')]
   );
 
-  // Chart: PDVs por bandeira
-  const grp = groupBy(filteredData, 'bandeira');
-  const bandSort = Object.entries(grp).sort((a,b) => b[1].length - a[1].length).slice(0, 8);
-  renderHorizBarChart('chart-bandeiras', bandSort.map(e => e[0]), bandSort.map(e => e[1].length));
+  // Chart: PDVs por bandeira (top 8 por count)
+  var grp = groupBy(filteredData, 'bandeira');
+  var bandSort = Object.entries(grp).sort(function(a,b) { return b[1].length - a[1].length; }).slice(0, 8);
+  renderHorizBarChart('chart-bandeiras', bandSort.map(function(e) { return e[0]; }), bandSort.map(function(e) { return e[1].length; }));
 
   // Chart: distribuição de share
-  const bins = [0,2,5,10,15,20,30,50,100];
-  const labels = bins.slice(0,-1).map((v,i) => `${v}–${bins[i+1]}%`);
-  const counts = bins.slice(0,-1).map((v,i) => filteredData.filter(r => {
-    const s = parseFloat(r.share_reais_sku_dimensao||0)*100;
+  var bins = [0,2,5,10,15,20,30,50,100];
+  var labels = bins.slice(0,-1).map(function(v,i) { return v + '–' + bins[i+1] + '%'; });
+  var counts = bins.slice(0,-1).map(function(v,i) { return filteredData.filter(function(r) {
+    var s = parseFloat(r.share_reais_sku_dimensao||0)*100;
     return s >= v && s < bins[i+1];
-  }).length);
+  }).length; });
   renderHistChart('chart-dist', labels, counts);
 }
 
 // ─── Ranking Tab ─────────────────────────────────────────────────────────────
 function updateRanking() {
-  const grp = groupBy(filteredData, 'bandeira');
-  const ranked = Object.entries(grp).map(([b, rows]) => ({
-    name: b,
-    count: rows.length,
-    shareAvg: avg(rows, 'share_reais_sku_dimensao') * 100,
-    diffAvg: avg(rows, 'percentual_diff_media_dimensao'),
-    oportAvg: avg(rows, 'oportunidade_dimensao'),
-  })).sort((a,b) => b.shareAvg - a.shareAvg);
+  var grp = groupBy(filteredData, 'bandeira');
+  var ranked = Object.entries(grp).map(function(entry) {
+    var b = entry[0], rows = entry[1];
+    var shareAvgVal = avg(rows, 'share_reais_sku_dimensao') * 100;
+    var diffAvgVal = avg(rows, 'percentual_diff_media_dimensao');
+    var oportRaw = rows.map(function(r) { return parseFloat(r.oportunidade_dimensao || 0); });
+    var oportAvgVal = oportRaw.reduce(function(a,b) { return a+b; }, 0) / (oportRaw.length || 1);
+    var hasOportData = oportRaw.some(function(v) { return v !== 0; });
+    // Proxy de oportunidade: PDVs abaixo da média × magnitude da perda
+    var losePDVs = rows.filter(function(r) { return parseFloat(r.percentual_diff_media_dimensao || 0) < -2; });
+    var oportProxy = losePDVs.length * Math.abs(diffAvgVal < 0 ? diffAvgVal : 0);
+    return {
+      name: b, count: rows.length, shareAvg: shareAvgVal, diffAvg: diffAvgVal,
+      oportAvg: oportAvgVal, hasOportData: hasOportData, oportProxy: oportProxy,
+      losePDVs: losePDVs.length,
+    };
+  }).sort(function(a,b) { return b.shareAvg - a.shareAvg; });
 
-  const maxShare = Math.max(...ranked.map(r => r.shareAvg), 1);
+  var maxShare = Math.max.apply(null, ranked.map(function(r) { return r.shareAvg; }).concat([1]));
 
-  const top = ranked.slice(0, 7);
-  const bottom = [...ranked].sort((a,b) => a.shareAvg - b.shareAvg).slice(0, 7);
-  const topOport = [...ranked].sort((a,b) => b.oportAvg - a.oportAvg).slice(0, 7);
+  // Decidir modo: se poucas bandeiras, ranking único. Se muitas, top/bottom split.
+  var isFewBandeiras = ranked.length <= 15;
+  var topSection = document.getElementById('rank-top-section');
+  var bottomSection = document.getElementById('rank-bottom-section');
 
-  function renderRankList(id, items, valueKey, label, badgeFn) {
-    const el = document.getElementById(id);
-    el.innerHTML = items.map((item, i) => {
-      const val = item[valueKey];
-      const badge = badgeFn ? badgeFn(item) : '';
-      const barColor = item.diffAvg > 2 ? _cssVar('--win') : item.diffAvg < -2 ? _cssVar('--lose') : _cssVar('--neutral');
-      return `<div class="rank-item">
-        <span class="rank-num">${i+1}</span>
-        <span class="rank-name" title="${_escForHtml(item.name)}">${_escForHtml(item.name)}</span>
-        <div class="rank-bar-wrap"><div class="rank-bar" style="width:${Math.min(val/maxShare*100,100)}%;background:${barColor}"></div></div>
-        <span class="rank-val" style="color:${barColor}">${val.toFixed(1)}%</span>
-        ${badge}
-      </div>`;
+  function renderRankList(id, items, valueKey, maxVal, badgeFn) {
+    var el = document.getElementById(id);
+    if (!el) return;
+    if (!items.length) { el.innerHTML = '<div style="font-size:12px;color:var(--text-muted);padding:8px 0;">Sem dados para exibir</div>'; return; }
+    el.innerHTML = items.map(function(item, i) {
+      var val = item[valueKey];
+      var badge = badgeFn ? badgeFn(item) : '';
+      var barColor = item.diffAvg > 2 ? _cssVar('--win') : item.diffAvg < -2 ? _cssVar('--lose') : _cssVar('--neutral');
+      return '<div class="rank-item">' +
+        '<span class="rank-num">' + (i+1) + '</span>' +
+        '<span class="rank-name" title="' + _escForHtml(item.name) + '">' + _escForHtml(item.name) + '</span>' +
+        '<div class="rank-bar-wrap"><div class="rank-bar" style="width:' + Math.min(val/maxVal*100,100) + '%;background:' + barColor + '"></div></div>' +
+        '<span class="rank-val" style="color:' + barColor + '">' + val.toFixed(1) + '%</span>' +
+        badge +
+      '</div>';
     }).join('');
   }
 
-  renderRankList('rank-top', top, 'shareAvg', '%', item => {
-    const cls = item.diffAvg > 2 ? 'win' : item.diffAvg < -2 ? 'lose' : 'neutral';
-    const label = item.diffAvg > 2 ? '▲ ganha' : item.diffAvg < -2 ? '▼ perde' : '→ neutro';
-    return `<span class="rank-badge ${cls}">${label}</span>`;
-  });
-  renderRankList('rank-bottom', bottom, 'shareAvg', '%', item => {
-    const cls = item.diffAvg > 2 ? 'win' : item.diffAvg < -2 ? 'lose' : 'neutral';
-    const label = item.diffAvg > 2 ? '▲ ganha' : item.diffAvg < -2 ? '▼ perde' : '→ neutro';
-    return `<span class="rank-badge ${cls}">${label}</span>`;
-  });
+  var diffBadge = function(item) {
+    var cls = item.diffAvg > 2 ? 'win' : item.diffAvg < -2 ? 'lose' : 'neutral';
+    var label = item.diffAvg > 2 ? '▲ ganha' : item.diffAvg < -2 ? '▼ perde' : '→ neutro';
+    return '<span class="rank-badge ' + cls + '">' + label + '</span>';
+  };
 
-  // Oportunidade
-  const maxOport = Math.max(...topOport.map(r => r.oportAvg), 1);
-  const el = document.getElementById('rank-oport');
-  el.innerHTML = topOport.map((item, i) => `
-    <div class="rank-item">
-      <span class="rank-num">${i+1}</span>
-      <span class="rank-name" title="${_escForHtml(item.name)}">${_escForHtml(item.name)}</span>
-      <div class="rank-bar-wrap"><div class="rank-bar" style="width:${Math.min(item.oportAvg/maxOport*100,100)}%;background:var(--accent)"></div></div>
-      <span class="rank-val" style="color:var(--accent-light)">${item.oportAvg.toFixed(2)}</span>
-      <span class="rank-badge neutral">${item.count} PDVs</span>
-    </div>
-  `).join('');
+  if (isFewBandeiras) {
+    // Ranking único
+    if (topSection) topSection.querySelector('.panel-section-title').textContent = 'Ranking por share';
+    if (bottomSection) bottomSection.style.display = 'none';
+    renderRankList('rank-top', ranked, 'shareAvg', maxShare, function(item) {
+      return diffBadge(item) + '<span class="rank-badge neutral">' + item.count + ' PDVs</span>';
+    });
+  } else {
+    // Top + Bottom split
+    if (topSection) topSection.querySelector('.panel-section-title').textContent = 'Top bandeiras por share';
+    if (bottomSection) bottomSection.style.display = '';
+    var top = ranked.slice(0, 7);
+    // Bottom: só bandeiras com share > 0 (excluir onde a marca não vende)
+    var withPresence = ranked.filter(function(r) { return r.shareAvg > 0.1; });
+    var bottom = withPresence.slice().sort(function(a,b) { return a.shareAvg - b.shareAvg; }).slice(0, 7);
+    renderRankList('rank-top', top, 'shareAvg', maxShare, diffBadge);
+    renderRankList('rank-bottom', bottom, 'shareAvg', maxShare, diffBadge);
+  }
+
+  // Oportunidade: usar campo real se disponível, senão proxy (losePDVs × magnitude)
+  var hasRealOport = ranked.some(function(r) { return r.hasOportData; });
+  var oportList;
+  if (hasRealOport) {
+    oportList = ranked.slice().sort(function(a,b) { return b.oportAvg - a.oportAvg; }).slice(0, 7);
+  } else {
+    // Proxy: bandeiras com mais PDVs abaixo da média = maior oportunidade de crescimento
+    oportList = ranked.filter(function(r) { return r.losePDVs > 0; })
+      .sort(function(a,b) { return b.oportProxy - a.oportProxy; }).slice(0, 7);
+  }
+
+  var oportTitle = document.querySelector('#rank-oport-section .panel-section-title');
+  if (oportTitle) oportTitle.textContent = hasRealOport ? 'Maior oportunidade' : 'Maior potencial de crescimento';
+
+  var maxOportVal = Math.max.apply(null, oportList.map(function(r) { return hasRealOport ? r.oportAvg : r.oportProxy; }).concat([1]));
+  var oportEl = document.getElementById('rank-oport');
+  if (oportEl) {
+    if (!oportList.length) {
+      oportEl.innerHTML = '<div style="font-size:12px;color:var(--text-muted);padding:8px 0;">Nenhuma bandeira com oportunidade identificada</div>';
+    } else {
+      oportEl.innerHTML = oportList.map(function(item, i) {
+        var val = hasRealOport ? item.oportAvg : item.oportProxy;
+        var displayVal = hasRealOport ? item.oportAvg.toFixed(2) : item.losePDVs + ' PDVs';
+        return '<div class="rank-item">' +
+          '<span class="rank-num">' + (i+1) + '</span>' +
+          '<span class="rank-name" title="' + _escForHtml(item.name) + '">' + _escForHtml(item.name) + '</span>' +
+          '<div class="rank-bar-wrap"><div class="rank-bar" style="width:' + Math.min(val/maxOportVal*100,100) + '%;background:var(--accent)"></div></div>' +
+          '<span class="rank-val" style="color:var(--accent-light)">' + displayVal + '</span>' +
+          '<span class="rank-badge neutral">' + item.count + ' PDVs</span>' +
+        '</div>';
+      }).join('');
+    }
+  }
 }
 
 // ─── Analysis Tab ────────────────────────────────────────────────────────────
 function updateAnalysis() {
-  const grp = groupBy(filteredData, 'bandeira');
-  const ranked = Object.entries(grp).map(([b, rows]) => ({
-    name: b,
-    count: rows.length,
-    shareAvg: avg(rows, 'share_reais_sku_dimensao') * 100,
-    diffAvg: avg(rows, 'percentual_diff_media_dimensao'),
-    oportTotal: rows.reduce((s,r) => s + parseFloat(r.oportunidade_dimensao||0), 0),
-  }));
+  var grp = groupBy(filteredData, 'bandeira');
+  var ranked = Object.entries(grp).map(function(entry) {
+    var b = entry[0], rows = entry[1];
+    return {
+      name: b, count: rows.length,
+      shareAvg: avg(rows, 'share_reais_sku_dimensao') * 100,
+      diffAvg: avg(rows, 'percentual_diff_media_dimensao'),
+    };
+  });
 
-  const winBandeiras = ranked.filter(r => r.diffAvg > 3).sort((a,b) => b.diffAvg - a.diffAvg).slice(0,3);
-  const loseBandeiras = ranked.filter(r => r.diffAvg < -3).sort((a,b) => a.diffAvg - b.diffAvg).slice(0,3);
-  const bestOport = ranked.sort((a,b) => b.oportTotal - a.oportTotal).slice(0,3);
+  var totalPDVs = filteredData.length;
+  var winCount = filteredData.filter(function(r) { return parseFloat(r.percentual_diff_media_dimensao||0) > 2; }).length;
+  var loseCount = filteredData.filter(function(r) { return parseFloat(r.percentual_diff_media_dimensao||0) < -2; }).length;
+  var neutralCount = totalPDVs - winCount - loseCount;
+  var winPct = totalPDVs ? (winCount / totalPDVs * 100).toFixed(0) : 0;
+  var losePct = totalPDVs ? (loseCount / totalPDVs * 100).toFixed(0) : 0;
 
-  const totalPDVs = filteredData.length;
-  const winCount = filteredData.filter(r => parseFloat(r.percentual_diff_media_dimensao||0) > 2).length;
-  const loseCount = filteredData.filter(r => parseFloat(r.percentual_diff_media_dimensao||0) < -2).length;
-  const winPct = totalPDVs ? (winCount / totalPDVs * 100).toFixed(0) : 0;
-  const losePct = totalPDVs ? (loseCount / totalPDVs * 100).toFixed(0) : 0;
+  // Concentração geográfica
+  var ufGrp = groupBy(filteredData, 'uf');
+  var ufSorted = Object.entries(ufGrp).sort(function(a,b) { return b[1].length - a[1].length; });
+  var topUF = ufSorted[0] ? ufSorted[0][0] : '';
+  var topUFPct = ufSorted[0] && totalPDVs ? (ufSorted[0][1].length / totalPDVs * 100).toFixed(0) : 0;
 
-  const cards = [
+  // Bandeiras com melhor e pior performance (excluir 0%)
+  var withPresence = ranked.filter(function(r) { return r.shareAvg > 0.1; });
+  var bestPerf = withPresence.filter(function(r) { return r.diffAvg > 2; }).sort(function(a,b) { return b.diffAvg - a.diffAvg; }).slice(0,3);
+  var worstPerf = withPresence.filter(function(r) { return r.diffAvg < -2; }).sort(function(a,b) { return a.diffAvg - b.diffAvg; }).slice(0,3);
+
+  // Share da top bandeira vs média geral
+  var shareGeral = avg(filteredData, 'share_reais_sku_dimensao') * 100;
+  var topBandeira = ranked.sort(function(a,b) { return b.count - a.count; })[0];
+  var topBandShare = topBandeira ? topBandeira.shareAvg : 0;
+
+  var cards = [
     {
-      icon: '📈',
-      title: 'Onde a marca ganha share',
-      body: winBandeiras.length
-        ? `A marca está <span class="analysis-highlight win">acima da média</span> em ${winCount} PDVs (${winPct}% do total). ${winBandeiras.length ? `Melhor performance em: <span class="analysis-highlight">${winBandeiras.map(b => _escForHtml(b.name)).join(', ')}</span>.` : ''}`
-        : `Nenhuma bandeira com performance significativamente acima da média nos filtros selecionados.`
+      title: 'Performance geral',
+      body: totalPDVs === 0 ? 'Nenhum PDV visível com os filtros atuais.' :
+        '<span class="analysis-highlight win">' + winCount.toLocaleString('pt-BR') + ' PDVs ganham</span> share (' + winPct + '%), ' +
+        '<span class="analysis-highlight lose">' + loseCount.toLocaleString('pt-BR') + ' perdem</span> (' + losePct + '%) e ' +
+        neutralCount.toLocaleString('pt-BR') + ' estão na média.' +
+        (parseFloat(winPct) > parseFloat(losePct) ? ' Cenário <span class="analysis-highlight win">favorável</span>.' : ' Há espaço para <span class="analysis-highlight">recuperação</span>.')
     },
     {
-      icon: '📉',
-      title: 'Onde a marca perde share',
-      body: loseBandeiras.length
-        ? `A marca está <span class="analysis-highlight lose">abaixo da média</span> em ${loseCount} PDVs (${losePct}% do total). Risco concentrado em: <span class="analysis-highlight">${loseBandeiras.map(b => _escForHtml(b.name)).join(', ')}</span>.`
-        : `Nenhuma bandeira com performance significativamente abaixo da média.`
+      title: 'Concentração geográfica',
+      body: topUF ?
+        topUFPct + '% dos PDVs estão em <span class="analysis-highlight">' + topUF + '</span>.' +
+        (ufSorted.length > 1 ? ' Seguido por ' + ufSorted.slice(1,3).map(function(u) { return u[0] + ' (' + u[1].length + ')'; }).join(', ') + '.' : '') +
+        (parseInt(topUFPct) > 60 ? ' <span class="analysis-highlight lose">Alta concentração</span> — risco de dependência regional.' : '')
+        : 'Sem dados de UF disponíveis.'
     },
     {
-      icon: '🎯',
-      title: 'Maior oportunidade de investimento',
-      body: bestOport.length
-        ? `Priorizando bandeiras com maior score de oportunidade: <span class="analysis-highlight">${bestOport.map(b => `${_escForHtml(b.name)} (${b.count} PDVs)`).join(', ')}</span>. Esses PDVs têm maior potencial de crescimento de share.`
-        : `Sem dados de oportunidade disponíveis.`
+      title: 'Onde a marca vai bem',
+      body: bestPerf.length ?
+        'Melhor performance em: ' + bestPerf.map(function(b) {
+          return '<span class="analysis-highlight">' + _escForHtml(b.name) + '</span> (+' + b.diffAvg.toFixed(1) + '%, ' + b.count + ' PDVs)';
+        }).join(', ') + '.'
+        : 'Nenhuma bandeira com performance significativamente acima da média.'
     },
     {
-      icon: '⚖️',
-      title: 'Balanço geral',
-      body: `De ${totalPDVs.toLocaleString('pt-BR')} PDVs visíveis, <span class="analysis-highlight win">${winPct}% ganham</span> e <span class="analysis-highlight lose">${losePct}% perdem</span> share vs. a média da dimensão. ${parseFloat(winPct) > parseFloat(losePct) ? 'Cenário <span class="analysis-highlight win">favorável</span> para a marca.' : 'Há espaço relevante para <span class="analysis-highlight">recuperação de share</span>.'}`
+      title: 'Onde precisa melhorar',
+      body: worstPerf.length ?
+        'Maior risco em: ' + worstPerf.map(function(b) {
+          return '<span class="analysis-highlight lose">' + _escForHtml(b.name) + '</span> (' + b.diffAvg.toFixed(1) + '%, ' + b.count + ' PDVs)';
+        }).join(', ') + '.'
+        : 'Nenhuma bandeira com performance significativamente abaixo da média.'
+    },
+    {
+      title: 'Rede principal',
+      body: topBandeira ?
+        '<span class="analysis-highlight">' + _escForHtml(topBandeira.name) + '</span> concentra ' + topBandeira.count.toLocaleString('pt-BR') + ' PDVs com share médio de ' + topBandShare.toFixed(1) + '%.' +
+        (topBandShare > shareGeral * 1.5 ? ' Share nessa rede é <span class="analysis-highlight win">' + (topBandShare / shareGeral).toFixed(1) + 'x maior</span> que a média geral.' : '') +
+        (topBandShare < shareGeral * 0.7 ? ' Share nessa rede está <span class="analysis-highlight lose">abaixo da média</span> geral — oportunidade de investimento.' : '')
+        : ''
     }
   ];
 
-  document.getElementById('analysis-cards').innerHTML = cards.map(c => `
-    <div class="analysis-card">
-      <div class="analysis-card-header">
-        <span class="analysis-card-icon">${c.icon}</span>
-        <span class="analysis-card-title">${c.title}</span>
-      </div>
-      <div class="analysis-card-body">${c.body}</div>
-    </div>
-  `).join('');
+  document.getElementById('analysis-cards').innerHTML = cards.map(function(c) {
+    return '<div class="analysis-card">' +
+      '<div class="analysis-card-header"><span class="analysis-card-title">' + c.title + '</span></div>' +
+      '<div class="analysis-card-body">' + c.body + '</div>' +
+    '</div>';
+  }).join('');
 
-  // Win/Lose chart
-  const wlData = ranked.slice(0, 10);
+  // Win/Lose chart — usar bandeiras com presença, ordenadas por diff
+  var wlData = withPresence.sort(function(a,b) { return b.diffAvg - a.diffAvg; }).slice(0, 10);
   renderWinLoseChart('chart-winlose',
-    wlData.map(r => r.name),
-    wlData.map(r => Math.max(r.diffAvg, 0)),
-    wlData.map(r => Math.min(r.diffAvg, 0))
+    wlData.map(function(r) { return r.name; }),
+    wlData.map(function(r) { return Math.max(r.diffAvg, 0); }),
+    wlData.map(function(r) { return Math.min(r.diffAvg, 0); })
   );
 
   // UF ranking
-  const ufGrp = groupBy(filteredData, 'uf');
-  const ufRanked = Object.entries(ufGrp)
-    .map(([uf, rows]) => ({ name: uf, count: rows.length, shareAvg: avg(rows, 'share_reais_sku_dimensao') * 100 }))
-    .sort((a,b) => b.count - a.count).slice(0, 10);
-  const maxUf = Math.max(...ufRanked.map(r => r.count), 1);
-  document.getElementById('rank-uf').innerHTML = ufRanked.map((item, i) => `
-    <div class="rank-item">
-      <span class="rank-num">${i+1}</span>
-      <span class="rank-name">${_escForHtml(item.name)}</span>
-      <div class="rank-bar-wrap"><div class="rank-bar" style="width:${item.count/maxUf*100}%;background:var(--accent)"></div></div>
-      <span class="rank-val" style="color:var(--text-dim)">${item.count}</span>
-      <span class="rank-badge neutral">${item.shareAvg.toFixed(1)}%</span>
-    </div>
-  `).join('');
+  var ufRanked = ufSorted
+    .map(function(entry) { return { name: entry[0], count: entry[1].length, shareAvg: avg(entry[1], 'share_reais_sku_dimensao') * 100 }; })
+    .slice(0, 10);
+  var maxUf = Math.max.apply(null, ufRanked.map(function(r) { return r.count; }).concat([1]));
+  document.getElementById('rank-uf').innerHTML = ufRanked.map(function(item, i) {
+    return '<div class="rank-item">' +
+      '<span class="rank-num">' + (i+1) + '</span>' +
+      '<span class="rank-name">' + _escForHtml(item.name) + '</span>' +
+      '<div class="rank-bar-wrap"><div class="rank-bar" style="width:' + (item.count/maxUf*100) + '%;background:var(--accent)"></div></div>' +
+      '<span class="rank-val" style="color:var(--text-dim)">' + item.count + '</span>' +
+      '<span class="rank-badge neutral">' + item.shareAvg.toFixed(1) + '%</span>' +
+    '</div>';
+  }).join('');
 }
 
 // ─── Charts ──────────────────────────────────────────────────────────────────
@@ -1317,7 +1414,7 @@ async function renderHorizBarChart(id, labels, data) {
     options: { ...chartDefaults, indexAxis: 'y', responsive: true, maintainAspectRatio: false,
       scales: {
         x: { grid: { color: _cssVar('--surface-subtle') }, ticks: { color: _cssVar('--text-muted'), font: { size: 10 } } },
-        y: { grid: { display: false }, ticks: { color: _cssVar('--text-dim'), font: { size: 10 }, callback: v => v.length > 14 ? v.slice(0,14)+'…' : v } }
+        y: { grid: { display: false }, ticks: { color: _cssVar('--text-dim'), font: { size: 10 }, callback: function(value) { var l = this.getLabelForValue(value); return l && l.length > 16 ? l.slice(0,16) + '…' : l; } } }
       }
     }
   });
@@ -5274,6 +5371,7 @@ function resetPlacesForNewSearch() {
   try { window.autoSaveAndNotify = autoSaveAndNotify; } catch(e) {}
   try { window.autoSaveExpandedPlaces = autoSaveExpandedPlaces; } catch(e) {}
   try { window.avg = avg; } catch(e) {}
+  try { window._median = _median; } catch(e) {}
   try { window.buildBandeiraGroups = buildBandeiraGroups; } catch(e) {}
   try { window.buildMapCard = buildMapCard; } catch(e) {}
   try { window.buildPageNumbers = buildPageNumbers; } catch(e) {}
