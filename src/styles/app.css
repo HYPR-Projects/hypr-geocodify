@@ -1268,3 +1268,22 @@ input[type="range"]::-webkit-slider-thumb {
   --login-bg: #000;
 }
 #login-screen .login-logo { color: #fff; }
+
+/* Share button in gallery card */
+.map-card-share {
+  background: none; border: none; cursor: pointer; font-size: 14px;
+  padding: 4px 6px; border-radius: 6px; opacity: 0.5; transition: opacity 0.15s;
+}
+.map-card-share:hover { opacity: 1; background: var(--surface2); }
+
+/* Shared mode — hide all edit/auth controls */
+.shared-mode #btn-back-gallery,
+.shared-mode #btn-share-map,
+.shared-mode #gallery-screen,
+.shared-mode #login-screen,
+.shared-mode #upload-zone,
+.shared-mode #geo-toast,
+.shared-mode #save-modal,
+.shared-mode .map-card-del,
+.shared-mode .map-card-share,
+.shared-mode .gallery-btn-new { display: none !important; }

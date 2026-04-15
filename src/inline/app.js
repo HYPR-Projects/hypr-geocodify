@@ -1882,7 +1882,14 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
 
-  initAuth();
+  // Check for shared mode (public link) before normal auth
+  if (typeof initSharedMode === 'function') {
+    initSharedMode().then(function(handled) {
+      if (!handled) initAuth();
+    });
+  } else {
+    initAuth();
+  }
 });
 var rawCSVData = [];
 var geocodingCancelled = false;
@@ -3475,6 +3482,7 @@ function buildMapCard(m) {
           <div class="map-card-date">${date}${periodoStr}</div>
           <div class="map-card-user">${escHtml(m.created_by)}</div>
         </div>
+        <button class="map-card-share" title="Compartilhar" onclick="event.stopPropagation();openShareModalFromCard('${m.id}')">🔗</button>
         <button class="map-card-del" title="Excluir" onclick="event.stopPropagation();deleteMap('${m.id}',this)">🗑</button>
       </div>
     </div>`;
@@ -3511,6 +3519,10 @@ async function openSavedMap(mapId, name, mapType) {
   window._pendingMapType = null;
   window._pendingPeriodo = null;
   rawCSVData = [];
+  // Track open map for share feature
+  window._currentOpenMapId = mapId;
+  var shareBtn = document.getElementById('btn-share-map');
+  if (shareBtn && !_isSharedMode) shareBtn.style.display = '';
   // Aplicar modo visual correto ANTES de mostrar o mapa
   applyMapMode(mapType || 'varejo360');
   // Salvar estado para restaurar ao trocar de aba
@@ -3723,6 +3735,172 @@ async function saveMapToSupabase() {
     throw e; // Re-throw so autoSaveAndNotify can catch it
   }
 }
+
+// ─── Compartilhamento de mapas ─────────────────────────────────────────────
+var _currentShareMapId = null;
+
+function openShareModal() {
+  var mapId = window._currentOpenMapId;
+  if (!mapId) return;
+  _currentShareMapId = mapId;
+  document.getElementById('share-modal').classList.add('active');
+  document.getElementById('share-modal-content').innerHTML = '<div style="text-align:center;padding:20px 0;color:var(--text-muted);font-size:13px;">Gerando link...</div>';
+  generateShareLink(mapId);
+}
+
+function openShareModalFromCard(mapId) {
+  _currentShareMapId = mapId;
+  window._currentOpenMapId = mapId;
+  document.getElementById('share-modal').classList.add('active');
+  document.getElementById('share-modal-content').innerHTML = '<div style="text-align:center;padding:20px 0;color:var(--text-muted);font-size:13px;">Gerando link...</div>';
+  generateShareLink(mapId);
+}
+
+function closeShareModal() {
+  document.getElementById('share-modal').classList.remove('active');
+  _currentShareMapId = null;
+}
+
+async function generateShareLink(mapId) {
+  var content = document.getElementById('share-modal-content');
+  try {
+    var maps = await sbFetch('saved_maps?id=eq.' + mapId + '&select=share_token,share_expires_at');
+    var existing = maps && maps[0] ? maps[0].share_token : null;
+    if (existing) {
+      renderShareLink(existing);
+      return;
+    }
+    var token = crypto.randomUUID();
+    await sbFetch('saved_maps?id=eq.' + mapId, {
+      method: 'PATCH',
+      body: JSON.stringify({ share_token: token, share_expires_at: null }),
+    });
+    renderShareLink(token);
+  } catch(e) {
+    content.innerHTML = '<div style="color:var(--lose);font-size:13px;">Erro ao gerar link: ' + escHtml(e.message) + '</div>';
+  }
+}
+
+function renderShareLink(token) {
+  var link = window.location.origin + '/?share=' + token;
+  var content = document.getElementById('share-modal-content');
+  content.innerHTML =
+    '<div style="display:flex;gap:8px;align-items:center;">' +
+      '<input class="modal-input" id="share-link-input" value="' + link + '" readonly style="flex:1;font-size:12px;font-family:var(--mono,monospace);cursor:text;">' +
+      '<button class="modal-btn-save" id="share-copy-btn" onclick="copyShareLink()" style="white-space:nowrap;padding:10px 16px;font-size:13px;">Copiar link</button>' +
+    '</div>' +
+    '<div style="font-size:12px;color:var(--text-muted);margin-top:12px;line-height:1.6;">' +
+      'Qualquer pessoa com este link pode <strong>visualizar</strong> o mapa sem login. ' +
+      'Não é possível editar, excluir ou acessar outros mapas.' +
+    '</div>' +
+    '<div style="margin-top:12px;">' +
+      '<button onclick="revokeShareLink()" style="background:none;border:none;color:var(--lose);font-size:12px;cursor:pointer;padding:0;text-decoration:underline;">Revogar acesso</button>' +
+    '</div>';
+}
+
+function copyShareLink() {
+  var input = document.getElementById('share-link-input');
+  if (!input) return;
+  navigator.clipboard.writeText(input.value).then(function() {
+    var btn = document.getElementById('share-copy-btn');
+    btn.textContent = 'Copiado!';
+    btn.style.background = 'var(--win)';
+    setTimeout(function() { btn.textContent = 'Copiar link'; btn.style.background = ''; }, 2000);
+  });
+}
+
+async function revokeShareLink() {
+  if (!_currentShareMapId) return;
+  if (!confirm('Revogar o link? Quem tiver o link antigo não conseguirá mais acessar.')) return;
+  try {
+    await sbFetch('saved_maps?id=eq.' + _currentShareMapId, {
+      method: 'PATCH',
+      body: JSON.stringify({ share_token: null, share_expires_at: null }),
+    });
+    document.getElementById('share-modal-content').innerHTML =
+      '<div style="text-align:center;padding:16px 0;color:var(--win);font-size:13px;">Link revogado com sucesso.</div>';
+  } catch(e) {
+    alert('Erro: ' + e.message);
+  }
+}
+
+// ─── Shared Mode (link público — read-only, sem login) ──────────────────────
+var _isSharedMode = false;
+
+async function initSharedMode() {
+  var params = new URLSearchParams(location.search);
+  var shareToken = params.get('share');
+  if (!shareToken) return false;
+
+  _isSharedMode = true;
+  document.body.classList.add('shared-mode');
+
+  // Esconder login, gallery, upload
+  document.getElementById('login-screen').style.display = 'none';
+  document.getElementById('gallery-screen').classList.add('hidden');
+
+  try {
+    // Buscar mapa via anon key (sem auth, RLS permite por share_token)
+    var url = SUPABASE_URL + '/rest/v1/saved_maps?share_token=eq.' + shareToken + '&select=*';
+    var resp = await fetch(url, { headers: { 'apikey': SUPABASE_ANON, 'Accept': 'application/json' } });
+    if (!resp.ok) throw new Error('Mapa não encontrado');
+    var maps = await resp.json();
+    if (!maps || !maps.length) throw new Error('Link inválido ou expirado');
+    var mapMeta = maps[0];
+
+    // Buscar PDVs
+    var pdvs = [];
+    var PAGE = 1000, page = 0;
+    while (true) {
+      var pdvUrl = SUPABASE_URL + '/rest/v1/map_pdvs?map_id=eq.' + mapMeta.id + '&select=*&offset=' + (page * PAGE) + '&limit=' + PAGE;
+      var pResp = await fetch(pdvUrl, { headers: { 'apikey': SUPABASE_ANON, 'Accept': 'application/json' } });
+      if (!pResp.ok) break;
+      var batch = await pResp.json();
+      if (!batch || !batch.length) break;
+      pdvs = pdvs.concat(batch);
+      if (batch.length < PAGE) break;
+      page++;
+    }
+
+    // Montar app em modo read-only
+    var appEl = document.getElementById('app');
+    appEl.style.display = 'flex';
+    applyMapMode(mapMeta.map_type || 'varejo360');
+
+    // Header: mostrar nome do mapa, esconder botões de edição
+    document.getElementById('logo-map-type').textContent = mapMeta.name || 'Mapa compartilhado';
+    document.getElementById('btn-share-map').style.display = 'none';
+    document.getElementById('btn-back-gallery').style.display = 'none';
+
+    await new Promise(function(r) { setTimeout(r, 80); });
+    if (!map) initMap(); else map.resize();
+
+    allData = pdvs.map(function(r) {
+      r.lat = parseFloat(r.lat); r.lon = parseFloat(r.lon);
+      return r;
+    }).filter(function(r) { return r.lat && r.lon; });
+    filteredData = [...allData];
+
+    populateFilters(); applyFilters(); updatePanels(); renderMarkers(); updateOverlay();
+
+    // Zoom to data
+    if (allData.length > 0 && map) {
+      var bounds = allData.reduce(function(b, r) {
+        return [[Math.min(b[0][0], r.lon), Math.min(b[0][1], r.lat)], [Math.max(b[1][0], r.lon), Math.max(b[1][1], r.lat)]];
+      }, [[180, 90], [-180, -90]]);
+      map.fitBounds(bounds, { padding: 60, maxZoom: 14 });
+    }
+
+    return true;
+  } catch(e) {
+    document.body.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;min-height:100vh;font-family:sans-serif;color:#888;font-size:16px;text-align:center;padding:20px;">' +
+      '<div><div style="font-size:48px;margin-bottom:16px;">🔒</div>' + escHtml(e.message) + '<br><br><a href="/" style="color:var(--accent-light,#3b9eff);">Ir para o Geocodify</a></div></div>';
+    return true;
+  }
+}
+
+// ─── Show share button when a saved map is open ─────────────────────────────
+window._currentOpenMapId = null;
 // ─── Places Discovery ─────────────────────────────────────────────────────────
 // Brazilian state centroids and bounding boxes for grid generation
 var BR_STATES = {
@@ -4802,6 +4980,13 @@ function resetPlacesForNewSearch() {
   try { window.showGeoToast = showGeoToast; } catch(e) {}
   try { window.showPlacesSetup = showPlacesSetup; } catch(e) {}
   try { window.showSaveMapDialog = showSaveMapDialog; } catch(e) {}
+  try { window.openShareModal = openShareModal; } catch(e) {}
+  try { window.openShareModalFromCard = openShareModalFromCard; } catch(e) {}
+  try { window.closeShareModal = closeShareModal; } catch(e) {}
+  try { window.copyShareLink = copyShareLink; } catch(e) {}
+  try { window.revokeShareLink = revokeShareLink; } catch(e) {}
+  try { window.initSharedMode = initSharedMode; } catch(e) {}
+  try { window._isSharedMode = _isSharedMode; } catch(e) {}
   try { window.showUploadZone = showUploadZone; } catch(e) {}
   try { window.startExpandSearch = startExpandSearch; } catch(e) {}
   try { window.startGeocoding = startGeocoding; } catch(e) {}

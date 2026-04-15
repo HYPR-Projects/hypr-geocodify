@@ -156,6 +156,19 @@
     <div class="modal-save-status" id="save-status"></div>
   </div>
 </div>
+<!-- Share Modal -->
+<div class="modal-overlay" id="share-modal" role="dialog" aria-modal="true" aria-labelledby="share-modal-title">
+  <div class="modal-box" style="max-width:440px">
+    <div class="modal-title" id="share-modal-title">🔗 Compartilhar mapa</div>
+    <div class="modal-sub" id="share-modal-sub">Gere um link público para que seu cliente navegue este mapa sem precisar de login.</div>
+    <div id="share-modal-content">
+      <div id="share-generating" style="text-align:center;padding:20px 0;color:var(--text-muted);font-size:13px;">Gerando link...</div>
+    </div>
+    <div class="modal-actions" style="margin-top:16px">
+      <button class="modal-btn-skip" onclick="closeShareModal()">Fechar</button>
+    </div>
+  </div>
+</div>
 <div id="geocoding-overlay" role="status" aria-live="polite">
   <div class="geo-row1">
     <div class="geo-title">
@@ -431,8 +444,14 @@
       Expandir
     </button>
 
+    <!-- Compartilhar mapa -->
+    <button id="btn-share-map" class="hdr-btn" onclick="openShareModal()" title="Compartilhar link público" style="display:none;">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>
+      Compartilhar
+    </button>
+
     <!-- Voltar para galeria -->
-    <button onclick="showGallery()" class="hdr-btn">
+    <button onclick="showGallery()" class="hdr-btn" id="btn-back-gallery">
       <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg>
       Mapas
     </button>
