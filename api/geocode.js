@@ -1,25 +1,76 @@
 // Vercel Serverless Function — HERE Geocoding API proxy
-// Adaptado da Netlify Function original. Mesma lógica, formato Vercel.
+// Aceita os mesmos query params que a HERE API, adiciona a key server-side.
+// Suporta: forward freeform (?q=), forward structured (?qq=), reverse (?action=reverse&at=)
 
 const HERE_KEY = process.env.HERE_API_KEY;
 
+const ALLOWED_ORIGINS = [
+  'https://geocodify.hypr.mobi',
+  'https://hypr-geocodify.vercel.app',
+];
+
+function getCorsOrigin(req) {
+  const origin = req.headers?.origin || '';
+  if (ALLOWED_ORIGINS.some(o => origin.startsWith(o))) return origin;
+  if (origin.includes('localhost') || origin.includes('127.0.0.1')) return origin;
+  if (origin.includes('.vercel.app')) return origin;
+  return ALLOWED_ORIGINS[0];
+}
+
 export default async function handler(req, res) {
-  // CORS
-  res.setHeader('Access-Control-Allow-Origin', '*');
+  const corsOrigin = getCorsOrigin(req);
+  res.setHeader('Access-Control-Allow-Origin', corsOrigin);
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
   res.setHeader('Content-Type', 'application/json');
 
   if (req.method === 'OPTIONS') {
     return res.status(204).end();
   }
 
-  const q = req.query?.q;
-  if (!q || !HERE_KEY) {
-    return res.status(400).json({ error: 'Missing query or HERE_API_KEY' });
+  if (!HERE_KEY) {
+    return res.status(500).json({ error: 'HERE_API_KEY not configured on server' });
   }
 
-  const url = `https://geocode.search.hereapi.com/v1/geocode?q=${encodeURIComponent(q)}&in=countryCode:BRA&limit=1&lang=pt-BR&apiKey=${HERE_KEY}`;
-  const resp = await fetch(url);
-  const data = await resp.json();
-  return res.status(resp.status).json(data);
+  const params = req.method === 'POST' && req.body
+    ? (typeof req.body === 'string' ? JSON.parse(req.body) : req.body)
+    : req.query || {};
+
+  try {
+    const action = params.action || '';
+
+    if (action === 'reverse') {
+      const at = params.at;
+      if (!at) return res.status(400).json({ error: 'Missing "at" parameter (lat,lon)' });
+      const limit = params.limit || '1';
+      const lang = params.lang || 'pt-BR';
+      const url = `https://revgeocode.search.hereapi.com/v1/revgeocode?at=${encodeURIComponent(at)}&lang=${lang}&limit=${limit}&apiKey=${HERE_KEY}`;
+      const resp = await fetch(url);
+      const data = await resp.json();
+      return res.status(resp.status).json(data);
+    }
+
+    if (params.qq) {
+      const limit = params.limit || '5';
+      const lang = params.lang || 'pt-BR';
+      const url = `https://geocode.search.hereapi.com/v1/geocode?qq=${encodeURIComponent(params.qq)}&limit=${limit}&lang=${lang}&apiKey=${HERE_KEY}`;
+      const resp = await fetch(url);
+      const data = await resp.json();
+      return res.status(resp.status).json(data);
+    }
+
+    if (params.q) {
+      const limit = params.limit || '5';
+      const lang = params.lang || 'pt-BR';
+      const inParam = params.in || 'countryCode:BRA';
+      const url = `https://geocode.search.hereapi.com/v1/geocode?q=${encodeURIComponent(params.q)}&in=${encodeURIComponent(inParam)}&limit=${limit}&lang=${lang}&apiKey=${HERE_KEY}`;
+      const resp = await fetch(url);
+      const data = await resp.json();
+      return res.status(resp.status).json(data);
+    }
+
+    return res.status(400).json({ error: 'Missing q, qq, or action=reverse parameter' });
+  } catch (err) {
+    return res.status(500).json({ error: err.message });
+  }
 }

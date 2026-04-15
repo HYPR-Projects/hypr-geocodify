@@ -4,9 +4,22 @@
 
 const API_KEY = process.env.GOOGLE_PLACES_API_KEY;
 
+const ALLOWED_ORIGINS = [
+  'https://geocodify.hypr.mobi',
+  'https://hypr-geocodify.vercel.app',
+];
+
+function getCorsOrigin(req) {
+  const origin = req.headers?.origin || '';
+  if (ALLOWED_ORIGINS.some(o => origin.startsWith(o))) return origin;
+  if (origin.includes('localhost') || origin.includes('127.0.0.1')) return origin;
+  if (origin.includes('.vercel.app')) return origin;
+  return ALLOWED_ORIGINS[0];
+}
+
 export default async function handler(req, res) {
-  // CORS
-  res.setHeader('Access-Control-Allow-Origin', '*');
+  const corsOrigin = getCorsOrigin(req);
+  res.setHeader('Access-Control-Allow-Origin', corsOrigin);
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
   res.setHeader('Content-Type', 'application/json');

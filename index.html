@@ -24,7 +24,6 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="preconnect" href="https://tiles.openfreemap.org">
 <link rel="preconnect" href="https://qfyqvcxhcmduhknbpofx.supabase.co">
-<link rel="preconnect" href="https://geocode.search.hereapi.com">
 <link rel="preconnect" href="https://publica.cnpj.ws">
 <link rel="dns-prefetch" href="https://unpkg.com">
 <link rel="dns-prefetch" href="https://cdn.jsdelivr.net">
@@ -2171,7 +2170,10 @@ function throttle(fn, ms) {
 
 // ─── State ───────────────────────────────────────────────────────────────────
 var STATE_NAME_TO_UF = {'Acre':'AC','Alagoas':'AL','Amapá':'AP','Amazonas':'AM','Bahia':'BA','Ceará':'CE','Distrito Federal':'DF','Espírito Santo':'ES','Goiás':'GO','Maranhão':'MA','Mato Grosso do Sul':'MS','Mato Grosso':'MT','Minas Gerais':'MG','Pará':'PA','Paraíba':'PB','Paraná':'PR','Pernambuco':'PE','Piauí':'PI','Rio de Janeiro':'RJ','Rio Grande do Norte':'RN','Rio Grande do Sul':'RS','Rondônia':'RO','Roraima':'RR','Santa Catarina':'SC','São Paulo':'SP','Sergipe':'SE','Tocantins':'TO'};
-var HERE_API_KEY = 'abXwwRsBKFvJdsCWLt18_is1dcqXDOaTyxRAIlrEmMg';
+// HERE key: usada APENAS para satellite tiles do MapLibre (raster tile URL precisa da key no client).
+// Geocoding e reverse geocoding usam o proxy server-side /api/geocode (key fica no Vercel env vars).
+// TODO: criar key separada restrita a Map Tile API + referrer restriction no HERE console.
+var _HERE_SAT_KEY = 'abXwwRsBKFvJdsCWLt18_is1dcqXDOaTyxRAIlrEmMg';
 var allData = [];
 var filteredData = [];
 var map = null;
@@ -2254,7 +2256,7 @@ function _buildDarkStyle() {
 }
 
 function _buildSatelliteStyle() {
-  const H = HERE_API_KEY;
+  const H = _HERE_SAT_KEY;
   return {
     version: 8,
     glyphs: 'https://tiles.openfreemap.org/fonts/{fontstack}/{range}.pbf',
@@ -3772,7 +3774,7 @@ function downloadGeocoderCSV() {
 // ─── Reverse Geocoding (lat/lon → endereço) ───────────────────────────────────
 async function reverseGeocodeHERE(lat, lon) {
   const resp = await fetch(
-    `https://revgeocode.search.hereapi.com/v1/revgeocode?at=${lat},${lon}&lang=pt-BR&limit=1&apiKey=${HERE_API_KEY}`
+    `/api/geocode?action=reverse&at=${lat},${lon}&lang=pt-BR&limit=1`
   );
   if (!resp.ok) return null;
   const d = await resp.json();
@@ -4075,10 +4077,10 @@ async function geocodeHERE(address, opts) {
       if (opts.city)     parts.push('city=' + encodeURIComponent(opts.city));
       if (opts.state)    parts.push('state=' + encodeURIComponent(opts.state));
       parts.push('country=Brasil');
-      url = `https://geocode.search.hereapi.com/v1/geocode?qq=${parts.join(';')}&limit=5&lang=pt-BR&apiKey=${HERE_API_KEY}`;
+      url = `/api/geocode?qq=${parts.join(';')}&limit=5&lang=pt-BR`;
     } else {
       // Freeform — sem contexto de cidade/UF
-      url = `https://geocode.search.hereapi.com/v1/geocode?q=${encodeURIComponent(address)}&in=countryCode:BRA&limit=5&lang=pt-BR&apiKey=${HERE_API_KEY}`;
+      url = `/api/geocode?q=${encodeURIComponent(address)}&in=countryCode:BRA&limit=5&lang=pt-BR`;
     }
 
     const resp = await fetch(url);
@@ -4118,7 +4120,7 @@ async function geocodeHERE(address, opts) {
 
       // 2) Nenhum resultado bateu UF ou score muito baixo — fallback freeform se era structured
       if (hasStructured && address) {
-        const fallUrl = `https://geocode.search.hereapi.com/v1/geocode?q=${encodeURIComponent(address)}&in=countryCode:BRA&limit=5&lang=pt-BR&apiKey=${HERE_API_KEY}`;
+        const fallUrl = `/api/geocode?q=${encodeURIComponent(address)}&in=countryCode:BRA&limit=5&lang=pt-BR`;
         const fallResp = await fetch(fallUrl);
         if (fallResp.ok) {
           const fallD = await fallResp.json();
@@ -4153,7 +4155,7 @@ async function geocodeHERE(address, opts) {
     // Score abaixo do threshold — tentar com endereço limpo (sem shopping/loja/piso)
     var cleanedAddr = _cleanCommercialAddress(address);
     if (cleanedAddr && cleanedAddr !== address) {
-      var cleanUrl = `https://geocode.search.hereapi.com/v1/geocode?q=${encodeURIComponent(cleanedAddr)}&in=countryCode:BRA&limit=5&lang=pt-BR&apiKey=${HERE_API_KEY}`;
+      var cleanUrl = `/api/geocode?q=${encodeURIComponent(cleanedAddr)}&in=countryCode:BRA&limit=5&lang=pt-BR`;
       var cleanResp = await fetch(cleanUrl);
       if (cleanResp.ok) {
         var cleanD = await cleanResp.json();
@@ -4188,7 +4190,7 @@ async function geocodeHERE(address, opts) {
     // Último fallback: tentar só com CEP se disponível
     var cepMatch = (address || '').match(/(\d{5}-?\d{3})/);
     if (cepMatch) {
-      var cepUrl = `https://geocode.search.hereapi.com/v1/geocode?q=${encodeURIComponent(cepMatch[1] + ' Brasil')}&in=countryCode:BRA&limit=1&lang=pt-BR&apiKey=${HERE_API_KEY}`;
+      var cepUrl = `/api/geocode?q=${encodeURIComponent(cepMatch[1] + ' Brasil')}&in=countryCode:BRA&limit=1&lang=pt-BR`;
       var cepResp = await fetch(cepUrl);
       if (cepResp.ok) {
         var cepD = await cepResp.json();
@@ -6224,7 +6226,7 @@ async function startPlacesDiscovery() {
       var area = areas[ai], pageToken = null, pages = 0;
       do {
         try {
-          var resp = await fetch('/.netlify/functions/places-search', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ action:'textSearch', query: query+', Brasil', lat:area.lat, lon:area.lon, radius:area.radiusM, pageToken:pageToken }) });
+          var resp = await fetch('/api/places-search', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ action:'textSearch', query: query+', Brasil', lat:area.lat, lon:area.lon, radius:area.radiusM, pageToken:pageToken }) });
           var data = await resp.json();
           if (resp.ok && data.placeIds) { for (var pi=0;pi<data.placeIds.length;pi++) { var pid=data.placeIds[pi]; if(!seenIds[pid]){seenIds[pid]=true;allPlaceIds.push(pid);}else{skippedDupes++;} } pageToken=data.nextPageToken; }
           else { errors++; pageToken=null; }
@@ -6264,7 +6266,7 @@ async function startPlacesDiscovery() {
         var success = false;
         for (var attempt = 0; attempt < 2 && !success; attempt++) {
           try {
-            var resp = await fetch('/.netlify/functions/places-search', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(searchBody) });
+            var resp = await fetch('/api/places-search', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(searchBody) });
             var data = await resp.json();
             if (resp.ok && data.placeIds) {
               for (var pi=0;pi<data.placeIds.length;pi++) { var pid=data.placeIds[pi]; if(!seenIds[pid]){seenIds[pid]=true;allPlaceIds.push(pid);}else{skippedDupes++;} }
@@ -6305,7 +6307,7 @@ async function startPlacesDiscovery() {
   
   async function enrichBatch(batch) {
     try {
-      var resp2 = await fetch('/.netlify/functions/places-search', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ action:'details', placeIds:batch }) });
+      var resp2 = await fetch('/api/places-search', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ action:'details', placeIds:batch }) });
       var data2 = await resp2.json();
       if (resp2.ok && data2.places) {
         // Track which IDs were successfully returned
@@ -6565,7 +6567,7 @@ async function retryPendingIds() {
     if (newBatch.length === 0) { processed += batch.length; continue; }
     
     try {
-      var resp = await fetch('/.netlify/functions/places-search', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ action:'details', placeIds: newBatch }) });
+      var resp = await fetch('/api/places-search', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ action:'details', placeIds: newBatch }) });
       var data = await resp.json();
       if (resp.ok && data.places) {
         var returnedIds = {};
