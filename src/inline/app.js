@@ -1274,16 +1274,18 @@ async function loadData(data) {
   updateOverlay();
 }
 
-// ─── Auth — Supabase Email + Senha ──────────────────────────────────────────
+// ─── Auth — Supabase (client inicializado no bootstrap DOMContentLoaded) ────
 var SUPABASE_URL  = 'https://qfyqvcxhcmduhknbpofx.supabase.co';
 var SUPABASE_ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFmeXF2Y3hoY21kdWhrbmJwb2Z4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM0Mjk1NjAsImV4cCI6MjA4OTAwNTU2MH0.k92V1LN4OqqdtfF86iml4L-gVg0AabENKt7S5vlP2dk';
-// Inicializar imediatamente — supabase.js já carregou (script síncrono no <head>)
-var _supa = null;
-var currentUser = null;
 
 async function initAuth() {
-  if (!_supa && window.supabase) {
-    _supa = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON);
+  // Aguardar bootstrap se ainda não rodou (defer scripts carregando)
+  if (!window._supaReady) {
+    await new Promise(function(resolve) {
+      var check = setInterval(function() {
+        if (window._supaReady) { clearInterval(check); resolve(); }
+      }, 50);
+    });
   }
   // Check existing session
   var sessionResult = await _supa.auth.getSession();
