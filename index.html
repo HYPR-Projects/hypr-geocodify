@@ -2519,7 +2519,9 @@ async function buscarReceitaEstab(estab, razaoSocial) {
 // Garantias: (1) sempre usa CNPJ completo de 14 dígitos para identificação de filial,
 //            (2) razão social é fallback obrigatório quando nome_fantasia ausente,
 //            (3) BrasilAPI como segunda fonte se cnpj.ws falhar.
-async function buscarReceita(cnpjCol) {
+async function buscarReceita(cnpjCol, _retries) {
+  if (_retries === undefined) _retries = 0;
+  var MAX_RETRIES = 3;
   const cnpjNum = (cnpjCol.split(' - ')[0] || '').replace(/\D/g, '').slice(0, 14);
   if (!cnpjNum) return null;
 
@@ -2539,8 +2541,9 @@ async function buscarReceita(cnpjCol) {
       clearTimeout(tid);
       if (resp.status === 429) {
         _receitaInFlight--;
-        await new Promise(r => setTimeout(r, 2000));
-        return buscarReceita(cnpjCol);
+        if (_retries >= MAX_RETRIES) { _receitaCache[cacheKey] = null; return null; }
+        await new Promise(r => setTimeout(r, 2000 * (_retries + 1)));
+        return buscarReceita(cnpjCol, _retries + 1);
       }
       if (!resp.ok) { _receitaCache[cacheKey] = null; _receitaInFlight--; return null; }
       const d = await resp.json();
@@ -2592,8 +2595,9 @@ async function buscarReceita(cnpjCol) {
 
     if (resp.status === 429) {
       _receitaInFlight--;
-      await new Promise(r => setTimeout(r, 2000));
-      return buscarReceita(cnpjCol);
+      if (_retries >= MAX_RETRIES) { _receitaCache[cnpjNum] = null; return null; }
+      await new Promise(r => setTimeout(r, 2000 * (_retries + 1)));
+      return buscarReceita(cnpjCol, _retries + 1);
     }
     if (!resp.ok) {
       _receitaCache[cnpjNum] = null;

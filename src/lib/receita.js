@@ -46,7 +46,8 @@ export function aplicarReceita(row, receita) {
  * CNPJ raiz (8 dígitos): busca filial ativa via /estabelecimentos.
  * CNPJ completo (14 dígitos): BrasilAPI → publica.cnpj.ws.
  */
-export async function buscarReceita(cnpjCol) {
+export async function buscarReceita(cnpjCol, _retries = 0) {
+  const MAX_RETRIES = 3;
   const cnpjNum = (cnpjCol.split(' - ')[0] || '').replace(/\D/g, '').slice(0, 14);
   if (!cnpjNum) return null;
 
@@ -66,8 +67,9 @@ export async function buscarReceita(cnpjCol) {
       clearTimeout(tid);
       if (resp.status === 429) {
         _inFlight--;
-        await new Promise(r => setTimeout(r, RECEITA_RETRY_DELAY_MS));
-        return buscarReceita(cnpjCol);
+        if (_retries >= MAX_RETRIES) { _cache[cacheKey] = null; return null; }
+        await new Promise(r => setTimeout(r, RECEITA_RETRY_DELAY_MS * (_retries + 1)));
+        return buscarReceita(cnpjCol, _retries + 1);
       }
       if (!resp.ok) { _cache[cacheKey] = null; _inFlight--; return null; }
       const d = await resp.json();
@@ -115,8 +117,9 @@ export async function buscarReceita(cnpjCol) {
 
     if (resp.status === 429) {
       _inFlight--;
-      await new Promise(r => setTimeout(r, RECEITA_RETRY_DELAY_MS));
-      return buscarReceita(cnpjCol);
+      if (_retries >= MAX_RETRIES) { _cache[cnpjNum] = null; return null; }
+      await new Promise(r => setTimeout(r, RECEITA_RETRY_DELAY_MS * (_retries + 1)));
+      return buscarReceita(cnpjCol, _retries + 1);
     }
     if (!resp.ok) {
       _cache[cnpjNum] = null;

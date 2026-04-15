@@ -75,7 +75,7 @@ Substitua `SEU_CLIENT_ID_AQUI.apps.googleusercontent.com` pelo Client ID que voc
 
 | Key | Value |
 |-----|-------|
-| `HERE_API_KEY` | `abXwwRsBKFvJdsCWLt18_is1dcqXDOaTyxRAIlrEmMg` |
+| `HERE_API_KEY` | (copie da variável existente no Vercel — não commitar no repo) |
 | `GOOGLE_PLACES_API_KEY` | Sua API Key do Google Cloud (passo 2) |
 
 3. Clique em **Save**

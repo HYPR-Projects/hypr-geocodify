@@ -11,9 +11,9 @@ const ALLOWED_ORIGINS = [
 
 function getCorsOrigin(req) {
   const origin = req.headers?.origin || '';
-  if (ALLOWED_ORIGINS.some(o => origin.startsWith(o))) return origin;
-  if (origin.includes('localhost') || origin.includes('127.0.0.1')) return origin;
-  if (origin.includes('.vercel.app')) return origin;
+  if (ALLOWED_ORIGINS.some(o => origin === o)) return origin;
+  if (/^https:\/\/hypr-geocodify[a-z0-9-]*\.vercel\.app$/.test(origin)) return origin;
+  if (/^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin)) return origin;
   return ALLOWED_ORIGINS[0];
 }
 
