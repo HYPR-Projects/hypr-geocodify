@@ -4495,6 +4495,49 @@ function isInsideAnyPinCircle(lat, lon, circles) {
   return false;
 }
 
+// ─── Name-match filter (opt-in) ─────────────────────────────────────────────
+// Google's Text Search is semantic: "O Boticário" can return any cosmetics store
+// the algorithm considers relevant. When the user expects a brand, we can post-
+// filter Phase 2 results against the query tokens.
+
+var _NAME_FILTER_STOP_WORDS = {
+  'o':1,'a':1,'os':1,'as':1,'de':1,'do':1,'da':1,'dos':1,'das':1,
+  'e':1,'em':1,'no':1,'na':1,'nos':1,'nas':1
+};
+
+// Lowercase, strip accents, replace non-alphanumeric with spaces, collapse whitespace.
+function normalizeText(s) {
+  if (!s) return '';
+  return String(s)
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim()
+    .replace(/\s+/g, ' ');
+}
+
+// Extracts meaningful tokens from a query: >=3 chars, not a stop word.
+function extractQueryTokens(query) {
+  var normalized = normalizeText(query);
+  if (!normalized) return [];
+  return normalized.split(' ').filter(function(t) {
+    return t.length >= 3 && !_NAME_FILTER_STOP_WORDS[t];
+  });
+}
+
+// All tokens must be present in the place name (substring match, normalized).
+// Empty/useless tokens list returns true (fail-open — don't over-filter on weird queries).
+function matchesNameFilter(placeName, tokens) {
+  if (!tokens || !tokens.length) return true;
+  var normalized = normalizeText(placeName);
+  if (!normalized) return false;
+  for (var i = 0; i < tokens.length; i++) {
+    if (normalized.indexOf(tokens[i]) === -1) return false;
+  }
+  return true;
+}
+
 function toggleAdvancedFilters() {
   var body = document.getElementById('places-filters-body');
   var icon = document.getElementById('filter-toggle-icon');
@@ -4917,6 +4960,7 @@ async function startPlacesDiscovery() {
   }
   var found = 0, errors = 0, filtered = 0, skippedDupes = 0;
   var filteredByRadius = 0; // Pin mode: places returned outside the requested radius
+  var filteredByName = 0; // Opt-in: places whose name didn't match the query tokens
   var startTime = Date.now(), allPlaceIds = [];
   // Store allowed UFs for Phase 2 filtering (only for city/state mode)
   var allowedUFs = null;
@@ -4934,6 +4978,13 @@ async function startPlacesDiscovery() {
     });
   }
   window._pinCircles = pinCircles;
+  // Opt-in strict name filter: only keep places whose name contains the query tokens.
+  var strictNameEl = document.getElementById('strict-name-filter');
+  var strictName = !!(strictNameEl && strictNameEl.checked);
+  var nameTokens = strictName ? extractQueryTokens(query) : [];
+  // If strict is on but the query had no meaningful tokens (e.g. "O"), fall back to off.
+  if (strictName && !nameTokens.length) strictName = false;
+  window._strictNameTokens = nameTokens;
 
   if (searchConfig.mode === 'pin') {
     // PIN MODE: search each pin area
@@ -5061,6 +5112,11 @@ async function startPlacesDiscovery() {
             // LAYER 4: If no UF extracted and not full-Brasil mode, discard (can't verify)
             if (!placeUF && Object.keys(allowedUFs).length < 27) { filtered++; continue; }
           }
+          // Opt-in strict name filter (all meaningful tokens from the query must appear in the name).
+          if (strictName && !matchesNameFilter(p.name, nameTokens)) {
+            filteredByName++;
+            continue;
+          }
           allData.push({ nome:p.name, bandeira:p.name, geo_address:p.address, lat:p.lat, lon:p.lon, place_id:p.place_id, place_types:(p.types||[]).slice(0,3).join(', '), place_status:p.status||'', _mapId:allData.length }); found++;
         }
         // IDs that were sent but not returned = failed (rate limited or error)
@@ -5106,7 +5162,7 @@ async function startPlacesDiscovery() {
   // Store failed IDs for optional retry later
   window._pendingRetryIds = failedIds.length > 0 ? failedIds.slice() : [];
   // Store search stats for finish screen
-  window._lastSearchStats = { newIds: allPlaceIds.length, skippedDupes: skippedDupes, found: found, errors: errors, existingCount: existingCount, filtered: filtered, filteredByRadius: filteredByRadius };
+  window._lastSearchStats = { newIds: allPlaceIds.length, skippedDupes: skippedDupes, found: found, errors: errors, existingCount: existingCount, filtered: filtered, filteredByRadius: filteredByRadius, filteredByName: filteredByName };
   finishPlacesDiscovery();
 }
 
@@ -5171,6 +5227,10 @@ function finishPlacesDiscovery() {
     var radiusFiltered = (stats.filteredByRadius || 0);
     if (radiusFiltered > 0) {
       summaryParts.push('<span style="color:var(--text-muted);">' + radiusFiltered + ' fora do raio</span>');
+    }
+    var nameFiltered = (stats.filteredByName || 0);
+    if (nameFiltered > 0) {
+      summaryParts.push('<span style="color:var(--text-muted);">' + nameFiltered + ' fora do nome</span>');
     }
     document.getElementById('places-results-summary').innerHTML = summaryParts.join(' · ');
     

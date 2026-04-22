@@ -661,6 +661,13 @@
     <input class="places-search-input" id="places-query-input" aria-label="Termo de busca" type="text"
       placeholder="Ex: farmácia, Carrefour, pet shop..."
       maxlength="120" oninput="updatePlacesEstimate()">
+    <label style="display:flex;align-items:flex-start;gap:8px;margin-top:8px;padding:8px 10px;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);cursor:pointer;user-select:none;">
+      <input type="checkbox" id="strict-name-filter" style="margin-top:2px;cursor:pointer;flex-shrink:0;" aria-label="Filtrar por nome exato">
+      <span style="flex:1;">
+        <span style="font-size:11px;font-weight:500;color:var(--text);display:block;">🎯 Apenas resultados com o nome da busca</span>
+        <span style="font-size:10px;color:var(--text-muted);display:block;margin-top:2px;line-height:1.4;">Recomendado para marcas (Boticário, Carrefour). Desligue para categorias (farmácia, padaria).</span>
+      </span>
+    </label>
   </div>
 
   <!-- Map name -->
