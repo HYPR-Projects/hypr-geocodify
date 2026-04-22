@@ -77,10 +77,14 @@ async function handleTextSearch(body) {
       }
     };
   } else if (lat != null && lon != null && radius) {
-    payload.locationBias = {
+    // locationRestriction.circle: HARD constraint — Google returns only results inside the circle.
+    // (locationBias.circle is soft and leaks results outside the radius.)
+    // Google limits circle radius to 50000m; clamp just in case.
+    const clampedRadius = Math.min(Math.max(Number(radius) || 0, 1), 50000);
+    payload.locationRestriction = {
       circle: {
         center: { latitude: lat, longitude: lon },
-        radius: radius,
+        radius: clampedRadius,
       }
     };
   }

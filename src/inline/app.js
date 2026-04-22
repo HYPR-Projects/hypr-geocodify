@@ -4460,6 +4460,29 @@ var BR_CAPITALS = {
   'SE':'Aracaju','SP':'São Paulo','TO':'Palmas'
 };
 
+// Haversine distance in meters. Used to validate Phase 2 results against pin circles.
+function haversineM(lat1, lon1, lat2, lon2) {
+  var R = 6371000;
+  var toRad = Math.PI / 180;
+  var dLat = (lat2 - lat1) * toRad;
+  var dLon = (lon2 - lon1) * toRad;
+  var a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+          Math.cos(lat1 * toRad) * Math.cos(lat2 * toRad) *
+          Math.sin(dLon / 2) * Math.sin(dLon / 2);
+  return 2 * R * Math.asin(Math.sqrt(a));
+}
+
+// Returns true if (lat, lon) falls inside at least one pin circle.
+// Circles already include a 10% tolerance (applied when captured in startPlacesDiscovery).
+function isInsideAnyPinCircle(lat, lon, circles) {
+  if (!circles || !circles.length) return true;
+  for (var i = 0; i < circles.length; i++) {
+    var c = circles[i];
+    if (haversineM(lat, lon, c.lat, c.lon) <= c.radiusM) return true;
+  }
+  return false;
+}
+
 function toggleAdvancedFilters() {
   var body = document.getElementById('places-filters-body');
   var icon = document.getElementById('filter-toggle-icon');
@@ -4870,6 +4893,7 @@ async function startPlacesDiscovery() {
     allData.forEach(function(r) { if (r.place_id) { seenIds[r.place_id] = true; existingCount++; } });
   }
   var found = 0, errors = 0, filtered = 0, skippedDupes = 0;
+  var filteredByRadius = 0; // Pin mode: places returned outside the requested radius
   var startTime = Date.now(), allPlaceIds = [];
   // Store allowed UFs for Phase 2 filtering (only for city/state mode)
   var allowedUFs = null;
@@ -4878,6 +4902,15 @@ async function startPlacesDiscovery() {
     searchConfig.states.forEach(function(uf) { allowedUFs[uf] = true; });
   }
   window._allowedUFs = allowedUFs; // Store for retry function
+  // Pin mode: keep the circles around for post-details haversine validation.
+  // Small 10% tolerance on radius to account for Google's geocoding jitter.
+  var pinCircles = null;
+  if (searchConfig.mode === 'pin') {
+    pinCircles = searchConfig.areas.map(function(a) {
+      return { lat: a.lat, lon: a.lon, radiusM: a.radiusM * 1.1 };
+    });
+  }
+  window._pinCircles = pinCircles;
 
   if (searchConfig.mode === 'pin') {
     // PIN MODE: search each pin area
@@ -4978,6 +5011,13 @@ async function startPlacesDiscovery() {
           var p=data2.places[ri]; 
           if (p.place_id) returnedIds[p.place_id] = true;
           if(!p.lat||!p.lon)continue;
+          // Pin mode: discard places that fell outside the requested radius
+          // (locationRestriction on the API already prevents this, but Google
+          // occasionally places a pin just outside the circle — this is the safety net).
+          if (pinCircles && !isInsideAnyPinCircle(p.lat, p.lon, pinCircles)) {
+            filteredByRadius++;
+            continue;
+          }
           // Geographic filter: respect selected states, reject non-Brazil
           if (allowedUFs) {
             var addr = p.address || '';
@@ -5043,7 +5083,7 @@ async function startPlacesDiscovery() {
   // Store failed IDs for optional retry later
   window._pendingRetryIds = failedIds.length > 0 ? failedIds.slice() : [];
   // Store search stats for finish screen
-  window._lastSearchStats = { newIds: allPlaceIds.length, skippedDupes: skippedDupes, found: found, errors: errors, existingCount: existingCount, filtered: filtered };
+  window._lastSearchStats = { newIds: allPlaceIds.length, skippedDupes: skippedDupes, found: found, errors: errors, existingCount: existingCount, filtered: filtered, filteredByRadius: filteredByRadius };
   finishPlacesDiscovery();
 }
 
@@ -5104,6 +5144,10 @@ function finishPlacesDiscovery() {
     }
     if (pendingCount > 0) {
       summaryParts.push('<span style="color:var(--neutral);">' + pendingCount.toLocaleString('pt-BR') + ' pendentes</span>');
+    }
+    var radiusFiltered = (stats.filteredByRadius || 0);
+    if (radiusFiltered > 0) {
+      summaryParts.push('<span style="color:var(--text-muted);">' + radiusFiltered + ' fora do raio</span>');
     }
     document.getElementById('places-results-summary').innerHTML = summaryParts.join(' · ');
     
