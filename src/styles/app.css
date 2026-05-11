@@ -1402,3 +1402,7 @@ input[type="range"]::-webkit-slider-thumb {
 .shared-mode .map-card-del,
 .shared-mode .map-card-share,
 .shared-mode .gallery-btn-new { display: none !important; }
+
+/* Em modo shared, o tipo interno do mapa (ex: "Varejo 360") não é exposto */
+.shared-mode .header-map-type { display: none !important; }
+.shared-mode .header-map-name-sep { display: none !important; }
