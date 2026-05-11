@@ -3096,6 +3096,7 @@ async function startGeocoding() {
   }
   
   document.getElementById('geocoding-overlay').classList.remove('active');
+  try { checkReenrichBar(); } catch(e) {}
   showSaveMapDialog();
 }
 
@@ -4053,6 +4054,7 @@ async function saveMapToSupabase() {
     window._pendingMapName = null;
     window._pendingMapDesc = null;
     btn.disabled = false;
+    try { checkReenrichBar(); } catch(e) {}
     setTimeout(closeSaveModal, 1500);
   } catch(e) {
     status.innerHTML = `<span style="color:var(--lose)">Erro: ${escHtml(e.message)}</span>`;
@@ -4229,6 +4231,9 @@ window._currentOpenMapId = null;
 
 // ─── Re-enrich: detect and update unidentified PDVs ──────────────────────
 function checkReenrichBar() {
+  // Botão de download — mostra sempre que houver dados carregados, independente do tipo
+  var dlBtn = document.getElementById('btn-download-csv-map');
+  if (dlBtn) dlBtn.style.display = (allData && allData.length > 0 && !_isSharedMode) ? '' : 'none';
   if (_isSharedMode || !currentUser) return;
   var bar = document.getElementById('reenrich-bar');
   var headerBtn = document.getElementById('btn-reenrich-map');

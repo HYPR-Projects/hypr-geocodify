@@ -432,11 +432,13 @@
         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
         Lista
       </button>
-      <button class="hdr-group-btn" onclick="downloadGeocoderCSV()" style="border-left:1px solid var(--border);border-radius:0 5px 5px 0;margin-left:1px;">
-        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-        CSV
-      </button>
     </div>
+
+    <!-- Baixar CSV — aparece para todos os tipos quando há dados carregados -->
+    <button id="btn-download-csv-map" class="hdr-btn" onclick="downloadGeocoderCSV()" title="Baixar base em CSV" style="display:none;">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+      CSV
+    </button>
 
     <!-- Theme toggle -->
     <button onclick="toggleTheme()" class="hdr-btn" title="Alternar tema claro/escuro" style="padding:6px 10px;font-size:14px;line-height:1;"><span id="theme-toggle-icon">☀️</span></button>
