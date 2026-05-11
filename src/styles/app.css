@@ -1408,3 +1408,54 @@ input[type="range"]::-webkit-slider-thumb {
 /* Em modo shared, o tipo interno do mapa (ex: "Varejo 360") não é exposto */
 .shared-mode .header-map-type { display: none !important; }
 .shared-mode .header-map-name-sep { display: none !important; }
+
+/* ─── Shared-link loading overlay ─────────────────────────────────────────── */
+#shared-loading {
+  display: none;
+}
+html.shared-loading #shared-loading {
+  display: flex;
+  position: fixed; inset: 0;
+  align-items: center; justify-content: center;
+  background: var(--bg, #0a0a0a);
+  z-index: 99999;
+  animation: shared-loading-fade-in 0.18s ease-out;
+}
+html.shared-loading-leaving #shared-loading {
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.35s ease-out;
+}
+.shared-loading-inner {
+  display: flex; flex-direction: column; align-items: center;
+  gap: 22px;
+}
+.shared-loading-brand {
+  display: flex; align-items: center; gap: 10px;
+  font-family: var(--font);
+  font-size: 16px; font-weight: 500;
+  color: var(--text, #f0f0f0);
+  letter-spacing: -0.2px;
+}
+.shared-loading-brand-mark { font-weight: 600; }
+.shared-loading-brand-sep { color: var(--text-muted, #888); opacity: 0.5; }
+.shared-loading-brand-name { color: var(--text-muted, #aaa); font-weight: 400; }
+.shared-loading-spinner {
+  width: 28px; height: 28px;
+  border: 2px solid var(--surface2, rgba(255,255,255,0.08));
+  border-top-color: var(--accent, #c47f00);
+  border-radius: 50%;
+  animation: shared-loading-spin 0.9s linear infinite;
+}
+.shared-loading-text {
+  font-family: var(--font);
+  font-size: 11px;
+  color: var(--text-muted, #888);
+  text-transform: uppercase;
+  letter-spacing: 1.2px;
+}
+@keyframes shared-loading-spin { to { transform: rotate(360deg); } }
+@keyframes shared-loading-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
