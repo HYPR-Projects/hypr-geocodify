@@ -4192,6 +4192,18 @@ async function revokeShareLink() {
 // ─── Shared Mode (link público — read-only, sem login) ──────────────────────
 var _isSharedMode = false;
 
+function hideSharedLoading() {
+  try {
+    var root = document.documentElement;
+    if (!root.classList.contains('shared-loading')) return;
+    root.classList.add('shared-loading-leaving');
+    setTimeout(function() {
+      root.classList.remove('shared-loading');
+      root.classList.remove('shared-loading-leaving');
+    }, 380);
+  } catch(e) {}
+}
+
 async function initSharedMode() {
   var params = new URLSearchParams(location.search);
   var shareToken = params.get('share');
@@ -4256,8 +4268,10 @@ async function initSharedMode() {
       map.fitBounds(bounds, { padding: 60, maxZoom: 14 });
     }
 
+    hideSharedLoading();
     return true;
   } catch(e) {
+    hideSharedLoading();
     document.body.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;min-height:100vh;font-family:sans-serif;color:#888;font-size:16px;text-align:center;padding:20px;">' +
       '<div><div style="font-size:48px;margin-bottom:16px;">🔒</div>' + escHtml(e.message) + '<br><br><a href="/" style="color:var(--accent-light,#3b9eff);">Ir para o Geocodify</a></div></div>';
     return true;
