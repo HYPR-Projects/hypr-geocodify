@@ -1946,15 +1946,31 @@ function downloadGeocoderCSV() {
     cols   = ['nome', 'geo_address', 'lat', 'lon', 'place_id', 'place_types', 'place_status'];
     labels = ['Nome', 'Endereco', 'Latitude', 'Longitude', 'Google_Place_ID', 'Tipos', 'Status'];
   } else {
-    // Varejo 360: full columns with CNPJ, bandeira, receita data
-    cols   = ['bandeira', 'cnpj', 'lat', 'lon', 'geo_address', 'uf', 'nome_fantasia', 'razao_social', 'cep'];
-    labels = ['Bandeira', 'CNPJ', 'Latitude', 'Longitude', 'Endereco', 'UF', 'Nome_Fantasia', 'Razao_Social', 'CEP'];
+    // Varejo 360: identificação + endereço + coordenadas + métricas de share/performance
+    cols   = ['bandeira', '_cnpj', 'nome_fantasia', 'razao_social', 'geo_address', 'cidade', 'uf', 'cep', 'lat', 'lon', '_share_reais', '_share_volume', '_share_unidades', '_diff_media', '_performance'];
+    labels = ['Bandeira', 'CNPJ', 'Nome_Fantasia', 'Razao_Social', 'Endereco', 'Cidade', 'UF', 'CEP', 'Latitude', 'Longitude', 'Share_Reais_%', 'Share_Volume_%', 'Share_Unidades_%', 'Diff_vs_Media_pp', 'Performance'];
   }
 
   const esc = v => v == null ? '' : `"${String(v).replace(/"/g, '""')}"`;
+  const fmtPct = v => { var n = parseFloat(v || 0); return isFinite(n) ? (n * 100).toFixed(2) : ''; };
+  const fmtPp  = v => { var n = parseFloat(v || 0); return isFinite(n) ? n.toFixed(2) : ''; };
+  const classifyPerformance = r => {
+    var d = parseFloat(r.percentual_diff_media_dimensao || 0);
+    if (!isFinite(d) || d === 0) return 'Sem dado';
+    if (d > 2) return 'Ganhando';
+    if (d < -2) return 'Perdendo';
+    return 'Competindo';
+  };
+
   const rows = [labels.join(','), ...data.map(r => cols.map(c => {
-    if (c === '_status') return esc(r._geocodeFailed ? 'Não identificado' : (r._ufMismatch ? 'UF Mismatch (' + r._expectedUF + '→' + (r.uf||'?') + ')' : 'OK'));
-    if (c === '_input') return esc(r.endereco_geocode || r._endereco_livre || r.endereco || r['endereço'] || r.address || '');
+    if (c === '_status')      return esc(r._geocodeFailed ? 'Não identificado' : (r._ufMismatch ? 'UF Mismatch (' + r._expectedUF + '→' + (r.uf||'?') + ')' : 'OK'));
+    if (c === '_input')       return esc(r.endereco_geocode || r._endereco_livre || r.endereco || r['endereço'] || r.address || '');
+    if (c === '_cnpj')        return esc(r.cnpj_completo || (r.cnpj || '').split(' - ')[0] || '');
+    if (c === '_share_reais') return esc(fmtPct(r.share_reais_sku_dimensao));
+    if (c === '_share_volume')return esc(fmtPct(r.share_volume_sku_dimensao));
+    if (c === '_share_unidades') return esc(fmtPct(r.share_unidades_sku_dimensao));
+    if (c === '_diff_media')  return esc(fmtPp(r.percentual_diff_media_dimensao));
+    if (c === '_performance') return esc(classifyPerformance(r));
     return esc(r[c]);
   }).join(','))];
   const blob = new Blob([rows.join('\r\n')], { type: 'text/csv;charset=utf-8;' });
