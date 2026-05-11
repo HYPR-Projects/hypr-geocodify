@@ -1073,14 +1073,32 @@ function updateOverlay() {
 }
 
 function updateHeader() {
-  const winCount = filteredData.filter(r => parseFloat(r.percentual_diff_media_dimensao||0) > 2).length;
-  const bandeiras = new Set(filteredData.map(r => r.bandeira || 'Outros')).size;
+  var winCount = 0, loseCount = 0, competeCount = 0;
+  for (var i = 0; i < filteredData.length; i++) {
+    var r = filteredData[i];
+    var d = parseFloat(r.percentual_diff_media_dimensao || 0);
+    if (d > 2) winCount++;
+    else if (d < -2) loseCount++;
+    else {
+      // Competindo: na média (±2pp) mas com presença efetiva (share > 0).
+      // PDVs sem presença (share=0, diff=0) ficam fora — eles já são contabilizados
+      // separadamente como "PDVs sem presença" no Share Geral.
+      var s = parseFloat(r.share_reais_sku_dimensao || 0);
+      if (s > 0) competeCount++;
+    }
+  }
+  var bandeiras = new Set(filteredData.map(function(r) { return r.bandeira || 'Outros'; })).size;
 
   var elPdvs = document.getElementById('h-pdvs');
   if (elPdvs) elPdvs.textContent = filteredData.length.toLocaleString('pt-BR');
-  // Os outros KPIs antes ficavam no header; agora moveram para o painel Overview
+
+  // KPIs do painel Overview
   var elOvWin = document.getElementById('ov-win');
   if (elOvWin) elOvWin.textContent = winCount.toLocaleString('pt-BR');
+  var elOvCompete = document.getElementById('ov-compete');
+  if (elOvCompete) elOvCompete.textContent = competeCount.toLocaleString('pt-BR');
+  var elOvLose = document.getElementById('ov-lose');
+  if (elOvLose) elOvLose.textContent = loseCount.toLocaleString('pt-BR');
   var elOvBand = document.getElementById('ov-bandeiras');
   if (elOvBand) elOvBand.textContent = bandeiras.toLocaleString('pt-BR');
 }
