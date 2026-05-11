@@ -2969,6 +2969,7 @@ async function startGeocoding() {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ cnpjs: cnpjNums }),
+          signal: AbortSignal.timeout(30000),
         }).then(function(r) { return r.ok ? r.json() : null; }).catch(function() { return null; });
       }));
 
@@ -3008,8 +3009,6 @@ async function startGeocoding() {
       if ((ei + ENRICH_BATCH) % 100 === 0 || ei + ENRICH_BATCH >= remainingKeys.length) {
         filteredData = allData.slice(); populateFilters(); applyFilters(); updatePanels();
       }
-
-      await new Promise(function(r) { setTimeout(r, ENRICH_DELAY); });
     }
 
     // ── RETRY: wait 30s for rate limits to reset, then retry failed ones ──
@@ -3043,6 +3042,7 @@ async function startGeocoding() {
             return fetch('/api/cnpj-enrich', {
               method: 'POST', headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ cnpjs: cnpjNums }),
+              signal: AbortSignal.timeout(30000),
             }).then(function(r) { return r.ok ? r.json() : null; }).catch(function() { return null; });
           }));
           for (var rpi = 0; rpi < retryBatches.length; rpi++) {
