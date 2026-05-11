@@ -1074,13 +1074,15 @@ function updateOverlay() {
 
 function updateHeader() {
   const winCount = filteredData.filter(r => parseFloat(r.percentual_diff_media_dimensao||0) > 2).length;
-  const shareAvg = avg(filteredData, 'share_reais_sku_dimensao') * 100;
   const bandeiras = new Set(filteredData.map(r => r.bandeira || 'Outros')).size;
 
-  document.getElementById('h-pdvs').textContent = filteredData.length.toLocaleString('pt-BR');
-  document.getElementById('h-share').textContent = shareAvg.toFixed(1) + '%';
-  document.getElementById('h-win').textContent = winCount.toLocaleString('pt-BR');
-  document.getElementById('h-bandeiras').textContent = bandeiras;
+  var elPdvs = document.getElementById('h-pdvs');
+  if (elPdvs) elPdvs.textContent = filteredData.length.toLocaleString('pt-BR');
+  // Os outros KPIs antes ficavam no header; agora moveram para o painel Overview
+  var elOvWin = document.getElementById('ov-win');
+  if (elOvWin) elOvWin.textContent = winCount.toLocaleString('pt-BR');
+  var elOvBand = document.getElementById('ov-bandeiras');
+  if (elOvBand) elOvBand.textContent = bandeiras.toLocaleString('pt-BR');
 }
 
 var _lastFilteredLength = -1;
@@ -1628,10 +1630,10 @@ function applyMapMode(type) {
   if (map && map.getSource('pdvs') && !isPlaces) {
     // Don't clear if loading saved map data (allData may be populated by openSavedMap)
   }
-  // Subtítulo do header
-  const labels = { geocoder:'📍 Lat/Lon Generator', reverse_geocoder:'🔄 Address Generator', varejo360:'📊 Varejo 360 Analysis', places_discovery:'🔎 Places Discovery' };
+  // Tipo do mapa (texto sutil ao lado do logo)
+  const labels = { geocoder:'Lat/Lon Generator', reverse_geocoder:'Address Generator', varejo360:'Varejo 360', places_discovery:'Places Discovery' };
   const sub = document.getElementById('logo-map-type');
-  if (sub) sub.textContent = labels[currentMapType] || 'by HYPR°';
+  if (sub) sub.textContent = labels[currentMapType] || 'Geocodify';
   // View toggle buttons
   const vt = document.getElementById('view-toggle-btns');
   if (vt) vt.style.display = (isGeo || isPlaces) ? 'flex' : 'none';
@@ -3569,7 +3571,9 @@ function showGallery() {
   var _badgeGal = document.getElementById('places-map-badge');
   if (_badgeGal) _badgeGal.style.display = 'none';
   const _lsGal = document.getElementById('logo-map-type');
-  if (_lsGal) _lsGal.textContent = 'by HYPR°';
+  if (_lsGal) _lsGal.textContent = 'Geocodify';
+  try { setHeaderMapName(''); } catch(e) {}
+  try { closeMoreMenu(); } catch(e) {}
   const _vtGal = document.getElementById('view-toggle-btns');
   if (_vtGal) _vtGal.style.display = 'none';
   document.getElementById('gallery-screen').classList.remove('hidden');
@@ -3823,8 +3827,8 @@ async function openSavedMap(mapId, name, mapType) {
   rawCSVData = [];
   // Track open map for share feature
   window._currentOpenMapId = mapId;
-  var shareBtn = document.getElementById('btn-share-map');
-  if (shareBtn && !_isSharedMode) shareBtn.style.display = '';
+  window._currentOpenMapName = name;
+  try { setHeaderMapName(name); } catch(e) {}
   // Aplicar modo visual correto ANTES de mostrar o mapa
   applyMapMode(mapType || 'varejo360');
   // Salvar estado para restaurar ao trocar de aba
@@ -4047,9 +4051,9 @@ async function saveMapToSupabase() {
     // Marcar mapa como salvo na sessão — evita duplicata em saves subsequentes
     // e desbloqueia features que dependem do ID (ex: openShareModal)
     window._currentOpenMapId = mapId;
-    // Revelar botão de compartilhar no header (mesmo padrão de openSavedMap)
-    var shareBtn = document.getElementById('btn-share-map');
-    if (shareBtn && !_isSharedMode) shareBtn.style.display = '';
+    window._currentOpenMapName = name;
+    // Mostrar nome do mapa no header (substitui a antiga aparição do botão Compartilhar separado)
+    try { setHeaderMapName(name); } catch(e) {}
     // Limpar estado pendente — auto-save já consumiu
     window._pendingMapName = null;
     window._pendingMapDesc = null;
@@ -4195,9 +4199,9 @@ async function initSharedMode() {
     applyMapMode(mapMeta.map_type || 'varejo360');
 
     // Header: mostrar nome do mapa, esconder botões de edição
-    document.getElementById('logo-map-type').textContent = mapMeta.name || 'Mapa compartilhado';
-    document.getElementById('btn-share-map').style.display = 'none';
-    document.getElementById('btn-back-gallery').style.display = 'none';
+    try { setHeaderMapName(mapMeta.name || 'Mapa compartilhado'); } catch(e) {}
+    var _shareBackBtn = document.getElementById('btn-back-gallery');
+    if (_shareBackBtn) _shareBackBtn.style.display = 'none';
 
     await new Promise(function(r) { setTimeout(r, 80); });
     if (!map) initMap(); else map.resize();
@@ -4229,44 +4233,103 @@ async function initSharedMode() {
 // ─── Show share button when a saved map is open ─────────────────────────────
 window._currentOpenMapId = null;
 
+// ─── Header helpers: nome do mapa e menu de ações ─────────────────────────
+function setHeaderMapName(name) {
+  var wrap = document.getElementById('header-map-name-wrap');
+  var el = document.getElementById('header-map-name');
+  if (!wrap || !el) return;
+  if (name && String(name).trim()) {
+    el.textContent = name;
+    el.setAttribute('title', name);
+    wrap.removeAttribute('hidden');
+  } else {
+    el.textContent = '';
+    el.removeAttribute('title');
+    wrap.setAttribute('hidden', '');
+  }
+}
+
+function toggleMoreMenu(ev) {
+  if (ev) ev.stopPropagation();
+  var dd = document.getElementById('more-menu-dropdown');
+  var btn = document.getElementById('btn-more-actions');
+  if (!dd) return;
+  var isOpen = dd.style.display !== 'none';
+  if (isOpen) {
+    closeMoreMenu();
+  } else {
+    // Atualiza itens do menu ANTES de abrir (visibilidade contextual)
+    var shareItem = document.getElementById('menu-item-share');
+    var csvItem = document.getElementById('menu-item-csv');
+    if (shareItem) {
+      // Compartilhar: só disponível quando o mapa tem ID salvo e não está em modo shared
+      var canShare = !!window._currentOpenMapId && !_isSharedMode;
+      shareItem.style.display = canShare ? '' : 'none';
+    }
+    if (csvItem) {
+      // CSV: disponível quando há dados carregados e não está em modo shared
+      var canCsv = (typeof allData !== 'undefined') && allData && allData.length > 0 && !_isSharedMode;
+      csvItem.style.display = canCsv ? '' : 'none';
+    }
+    dd.style.display = '';
+    if (btn) btn.setAttribute('aria-expanded', 'true');
+    // Click fora fecha
+    setTimeout(function() { document.addEventListener('click', _moreMenuClickOutside); }, 0);
+  }
+}
+
+function closeMoreMenu() {
+  var dd = document.getElementById('more-menu-dropdown');
+  var btn = document.getElementById('btn-more-actions');
+  if (dd) dd.style.display = 'none';
+  if (btn) btn.setAttribute('aria-expanded', 'false');
+  document.removeEventListener('click', _moreMenuClickOutside);
+}
+
+function _moreMenuClickOutside(ev) {
+  var wrap = document.querySelector('.hdr-more-wrap');
+  if (wrap && !wrap.contains(ev.target)) closeMoreMenu();
+}
+
 // ─── Re-enrich: detect and update unidentified PDVs ──────────────────────
 function checkReenrichBar() {
-  // Botão de download — mostra sempre que houver dados carregados, independente do tipo
-  var dlBtn = document.getElementById('btn-download-csv-map');
-  if (dlBtn) dlBtn.style.display = (allData && allData.length > 0 && !_isSharedMode) ? '' : 'none';
-  if (_isSharedMode || !currentUser) return;
-  var bar = document.getElementById('reenrich-bar');
   var headerBtn = document.getElementById('btn-reenrich-map');
-  var unidentified = allData.filter(function(r) {
+  var badge = document.getElementById('reenrich-badge');
+  if (_isSharedMode || !currentUser) {
+    if (headerBtn) headerBtn.style.display = 'none';
+    return;
+  }
+  var unidentified = (allData || []).filter(function(r) {
     return r.cnpj && (!r.bandeira || r.bandeira === 'Não identificado' || r.bandeira === 'Carregando...' || r.bandeira === 'Desconhecido');
   });
-  // Header button: show when any unidentified exist
   if (headerBtn) headerBtn.style.display = unidentified.length > 0 ? '' : 'none';
-  // Bar: only show for large counts (>50)
-  if (bar) {
-    if (unidentified.length > 50) {
-      document.getElementById('reenrich-count').textContent = unidentified.length;
-      bar.style.display = '';
-    } else {
-      bar.style.display = 'none';
-    }
+  if (badge) {
+    var n = unidentified.length;
+    badge.textContent = n > 999 ? '999+' : String(n);
   }
 }
 
 function dismissReenrich() {
-  var bar = document.getElementById('reenrich-bar');
-  if (bar) bar.style.display = 'none';
+  // Mantida como no-op por compatibilidade; a barra antiga foi removida em favor do badge no header
 }
 
 async function startReenrich() {
-  var btn = document.getElementById('reenrich-btn');
-  btn.disabled = true;
-  btn.textContent = 'Atualizando...';
+  var btn = document.getElementById('btn-reenrich-map');
+  var badge = document.getElementById('reenrich-badge');
+  if (btn) {
+    btn.disabled = true;
+    btn.setAttribute('title', 'Atualizando nomes...');
+    btn.classList.add('is-loading');
+  }
 
   var needsEnrich = allData.filter(function(r) {
     return r.cnpj && (!r.bandeira || r.bandeira === 'Não identificado' || r.bandeira === 'Carregando...' || r.bandeira === 'Desconhecido');
   });
-  if (needsEnrich.length === 0) { dismissReenrich(); return; }
+  if (needsEnrich.length === 0) {
+    if (btn) { btn.disabled = false; btn.classList.remove('is-loading'); btn.setAttribute('title', 'Atualizar nomes dos PDVs não identificados'); }
+    checkReenrichBar();
+    return;
+  }
 
   // Show the geocoding overlay with re-enrich context
   document.getElementById('geo-title-text').textContent = 'Atualizando nomes';
@@ -4452,8 +4515,11 @@ async function startReenrich() {
 
   // Hide overlay
   document.getElementById('geocoding-overlay').classList.remove('active');
-  btn.disabled = false;
-  btn.textContent = 'Atualizar nomes';
+  if (btn) {
+    btn.disabled = false;
+    btn.classList.remove('is-loading');
+    btn.setAttribute('title', 'Atualizar nomes dos PDVs não identificados');
+  }
   checkReenrichBar();
 }
 // ─── Places Discovery ─────────────────────────────────────────────────────────
@@ -5867,6 +5933,9 @@ function resetPlacesForNewSearch() {
   try { window.startReenrich = startReenrich; } catch(e) {}
   try { window.dismissReenrich = dismissReenrich; } catch(e) {}
   try { window.checkReenrichBar = checkReenrichBar; } catch(e) {}
+  try { window.setHeaderMapName = setHeaderMapName; } catch(e) {}
+  try { window.toggleMoreMenu = toggleMoreMenu; } catch(e) {}
+  try { window.closeMoreMenu = closeMoreMenu; } catch(e) {}
   try { window.openShareModalFromCard = openShareModalFromCard; } catch(e) {}
   try { window.closeShareModal = closeShareModal; } catch(e) {}
   try { window.copyShareLink = copyShareLink; } catch(e) {}
