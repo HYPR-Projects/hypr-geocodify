@@ -1245,6 +1245,13 @@ function resetFilters() {
     document.getElementById('f-tickets-min').value = 0;
     syncTicketRange();
   }
+  // Reset do slider Mínimo PDVs/rede para o default (3)
+  var minRedeEl = document.getElementById('f-min-pdvs-rede');
+  if (minRedeEl) {
+    minRedeEl.value = 3;
+    var lbl = document.getElementById('lbl-min-pdvs-rede');
+    if (lbl) lbl.textContent = '3';
+  }
   document.getElementById('lbl-share-min').textContent = '0%';
   // lbl-tickets atualizado por syncTicketRange
   ['f-oport','f-perf'].forEach(gid => {
@@ -1541,7 +1548,9 @@ function updateBandeiraChartChip(bandeiraName) {
 // ─── Ranking Tab ─────────────────────────────────────────────────────────────
 function updateRanking() {
   var grp = groupBy(filteredData, 'bandeira');
-  var MIN_PDVS = 3;
+  // Mínimo de PDVs com presença para uma rede aparecer (configurável via slider)
+  var minRedeEl = document.getElementById('f-min-pdvs-rede');
+  var MIN_PDVS = minRedeEl ? Math.max(1, parseInt(minRedeEl.value) || 3) : 3;
 
   var ranked = Object.entries(grp).map(function(entry) {
     var b = entry[0], rows = entry[1];
@@ -1578,6 +1587,20 @@ function updateRanking() {
   // Ordenar por diff real (performance vs media, excluindo PDVs sem presenca)
   var topPerf = withPresence.slice().sort(function(a,b) { return (b.diffReal||0) - (a.diffReal||0); });
 
+  // Bandeira atualmente selecionada (única) no multi-select — usado para destacar item ativo
+  var _selRank = msGetSelected('ms-bandeira');
+  var _activeBand = _selRank.size === 1 ? Array.from(_selRank)[0] : null;
+  function _isActiveBand(itemName) {
+    if (!_activeBand) return false;
+    var grouped = (typeof _bandeiraGroupMap !== 'undefined' && _bandeiraGroupMap[itemName]) || itemName;
+    return _activeBand === grouped || _activeBand === itemName;
+  }
+  function _rankItemAttrs(itemName) {
+    var safeName = _escForHtml(itemName);
+    var cls = 'rank-item clickable' + (_isActiveBand(itemName) ? ' active' : '');
+    return 'class="' + cls + '" data-bandeira="' + safeName + '"';
+  }
+
   if (isFew) {
     if (topSection) topSection.querySelector('.panel-section-title').textContent = 'Performance por rede (' + withPresence.length + ')';
     if (bottomSection) bottomSection.style.display = 'none';
@@ -1585,7 +1608,7 @@ function updateRanking() {
     renderList('rank-top', topPerf, function(item, i) {
       var d = item.diffReal || 0;
       var barColor = d > 2 ? _cssVar('--win') : d < -2 ? _cssVar('--lose') : _cssVar('--neutral');
-      return '<div class="rank-item">' +
+      return '<div ' + _rankItemAttrs(item.name) + '>' +
         '<span class="rank-num">' + (i+1) + '</span>' +
         '<span class="rank-name" title="' + _escForHtml(item.name) + '">' + _escForHtml(item.name) + '</span>' +
         '<div class="rank-bar-wrap"><div class="rank-bar" style="width:' + Math.min(item.shareAvg/maxS*100,100) + '%;background:' + barColor + '"></div></div>' +
@@ -1603,7 +1626,7 @@ function updateRanking() {
     function renderDiffItem(item, i) {
       var d = item.diffReal || 0;
       var barColor = d > 2 ? _cssVar('--win') : d < -2 ? _cssVar('--lose') : _cssVar('--neutral');
-      return '<div class="rank-item">' +
+      return '<div ' + _rankItemAttrs(item.name) + '>' +
         '<span class="rank-num">' + (i+1) + '</span>' +
         '<span class="rank-name" title="' + _escForHtml(item.name) + '">' + _escForHtml(item.name) + '</span>' +
         '<div class="rank-bar-wrap"><div class="rank-bar" style="width:' + Math.min(Math.abs(d)/maxDiff*100,100) + '%;background:' + barColor + '"></div></div>' +
@@ -1626,7 +1649,7 @@ function updateRanking() {
   renderList('rank-oport', oportItems, function(item, i) {
     var hasAny = item.withShare > 0;
     var presenceLabel = hasAny ? (item.presence.toFixed(0) + '% c/ share') : 'zero presenca';
-    return '<div class="rank-item">' +
+    return '<div ' + _rankItemAttrs(item.name) + '>' +
       '<span class="rank-num">' + (i+1) + '</span>' +
       '<span class="rank-name" title="' + _escForHtml(item.name) + '">' + _escForHtml(item.name) + '</span>' +
       '<div class="rank-bar-wrap"><div class="rank-bar" style="width:' + Math.min(item.count/Math.max(oportItems[0].count,1)*100,100) + '%;background:var(--accent)"></div></div>' +
@@ -1640,10 +1663,19 @@ function updateRanking() {
 // ─── Analysis Tab ────────────────────────────────────────────────────────────
 function updateAnalysis() {
   var grp = groupBy(filteredData, 'bandeira');
+  // Lê o mínimo de PDVs/rede configurado no painel (mesmo controle do Ranking)
+  var minRedeEl = document.getElementById('f-min-pdvs-rede');
+  var MIN_PDVS_REDE = minRedeEl ? Math.max(1, parseInt(minRedeEl.value) || 3) : 3;
+
   var ranked = Object.entries(grp).map(function(entry) {
     var b = entry[0], rows = entry[1];
+    // PDVs com presença efetiva da marca (share > 0)
+    var withShareRows = rows.filter(function(r) {
+      return parseFloat(r.share_reais_sku_dimensao || 0) > 0;
+    });
     return {
       name: b, count: rows.length,
+      withShareCount: withShareRows.length,
       shareAvg: avg(rows, 'share_reais_sku_dimensao') * 100,
       diffAvg: avg(rows, 'percentual_diff_media_dimensao'),
     };
@@ -1662,10 +1694,24 @@ function updateAnalysis() {
   var topUF = ufSorted[0] ? ufSorted[0][0] : '';
   var topUFPct = ufSorted[0] && totalPDVs ? (ufSorted[0][1].length / totalPDVs * 100).toFixed(0) : 0;
 
-  // Bandeiras com melhor e pior performance (excluir 0%)
-  var withPresence = ranked.filter(function(r) { return r.shareAvg > 0.1; });
-  var bestPerf = withPresence.filter(function(r) { return r.diffAvg > 2; }).sort(function(a,b) { return b.diffAvg - a.diffAvg; }).slice(0,3);
-  var worstPerf = withPresence.filter(function(r) { return r.diffAvg < -2; }).sort(function(a,b) { return a.diffAvg - b.diffAvg; }).slice(0,3);
+  // Filtro de relevância: redes com presença efetiva + mínimo configurado de PDVs c/ share
+  var withPresence = ranked.filter(function(r) {
+    return r.shareAvg > 0.1 && r.withShareCount >= MIN_PDVS_REDE;
+  });
+
+  // Score ponderado: prioriza redes onde o ganho/perda vale a pena agir
+  // score = |diff| × √(PDVs c/ presença) → diffs altos em redes maiores ranqueiam à frente
+  function relevanceScore(r) {
+    return Math.abs(r.diffAvg) * Math.sqrt(Math.max(r.withShareCount, 1));
+  }
+  var bestPerf = withPresence
+    .filter(function(r) { return r.diffAvg > 2; })
+    .sort(function(a,b) { return relevanceScore(b) - relevanceScore(a); })
+    .slice(0,3);
+  var worstPerf = withPresence
+    .filter(function(r) { return r.diffAvg < -2; })
+    .sort(function(a,b) { return relevanceScore(b) - relevanceScore(a); })
+    .slice(0,3);
 
   // Share da top bandeira vs média geral
   var shareGeral = avg(filteredData, 'share_reais_sku_dimensao') * 100;
@@ -1693,17 +1739,17 @@ function updateAnalysis() {
       title: 'Onde a marca vai bem',
       body: bestPerf.length ?
         'Melhor performance em: ' + bestPerf.map(function(b) {
-          return '<span class="analysis-highlight">' + _escForHtml(b.name) + '</span> (+' + b.diffAvg.toFixed(1) + '%, ' + b.count + ' PDVs)';
+          return '<span class="analysis-highlight">' + _escForHtml(b.name) + '</span> (+' + b.diffAvg.toFixed(1) + '%, ' + b.withShareCount + ' PDVs)';
         }).join(', ') + '.'
-        : 'Nenhuma bandeira com performance significativamente acima da média.'
+        : 'Nenhuma rede com performance significativamente acima da média (mín. ' + MIN_PDVS_REDE + ' PDVs c/ presença).'
     },
     {
       title: 'Onde precisa melhorar',
       body: worstPerf.length ?
         'Maior risco em: ' + worstPerf.map(function(b) {
-          return '<span class="analysis-highlight lose">' + _escForHtml(b.name) + '</span> (' + b.diffAvg.toFixed(1) + '%, ' + b.count + ' PDVs)';
+          return '<span class="analysis-highlight lose">' + _escForHtml(b.name) + '</span> (' + b.diffAvg.toFixed(1) + '%, ' + b.withShareCount + ' PDVs)';
         }).join(', ') + '.'
-        : 'Nenhuma bandeira com performance significativamente abaixo da média.'
+        : 'Nenhuma rede com performance significativamente abaixo da média (mín. ' + MIN_PDVS_REDE + ' PDVs c/ presença).'
     },
     {
       title: 'Rede principal',
@@ -2010,6 +2056,14 @@ function supaLogout() {
 
 // Criar versão debounced de applyFilters (150ms) para sliders
 var _debouncedFilter = debounce(applyFilters, 150);
+
+// Debounced refresh apenas das tabs Ranking + Análise — usado pelo slider
+// "Mínimo PDVs/rede", que não muda o que está visível no mapa (só recalcula painéis).
+var _debouncedAnalytics = debounce(function() {
+  _lastFilteredHash = '';
+  try { updateRanking(); } catch(e) { console.error(e); }
+  try { updateAnalysis(); } catch(e) { console.error(e); }
+}, 150);
 
 // ─── Estado do tipo de mapa atual ─────────────────────────────────────────────
 var currentMapType = 'varejo360'; // 'geocoder' | 'reverse_geocoder' | 'varejo360' | 'places_discovery'
@@ -6916,6 +6970,18 @@ function resetPlacesForNewSearch() {
     if (!el || !el.dataset.perf) return;
     try { toggleMiniStatFilter(el.dataset.perf); } catch(err) { console.error(err); }
   });
+
+  // Itens do Ranking clicáveis — seleciona aquela bandeira no multi-select
+  var tcRanking = document.getElementById('tc-ranking');
+  if (tcRanking) {
+    tcRanking.addEventListener('click', function(e) {
+      var el = e.target.closest('.rank-item.clickable[data-bandeira]');
+      if (!el) return;
+      // dataset decodifica entidades HTML automaticamente
+      var name = el.dataset.bandeira;
+      try { selectBandeiraFromChart(name); } catch(err) { console.error(err); }
+    });
+  }
 })();
 
 
@@ -7133,6 +7199,7 @@ function resetPlacesForNewSearch() {
   try { window._receitaPending = _receitaPending; } catch(e) {}
   try { window._GEO_SCORE_MIN = _GEO_SCORE_MIN; } catch(e) {}
   try { window._debouncedFilter = _debouncedFilter; } catch(e) {}
+  try { window._debouncedAnalytics = _debouncedAnalytics; } catch(e) {}
   try { window.dropZone = dropZone; } catch(e) {}
   try { window._escForHtml = _escForHtml; } catch(e) {}
   try { window._cssVar = _cssVar; } catch(e) {}
