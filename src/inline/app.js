@@ -3006,6 +3006,15 @@ async function startGeocoding() {
           // Plot pin em tempo real — usuário já pode interagir
           allData.push(row);
 
+          // Persistir lat/lon em cnpj_cache para o próximo upload pular HERE.
+          // Só Varejo 360 — geocoder/reverse não tem CNPJ confiável.
+          // Fire-and-forget: queueCnpjGeoUpsert valida cnpj 14d + lat/lon,
+          // flushCnpjGeoUpserts(false) só dispara request a cada 50 enfileirados.
+          if (currentMapType === 'varejo360') {
+            queueCnpjGeoUpsert(row);
+            flushCnpjGeoUpserts(false);
+          }
+
           // Atualizar mapa a cada 200 novos pins (batch GeoJSON update é mais eficiente)
           if (allData.length % 200 === 0) {
             filteredData = allData.slice();
@@ -3047,6 +3056,12 @@ async function startGeocoding() {
     }
 
     await new Promise(r => setTimeout(r, DELAY));
+  }
+
+  // Flush final dos upserts pendentes — força mesmo com batch pequeno
+  // para garantir que todos os novos lat/lon sejam persistidos no cnpj_cache.
+  if (currentMapType === 'varejo360') {
+    try { await flushCnpjGeoUpserts(true); } catch(e) {}
   }
 
   geocodingActive = false;
@@ -6124,7 +6139,8 @@ function resetPlacesForNewSearch() {
   try { window.generateCircleGeoJSON = generateCircleGeoJSON; } catch(e) {}
   try { window.geocodeHERE = geocodeHERE; } catch(e) {}
   try { window.bulkCnpjGeocodeLookup = bulkCnpjGeocodeLookup; } catch(e) {}
-  try { window.persistCnpjGeocode = persistCnpjGeocode; } catch(e) {}
+  try { window.queueCnpjGeoUpsert = queueCnpjGeoUpsert; } catch(e) {}
+  try { window.flushCnpjGeoUpserts = flushCnpjGeoUpserts; } catch(e) {}
   try { window._normalizeCnpj14 = _normalizeCnpj14; } catch(e) {}
   try { window.getSearchAreas = getSearchAreas; } catch(e) {}
   try { window.goToStep = goToStep; } catch(e) {}
