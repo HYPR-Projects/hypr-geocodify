@@ -431,6 +431,7 @@ function _refreshPinColors() {
     win: _cssVar('--win'),
     lose: _cssVar('--lose'),
     neutral: _cssVar('--neutral'),
+    absent: _cssVar('--absent') || '#94a3b8',
     purple: _cssVar('--purple') || '#a855f7',
   };
 }
@@ -441,6 +442,9 @@ function pinColor(row) {
   const diff = parseFloat(row.percentual_diff_media_dimensao || 0);
   if (diff > 2) return _pinColors.win;
   if (diff < -2) return _pinColors.lose;
+  // Faixa de média: separa "competindo" (com presença) de "sem presença"
+  const share = parseFloat(row.share_reais_sku_dimensao || 0);
+  if (share <= 0) return _pinColors.absent;
   return _pinColors.neutral;
 }
 
@@ -1007,8 +1011,11 @@ function applyFilters() {
     }
     if (perf) {
       const d = parseFloat(r.percentual_diff_media_dimensao || 0);
+      const s = parseFloat(r.share_reais_sku_dimensao || 0);
       if (perf === 'acima' && d <= 2) return false;
       if (perf === 'abaixo' && d >= -2) return false;
+      // Sem presença: na faixa de média (±2pp) com share = 0
+      if (perf === 'sem_presenca' && !(d >= -2 && d <= 2 && s <= 0)) return false;
     }
     return true;
   });
@@ -1080,18 +1087,17 @@ function updateOverlay() {
 }
 
 function updateHeader() {
-  var winCount = 0, loseCount = 0, competeCount = 0;
+  var winCount = 0, loseCount = 0, competeCount = 0, absentCount = 0;
   for (var i = 0; i < filteredData.length; i++) {
     var r = filteredData[i];
     var d = parseFloat(r.percentual_diff_media_dimensao || 0);
     if (d > 2) winCount++;
     else if (d < -2) loseCount++;
     else {
-      // Competindo: na média (±2pp) mas com presença efetiva (share > 0).
-      // PDVs sem presença (share=0, diff=0) ficam fora — eles já são contabilizados
-      // separadamente como "PDVs sem presença" no Share Geral.
+      // Faixa de média (±2pp): separa por presença efetiva
       var s = parseFloat(r.share_reais_sku_dimensao || 0);
       if (s > 0) competeCount++;
+      else absentCount++;
     }
   }
   var bandeiras = new Set(filteredData.map(function(r) { return r.bandeira || 'Outros'; })).size;
@@ -1106,6 +1112,8 @@ function updateHeader() {
   if (elOvCompete) elOvCompete.textContent = competeCount.toLocaleString('pt-BR');
   var elOvLose = document.getElementById('ov-lose');
   if (elOvLose) elOvLose.textContent = loseCount.toLocaleString('pt-BR');
+  var elOvAbsent = document.getElementById('ov-absent');
+  if (elOvAbsent) elOvAbsent.textContent = absentCount.toLocaleString('pt-BR');
   var elOvBand = document.getElementById('ov-bandeiras');
   if (elOvBand) elOvBand.textContent = bandeiras.toLocaleString('pt-BR');
 }
