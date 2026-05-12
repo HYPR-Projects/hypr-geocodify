@@ -398,6 +398,20 @@ function _setupMapInteractions() {
     const row = allData.find(r => r._mapId === props._mapId);
     if (!row) return;
 
+    // Cmd (Mac) / Ctrl (Win/Linux) + click ativa modo seleção automaticamente
+    // se ainda não estiver ativo e o usuário tiver permissão para deletar.
+    const isModifierClick = e.originalEvent && (e.originalEvent.metaKey || e.originalEvent.ctrlKey);
+    if (isModifierClick && !_selectionMode
+        && currentMapType === 'varejo360'
+        && currentUser && !_isSharedMode
+        && row.id) {
+      startSelectionMode();
+      _selectedIds.add(row.id);
+      try { updateSelectionBar(); } catch(_) {}
+      renderMarkers();
+      return;
+    }
+
     // Modo seleção: toggle no Set, não abre popup
     if (_selectionMode) {
       if (!row.id) return; // pin não persistido no banco — não pode deletar
