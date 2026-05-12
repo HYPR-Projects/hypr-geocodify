@@ -175,6 +175,10 @@ var charts = {};
 var activeLayer = 'dark';
 var _popup = null;        // MapLibre popup atual
 
+// Filtro de bucket de share ativado via clique no chart "Distribuição de Share"
+// Quando setado, sobrescreve o slider f-share-min. Formato: { min: 0.05, max: 0.10 } ou null.
+var _activeShareBucket = null;
+
 // Modo seleção múltipla — Varejo 360
 var _selectionMode = false;
 var _selectedIds = new Set(); // row.id (UUID) dos pins selecionados
@@ -1166,7 +1170,15 @@ function applyFilters() {
       if (!selBandeiras.has(grouped) && !selBandeiras.has(bandeira)) return false;
     }
     if (uf && r.uf !== uf) return false;
-    if (parseFloat(r.share_reais_sku_dimensao || 0) < shareMin) return false;
+
+    // Share bucket ativo (clique no chart-dist) tem precedência sobre o slider
+    var shareRaw = parseFloat(r.share_reais_sku_dimensao || 0);
+    if (_activeShareBucket) {
+      if (shareRaw < _activeShareBucket.min || shareRaw >= _activeShareBucket.max) return false;
+    } else {
+      if (shareRaw < shareMin) return false;
+    }
+
     if (parseInt(r.tickets_amostra || 0) < ticketsMin) return false;
     if (oport) {
       const o = parseFloat(r.oportunidade_dimensao || 0);
@@ -1176,9 +1188,11 @@ function applyFilters() {
     }
     if (perf) {
       const d = parseFloat(r.percentual_diff_media_dimensao || 0);
-      const s = parseFloat(r.share_reais_sku_dimensao || 0);
+      const s = shareRaw;
       if (perf === 'acima' && d <= 2) return false;
       if (perf === 'abaixo' && d >= -2) return false;
+      // Competindo: na faixa de média (±2pp) com share > 0
+      if (perf === 'competindo' && !(d >= -2 && d <= 2 && s > 0)) return false;
       // Sem presença: na faixa de média (±2pp) com share = 0
       if (perf === 'sem_presenca' && !(d >= -2 && d <= 2 && s <= 0)) return false;
     }
@@ -1210,6 +1224,7 @@ function toggleBadge(el, groupId) {
 
 function resetFilters() {
   _lastFilteredHash = '';
+  _activeShareBucket = null;
   msReset('ms-bandeira');
   document.getElementById('f-uf').value = '';
   document.getElementById('f-share-min').value = 0;
@@ -1281,6 +1296,92 @@ function updateHeader() {
   if (elOvAbsent) elOvAbsent.textContent = absentCount.toLocaleString('pt-BR');
   var elOvBand = document.getElementById('ov-bandeiras');
   if (elOvBand) elOvBand.textContent = bandeiras.toLocaleString('pt-BR');
+
+  // Sincroniza visual dos mini-stats clicáveis com o badge perf ativo
+  syncMiniStatActive();
+}
+
+// ─── Filtros clicáveis (overview) ───────────────────────────────────────────
+// Sincroniza classe .active dos mini-stats com badge perf ativo
+function syncMiniStatActive() {
+  var activePerf = document.querySelector('#f-perf .badge.active')?.dataset.v || '';
+  document.querySelectorAll('.overview-mini-stat.clickable').forEach(function(el) {
+    if (el.dataset.perf === activePerf && activePerf !== '') {
+      el.classList.add('active');
+    } else {
+      el.classList.remove('active');
+    }
+  });
+}
+
+// Clique em mini-stat: ativa/desativa o badge perf correspondente
+function toggleMiniStatFilter(perfValue) {
+  var group = document.getElementById('f-perf');
+  if (!group) return;
+  var current = group.querySelector('.badge.active');
+  var target = group.querySelector('.badge[data-v="' + perfValue + '"]');
+  if (!target) return;
+
+  // Toggle: se já está ativo, volta pra "Todos" (data-v="")
+  if (current && current.dataset.v === perfValue) {
+    var none = group.querySelector('.badge[data-v=""]');
+    if (none) toggleBadge(none, 'f-perf');
+  } else {
+    toggleBadge(target, 'f-perf');
+  }
+  applyFilters();
+}
+
+// Clique em bin do chart-dist: ativa/desativa o bucket de share
+function toggleShareBucket(min, max) {
+  if (_activeShareBucket && _activeShareBucket.min === min && _activeShareBucket.max === max) {
+    _activeShareBucket = null;
+  } else {
+    _activeShareBucket = { min: min, max: max };
+  }
+  _lastFilteredHash = ''; // invalida cache de panels
+  applyFilters();
+}
+
+function clearShareBucket() {
+  _activeShareBucket = null;
+  _lastFilteredHash = '';
+  applyFilters();
+}
+
+// Clique em barra do chart-bandeiras: seleciona aquela bandeira no multi-select
+function selectBandeiraFromChart(bandeiraName) {
+  if (!bandeiraName) return;
+  // Resolver nome agrupado (se houver agrupamento)
+  var grouped = (typeof _bandeiraGroupMap !== 'undefined' && _bandeiraGroupMap[bandeiraName]) || bandeiraName;
+
+  // Verificar estado atual: se já está só essa bandeira selecionada, limpar (toggle)
+  var current = msGetSelected('ms-bandeira');
+  if (current.size === 1 && (current.has(grouped) || current.has(bandeiraName))) {
+    msReset('ms-bandeira');
+    applyFilters();
+    return;
+  }
+
+  // Selecionar exclusivamente essa bandeira: reset + marca opção correspondente
+  msReset('ms-bandeira');
+  var wrap = document.getElementById('ms-bandeira');
+  if (!wrap || !_msState['ms-bandeira']) { applyFilters(); return; }
+
+  // Tenta achar a opção pelo valor agrupado ou pelo nome bruto
+  var targetOpt = wrap.querySelector('.ms-opt[data-value="' + CSS.escape(grouped) + '"]')
+              || wrap.querySelector('.ms-opt[data-value="' + CSS.escape(bandeiraName) + '"]');
+
+  if (targetOpt) {
+    var val = targetOpt.dataset.value;
+    _msState['ms-bandeira'].selected.add(val);
+    targetOpt.classList.add('selected');
+    var input = targetOpt.querySelector('input');
+    if (input) input.checked = true;
+    _updateMsSelectionBar('ms-bandeira');
+    updateMsDisplay('ms-bandeira');
+  }
+  applyFilters();
 }
 
 var _lastFilteredLength = -1;
@@ -1351,16 +1452,66 @@ function updateOverview() {
   // Chart: PDVs por bandeira (top 8 por count)
   var grp = groupBy(filteredData, 'bandeira');
   var bandSort = Object.entries(grp).sort(function(a,b) { return b[1].length - a[1].length; }).slice(0, 8);
-  renderHorizBarChart('chart-bandeiras', bandSort.map(function(e) { return e[0]; }), bandSort.map(function(e) { return e[1].length; }));
+  var bandLabels = bandSort.map(function(e) { return e[0]; });
+  var bandCounts = bandSort.map(function(e) { return e[1].length; });
 
-  // Chart: distribuição de share
-  var bins = [0,2,5,10,15,20,30,50,100];
-  var labels = bins.slice(0,-1).map(function(v,i) { return v + '–' + bins[i+1] + '%'; });
-  var counts = bins.slice(0,-1).map(function(v,i) { return filteredData.filter(function(r) {
-    var s = parseFloat(r.share_reais_sku_dimensao||0)*100;
+  // Detecta bandeira "ativa" (única selecionada no multi-select) para destacar a barra
+  var selBand = msGetSelected('ms-bandeira');
+  var activeBand = null;
+  if (selBand.size === 1) { activeBand = Array.from(selBand)[0]; }
+  renderHorizBarChart('chart-bandeiras', bandLabels, bandCounts, activeBand);
+  updateBandeiraChartChip(activeBand);
+
+  // Chart: distribuição de share — bins fixos (em decimal: 0.02 = 2%)
+  var bins = [0, 0.02, 0.05, 0.10, 0.15, 0.20, 0.30, 0.50, 1.00];
+  var distLabels = bins.slice(0,-1).map(function(v,i) { return Math.round(v*100) + '–' + Math.round(bins[i+1]*100) + '%'; });
+  var distCounts = bins.slice(0,-1).map(function(v,i) { return filteredData.filter(function(r) {
+    var s = parseFloat(r.share_reais_sku_dimensao||0);
     return s >= v && s < bins[i+1];
   }).length; });
-  renderHistChart('chart-dist', labels, counts);
+  // Detecta bin ativo
+  var activeBinIdx = -1;
+  if (_activeShareBucket) {
+    for (var bi = 0; bi < bins.length - 1; bi++) {
+      if (Math.abs(bins[bi] - _activeShareBucket.min) < 1e-6 && Math.abs(bins[bi+1] - _activeShareBucket.max) < 1e-6) {
+        activeBinIdx = bi; break;
+      }
+    }
+  }
+  renderHistChart('chart-dist', distLabels, distCounts, bins, activeBinIdx);
+  updateShareBucketChip();
+}
+
+// Atualiza chip do bucket de share ativo
+function updateShareBucketChip() {
+  var chip = document.getElementById('chip-share-bucket');
+  if (!chip) return;
+  if (_activeShareBucket) {
+    var minPct = Math.round(_activeShareBucket.min * 100);
+    var maxPct = Math.round(_activeShareBucket.max * 100);
+    chip.innerHTML = '<span>Filtro: ' + minPct + '–' + maxPct + '%</span><span class="chip-close">✕</span>';
+    chip.style.display = 'inline-flex';
+    chip.onclick = function() { clearShareBucket(); };
+  } else {
+    chip.style.display = 'none';
+    chip.innerHTML = '';
+    chip.onclick = null;
+  }
+}
+
+// Atualiza chip de bandeira filtrada via clique no chart
+function updateBandeiraChartChip(bandeiraName) {
+  var chip = document.getElementById('chip-bandeira-chart');
+  if (!chip) return;
+  if (bandeiraName) {
+    chip.innerHTML = '<span>Filtro: ' + _escForHtml(bandeiraName) + '</span><span class="chip-close">✕</span>';
+    chip.style.display = 'inline-flex';
+    chip.onclick = function() { msReset('ms-bandeira'); applyFilters(); };
+  } else {
+    chip.style.display = 'none';
+    chip.innerHTML = '';
+    chip.onclick = null;
+  }
 }
 
 // ─── Ranking Tab ─────────────────────────────────────────────────────────────
@@ -1598,14 +1749,31 @@ async function renderBarChart(id, labels, data, colors) {
   });
 }
 
-async function renderHorizBarChart(id, labels, data) {
+async function renderHorizBarChart(id, labels, data, activeLabel) {
   await ensureChartJS();
   destroyChart(id);
   const ctx = document.getElementById(id).getContext('2d');
+  var accentColor = _cssVar('--accent');
+  var dimColor = _cssVar('--accent-chart') || _cssVar('--accent');
+  // Se há label ativo, destaca essa barra e atenua as outras
+  var hasActive = activeLabel != null && labels.indexOf(activeLabel) !== -1;
+  var bgColors = labels.map(function(l) {
+    if (!hasActive) return accentColor;
+    return l === activeLabel ? accentColor : (dimColor + '55'); // semi-transparente
+  });
   charts[id] = new Chart(ctx, {
     type: 'bar',
-    data: { labels, datasets: [{ data, backgroundColor: _cssVar('--accent'), borderRadius: 3, borderSkipped: false }] },
+    data: { labels, datasets: [{ data, backgroundColor: bgColors, borderRadius: 3, borderSkipped: false }] },
     options: { ...chartDefaults, indexAxis: 'y', responsive: true, maintainAspectRatio: false,
+      onClick: function(evt, elements) {
+        if (!elements || !elements.length) return;
+        var idx = elements[0].index;
+        var labelOriginal = labels[idx];
+        try { selectBandeiraFromChart(labelOriginal); } catch(e) { console.error(e); }
+      },
+      onHover: function(evt, elements) {
+        evt.native.target.style.cursor = elements && elements.length ? 'pointer' : 'default';
+      },
       scales: {
         x: { grid: { color: _cssVar('--surface-subtle') }, ticks: { color: _cssVar('--text-muted'), font: { size: 10 } } },
         y: { grid: { display: false }, ticks: { color: _cssVar('--text-dim'), font: { size: 10 }, callback: function(value) { var l = this.getLabelForValue(value); return l && l.length > 16 ? l.slice(0,16) + '…' : l; } } }
@@ -1614,14 +1782,30 @@ async function renderHorizBarChart(id, labels, data) {
   });
 }
 
-async function renderHistChart(id, labels, data) {
+async function renderHistChart(id, labels, data, bins, activeBinIdx) {
   await ensureChartJS();
   destroyChart(id);
   const ctx = document.getElementById(id).getContext('2d');
+  var accentColor = _cssVar('--accent-chart') || _cssVar('--accent');
+  var hasActive = typeof activeBinIdx === 'number' && activeBinIdx >= 0;
+  var bgColors = labels.map(function(_, i) {
+    if (!hasActive) return accentColor;
+    return i === activeBinIdx ? _cssVar('--accent') : (accentColor + '55');
+  });
   charts[id] = new Chart(ctx, {
     type: 'bar',
-    data: { labels, datasets: [{ data, backgroundColor: _cssVar('--accent-chart'), borderRadius: 2 }] },
+    data: { labels, datasets: [{ data, backgroundColor: bgColors, borderRadius: 2 }] },
     options: { ...chartDefaults, responsive: true, maintainAspectRatio: false,
+      onClick: function(evt, elements) {
+        if (!elements || !elements.length || !bins) return;
+        var idx = elements[0].index;
+        var min = bins[idx];
+        var max = bins[idx + 1];
+        try { toggleShareBucket(min, max); } catch(e) { console.error(e); }
+      },
+      onHover: function(evt, elements) {
+        evt.native.target.style.cursor = elements && elements.length ? 'pointer' : 'default';
+      },
       scales: { x: { grid: { display: false }, ticks: { color: _cssVar('--text-muted'), font: { size: 9 }, maxRotation: 45 } },
         y: { grid: { color: _cssVar('--surface-subtle') }, ticks: { color: _cssVar('--text-muted'), font: { size: 10 } } } }
     }
@@ -6701,6 +6885,13 @@ function resetPlacesForNewSearch() {
       setRegionFilter(chip.getAttribute('data-region'), chip);
     });
   }
+
+  // Mini-stats clicáveis na Overview (Ganhando / Competindo / Perdendo / Sem presença)
+  document.addEventListener('click', function(e) {
+    var el = e.target.closest('.overview-mini-stat.clickable');
+    if (!el || !el.dataset.perf) return;
+    try { toggleMiniStatFilter(el.dataset.perf); } catch(err) { console.error(err); }
+  });
 })();
 
 
@@ -6863,6 +7054,11 @@ function resetPlacesForNewSearch() {
   try { window.toggleAdvancedFilters = toggleAdvancedFilters; } catch(e) {}
   try { window.toggleBadge = toggleBadge; } catch(e) {}
   try { window.toggleFullMap = toggleFullMap; } catch(e) {}
+  try { window.toggleMiniStatFilter = toggleMiniStatFilter; } catch(e) {}
+  try { window.toggleShareBucket = toggleShareBucket; } catch(e) {}
+  try { window.clearShareBucket = clearShareBucket; } catch(e) {}
+  try { window.selectBandeiraFromChart = selectBandeiraFromChart; } catch(e) {}
+  try { window.syncMiniStatActive = syncMiniStatActive; } catch(e) {}
   try { window.toggleMultiSelect = toggleMultiSelect; } catch(e) {}
   try { window.togglePanel = togglePanel; } catch(e) {}
   try { window.togglePlacesPanel = togglePlacesPanel; } catch(e) {}
