@@ -589,6 +589,15 @@
           </div>
         </div>
 
+        <!-- Mínimo de PDVs por rede — afeta Ranking e Análise -->
+        <div class="filter-group filter-group-minrede">
+          <div class="filter-label" title="Mínimo de PDVs com presença da marca para uma rede aparecer no Ranking e na Análise">Mínimo PDVs/rede</div>
+          <div class="range-row">
+            <input type="range" id="f-min-pdvs-rede" aria-label="Mínimo PDVs por rede" min="1" max="20" value="3" step="1" oninput="updateRangeLabel('f-min-pdvs-rede','lbl-min-pdvs-rede',''); _debouncedAnalytics()">
+            <span class="range-label" id="lbl-min-pdvs-rede">3</span>
+          </div>
+        </div>
+
         <!-- Oportunidade (só Varejo 360) -->
         <div class="filter-group filter-group-oport">
           <div class="filter-label">Oportunidade</div>
