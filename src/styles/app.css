@@ -1604,3 +1604,15 @@ html.shared-loading-leaving #shared-loading {
   .selection-bar-hint { display: none; }
   #selection-bar { padding: 8px 10px; font-size: 12px; }
 }
+
+/* ─── Box selection visual (Cmd/Ctrl + drag em V360) ──────────────────── */
+.map-box-select {
+  position: absolute;
+  background: rgba(0, 106, 199, 0.12);
+  border: 2px solid var(--accent, #006AC7);
+  border-radius: 4px;
+  pointer-events: none;
+  z-index: 5;
+}
+/* Previne seleção de texto durante drag no mapa */
+.maplibregl-canvas-container { user-select: none; -webkit-user-select: none; }

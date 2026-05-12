@@ -448,6 +448,140 @@ function _setupMapInteractions() {
   map.on('mouseleave', 'clusters', () => map.getCanvas().style.cursor = '');
   map.on('mouseenter', 'pdv-points', () => map.getCanvas().style.cursor = 'pointer');
   map.on('mouseleave', 'pdv-points', () => map.getCanvas().style.cursor = '');
+
+  // Box selection (Cmd/Ctrl + drag) — Varejo 360
+  _setupBoxSelection();
+}
+
+// Box selection: Cmd (Mac) ou Ctrl (Win/Linux) + arrastar desenha um
+// retângulo no mapa. Pins dentro do retângulo são adicionados à seleção
+// e o modo de seleção é ativado se ainda não estiver. Drag-pan do mapa
+// fica desabilitado só enquanto o retângulo está sendo desenhado.
+var _boxSelectInited = false;
+function _setupBoxSelection() {
+  if (_boxSelectInited) return;
+  _boxSelectInited = true;
+
+  var canvas = map.getCanvasContainer();
+  var startPt = null;
+  var box = null;
+  var dragging = false;
+  var DRAG_THRESHOLD = 5; // px
+
+  function mousePos(e) {
+    var rect = canvas.getBoundingClientRect();
+    return { x: e.clientX - rect.left, y: e.clientY - rect.top };
+  }
+
+  canvas.addEventListener('mousedown', function(e) {
+    // Só ativa com modifier (Cmd no Mac, Ctrl no Win/Linux)
+    if (!(e.metaKey || e.ctrlKey)) return;
+    // Botão esquerdo apenas
+    if (e.button !== 0) return;
+    // Gating: V360 + dono + não shared
+    if (currentMapType !== 'varejo360') return;
+    if (!currentUser || _isSharedMode) return;
+
+    startPt = mousePos(e);
+    dragging = false;
+
+    // Desabilita pan/zoom imediatamente pra evitar competição de handlers
+    try { map.dragPan.disable(); } catch(_) {}
+    try { map.boxZoom.disable(); } catch(_) {}
+
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+    document.addEventListener('keydown', onKey);
+  });
+
+  function onMove(e) {
+    if (!startPt) return;
+    var p = mousePos(e);
+    var dx = Math.abs(p.x - startPt.x);
+    var dy = Math.abs(p.y - startPt.y);
+
+    // Detecta drag depois de cruzar o threshold
+    if (!dragging && (dx > DRAG_THRESHOLD || dy > DRAG_THRESHOLD)) {
+      dragging = true;
+      box = document.createElement('div');
+      box.className = 'map-box-select';
+      canvas.appendChild(box);
+    }
+
+    if (dragging && box) {
+      var minX = Math.min(startPt.x, p.x);
+      var maxX = Math.max(startPt.x, p.x);
+      var minY = Math.min(startPt.y, p.y);
+      var maxY = Math.max(startPt.y, p.y);
+      box.style.left = minX + 'px';
+      box.style.top = minY + 'px';
+      box.style.width = (maxX - minX) + 'px';
+      box.style.height = (maxY - minY) + 'px';
+    }
+  }
+
+  function onUp(e) {
+    document.removeEventListener('mousemove', onMove);
+    document.removeEventListener('mouseup', onUp);
+    document.removeEventListener('keydown', onKey);
+
+    var hadBox = dragging;
+    var startBackup = startPt;
+    var endPt = mousePos(e);
+
+    // Cleanup visual + re-habilita interações do mapa
+    if (box) { try { box.parentNode.removeChild(box); } catch(_) {} box = null; }
+    try { map.dragPan.enable(); } catch(_) {}
+    try { map.boxZoom.enable(); } catch(_) {}
+
+    startPt = null;
+    dragging = false;
+
+    if (!hadBox) return; // não houve drag — handler de click cuida
+
+    // Query features renderizadas dentro do bbox em pixels
+    var bbox = [
+      [Math.min(startBackup.x, endPt.x), Math.min(startBackup.y, endPt.y)],
+      [Math.max(startBackup.x, endPt.x), Math.max(startBackup.y, endPt.y)],
+    ];
+    var feats;
+    try { feats = map.queryRenderedFeatures(bbox, { layers: ['pdv-points'] }); }
+    catch(err) { console.warn('[box-select] queryRenderedFeatures falhou:', err); feats = []; }
+
+    if (!feats.length) {
+      console.debug('[box-select] nenhum pin no retângulo');
+      return;
+    }
+
+    if (!_selectionMode) startSelectionMode();
+    var added = 0;
+    feats.forEach(function(f) {
+      var mapId = f.properties && f.properties._mapId;
+      if (mapId === undefined) return;
+      var row = allData.find(function(r) { return r._mapId === mapId; });
+      if (row && row.id && !_selectedIds.has(row.id)) {
+        _selectedIds.add(row.id);
+        added++;
+      }
+    });
+    console.debug('[box-select] adicionados:', added, 'de', feats.length, 'visíveis');
+    try { updateSelectionBar(); } catch(_) {}
+    renderMarkers();
+  }
+
+  function onKey(e) {
+    if (e.key === 'Escape') {
+      // Cancela o box em andamento
+      if (box) { try { box.parentNode.removeChild(box); } catch(_) {} box = null; }
+      try { map.dragPan.enable(); } catch(_) {}
+      try { map.boxZoom.enable(); } catch(_) {}
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+      document.removeEventListener('keydown', onKey);
+      startPt = null;
+      dragging = false;
+    }
+  }
 }
 
 // ─── Pin Color ───────────────────────────────────────────────────────────────
