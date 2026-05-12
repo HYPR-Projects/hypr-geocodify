@@ -4522,10 +4522,27 @@ function _mulberry32(seed) {
     return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
   };
 }
-// Quantidade de dots = log10(count+1) × 6 + 2, clamped 3..28
+// Quantidade de dots — tabela de tiers definida pelo usuário, com
+// interpolação linear entre vizinhos. Cap superior em 70.
 function _dotsCountForRows(rowCount) {
   var n = Math.max(0, parseInt(rowCount) || 0);
-  return Math.min(28, Math.max(3, Math.round(Math.log10(n + 1) * 6 + 2)));
+  var tiers = [
+    [0, 3], [10, 5], [100, 10], [250, 14], [500, 19],
+    [1000, 24], [2500, 29], [5000, 38], [7500, 45],
+    [10000, 55], [15000, 70]
+  ];
+  var last = tiers[tiers.length - 1];
+  if (n >= last[0]) return last[1];
+  if (n <= tiers[0][0]) return tiers[0][1];
+  for (var i = 1; i < tiers.length; i++) {
+    var x1 = tiers[i-1][0], y1 = tiers[i-1][1];
+    var x2 = tiers[i][0],   y2 = tiers[i][1];
+    if (n <= x2) {
+      var t = (n - x1) / (x2 - x1);
+      return Math.round(y1 + t * (y2 - y1));
+    }
+  }
+  return last[1];
 }
 // Gera o SVG dos dots dado um mapa (id + row_count)
 function _buildThumbDots(mapId, rowCount) {
