@@ -1523,3 +1523,84 @@ html.shared-loading-leaving #shared-loading {
   color: var(--lose, #ef4444);
 }
 .popup-delete-btn svg { flex-shrink: 0; }
+
+/* ─── Selection bar (Varejo 360 multi-select) ───────────────────────────── */
+#selection-bar {
+  position: fixed;
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%) translateY(20px);
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 10px 14px;
+  background: var(--bg-elevated, #ffffff);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.12), 0 2px 8px rgba(0, 0, 0, 0.06);
+  font-family: var(--font);
+  font-size: 13px;
+  z-index: 1000;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.18s ease, transform 0.18s ease;
+}
+#selection-bar.active {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+  pointer-events: auto;
+}
+.selection-bar-info {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--text);
+}
+.selection-bar-info svg { color: var(--accent); flex-shrink: 0; }
+.selection-bar-info strong { font-weight: 600; }
+.selection-bar-hint {
+  color: var(--text-muted);
+  font-size: 11px;
+  padding-left: 10px;
+  border-left: 1px solid var(--border);
+}
+.selection-bar-actions { display: flex; gap: 8px; }
+.selection-bar-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 12px;
+  font-size: 12px;
+  font-family: var(--font);
+  font-weight: 500;
+  border-radius: 8px;
+  cursor: pointer;
+  border: 1px solid transparent;
+  transition: all 0.15s;
+}
+.selection-bar-btn.danger {
+  background: var(--lose, #ef4444);
+  color: #ffffff;
+  border-color: var(--lose, #ef4444);
+}
+.selection-bar-btn.danger:hover:not(:disabled) {
+  background: #dc2626;
+  border-color: #dc2626;
+}
+.selection-bar-btn.danger:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.selection-bar-btn.ghost {
+  background: transparent;
+  color: var(--text-muted);
+  border-color: var(--border);
+}
+.selection-bar-btn.ghost:hover {
+  background: var(--bg-hover, rgba(0,0,0,0.04));
+  color: var(--text);
+}
+@media (max-width: 640px) {
+  .selection-bar-hint { display: none; }
+  #selection-bar { padding: 8px 10px; font-size: 12px; }
+}
