@@ -179,6 +179,11 @@ var _popup = null;        // MapLibre popup atual
 // Quando setado, sobrescreve o slider f-share-min. Formato: { min: 0.05, max: 0.10 } ou null.
 var _activeShareBucket = null;
 
+// Subset de allData com todos os filtros aplicados EXCETO o filtro de performance.
+// Usado pelos mini-stats Ganhando/Competindo/Perdendo/Sem presença para mostrar a contagem
+// real de cada categoria mesmo quando uma delas está ativa como filtro.
+var _baseDataNoPerf = [];
+
 // Modo seleção múltipla — Varejo 360
 var _selectionMode = false;
 var _selectedIds = new Set(); // row.id (UUID) dos pins selecionados
@@ -1158,7 +1163,8 @@ function applyFilters() {
   const oport = document.querySelector('#f-oport .badge.active')?.dataset.v || '';
   const perf = document.querySelector('#f-perf .badge.active')?.dataset.v || '';
 
-  filteredData = allData.filter(r => {
+  // Passada 1: aplica TODOS os filtros exceto perf → _baseDataNoPerf
+  _baseDataNoPerf = allData.filter(r => {
     if (selBandeiras.size > 0) {
       var bandeira = r.bandeira;
       // Tratar variantes de não identificado
@@ -1186,18 +1192,25 @@ function applyFilters() {
       if (oport === 'media' && (o < -0.03 || o > 0.05)) return false;
       if (oport === 'baixa' && o >= -0.03) return false;
     }
-    if (perf) {
+    return true;
+  });
+
+  // Passada 2: aplica apenas o filtro de perf em cima de _baseDataNoPerf → filteredData
+  if (!perf) {
+    filteredData = _baseDataNoPerf.slice();
+  } else {
+    filteredData = _baseDataNoPerf.filter(r => {
       const d = parseFloat(r.percentual_diff_media_dimensao || 0);
-      const s = shareRaw;
+      const s = parseFloat(r.share_reais_sku_dimensao || 0);
       if (perf === 'acima' && d <= 2) return false;
       if (perf === 'abaixo' && d >= -2) return false;
       // Competindo: na faixa de média (±2pp) com share > 0
       if (perf === 'competindo' && !(d >= -2 && d <= 2 && s > 0)) return false;
       // Sem presença: na faixa de média (±2pp) com share = 0
       if (perf === 'sem_presenca' && !(d >= -2 && d <= 2 && s <= 0)) return false;
-    }
-    return true;
-  });
+      return true;
+    });
+  }
 
   renderMarkers();
   updatePanels();
@@ -1240,6 +1253,7 @@ function resetFilters() {
     badges[0]?.classList.add('active');
   });
   filteredData = allData.slice();
+  _baseDataNoPerf = filteredData.slice();
   renderMarkers();
   updatePanels();
   updateOverlay();
@@ -1267,9 +1281,13 @@ function updateOverlay() {
 }
 
 function updateHeader() {
+  // Os 4 mini-stats de perf devem mostrar a contagem REAL de cada categoria
+  // mesmo quando uma delas está ativa como filtro. Por isso iteramos sobre
+  // _baseDataNoPerf (filteredData sem o filtro de perf aplicado).
+  var basePool = _baseDataNoPerf && _baseDataNoPerf.length ? _baseDataNoPerf : filteredData;
   var winCount = 0, loseCount = 0, competeCount = 0, absentCount = 0;
-  for (var i = 0; i < filteredData.length; i++) {
-    var r = filteredData[i];
+  for (var i = 0; i < basePool.length; i++) {
+    var r = basePool[i];
     var d = parseFloat(r.percentual_diff_media_dimensao || 0);
     if (d > 2) winCount++;
     else if (d < -2) loseCount++;
@@ -1280,6 +1298,7 @@ function updateHeader() {
       else absentCount++;
     }
   }
+  // Bandeiras e h-pdvs continuam refletindo o que está visível no mapa
   var bandeiras = new Set(filteredData.map(function(r) { return r.bandeira || 'Outros'; })).size;
 
   var elPdvs = document.getElementById('h-pdvs');
@@ -1302,14 +1321,19 @@ function updateHeader() {
 }
 
 // ─── Filtros clicáveis (overview) ───────────────────────────────────────────
-// Sincroniza classe .active dos mini-stats com badge perf ativo
+// Sincroniza classe .active e .dimmed dos mini-stats com badge perf ativo
 function syncMiniStatActive() {
   var activePerf = document.querySelector('#f-perf .badge.active')?.dataset.v || '';
+  var hasActive = activePerf !== '';
   document.querySelectorAll('.overview-mini-stat.clickable').forEach(function(el) {
-    if (el.dataset.perf === activePerf && activePerf !== '') {
+    if (el.dataset.perf === activePerf && hasActive) {
       el.classList.add('active');
+      el.classList.remove('dimmed');
     } else {
       el.classList.remove('active');
+      // Quando há um filtro ativo, os outros mini-stats ficam dimmed
+      if (hasActive) el.classList.add('dimmed');
+      else el.classList.remove('dimmed');
     }
   });
 }
