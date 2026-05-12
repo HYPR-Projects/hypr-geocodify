@@ -2244,6 +2244,126 @@ function aplicarReceita(row, receita) {
   if (receita.endereco_receita)  row.endereco_receita  = receita.endereco_receita;
 }
 
+// ─── CNPJ Geocode Cache (Varejo 360) ─────────────────────────────────────────
+// Permite reaproveitar lat/lon já computado para um CNPJ em uploads anteriores
+// (próprios ou de outros usuários HYPR), pulando a chamada HERE.
+//
+// Match estrito por CNPJ completo (14 dígitos). CNPJ raiz (8) NÃO entra no
+// cache de geocode porque a raiz cobre múltiplos estabelecimentos com lat/lon
+// distintos — esses casos seguem o fluxo HERE normal.
+//
+// SCOPE ISOLATION: mexe apenas em `cnpj_cache`. Nenhuma referência a
+// `places_cache` ou Places Discovery.
+function _normalizeCnpj14(raw) {
+  if (!raw) return null;
+  var digits = String(raw).split(' - ')[0].replace(/\D/g, '');
+  if (digits.length < 14) return null;
+  return digits.slice(0, 14);
+}
+
+// Bulk SELECT em cnpj_cache filtrando só linhas com lat/lon válidos. Retorna
+// Map<cnpj14, { cnpj, lat, lon, geo_address, uf_geocode }>. Falha de rede
+// degrada graciosamente — perde a otimização para esse chunk, HERE assume.
+async function bulkCnpjGeocodeLookup(cnpjs) {
+  var hits = new Map();
+  if (!cnpjs || !cnpjs.length) return hits;
+  // CNPJ tem 14 chars + vírgula = 15 chars/ID. 200 IDs ~3KB de URL, bem abaixo
+  // do limite típico de 8-16k em proxies/CDNs.
+  var CHUNK = 200;
+  for (var i = 0; i < cnpjs.length; i += CHUNK) {
+    var slice = cnpjs.slice(i, i + CHUNK);
+    var idList = slice.map(encodeURIComponent).join(',');
+    var url = SUPABASE_URL + '/rest/v1/cnpj_cache?cnpj=in.(' + idList + ')'
+      + '&lat=not.is.null&lon=not.is.null'
+      + '&select=cnpj,lat,lon,geo_address,uf_geocode';
+    try {
+      var resp = await fetch(url, {
+        headers: { 'apikey': SUPABASE_ANON, 'Accept': 'application/json' },
+        signal: AbortSignal.timeout(4000),
+      });
+      if (!resp.ok) continue;
+      var rows = await resp.json();
+      for (var r = 0; r < rows.length; r++) {
+        var row = rows[r];
+        if (row && row.cnpj && row.lat != null && row.lon != null) hits.set(row.cnpj, row);
+      }
+    } catch (e) {
+      console.warn('[cnpj-geo-cache] chunk failed:', e && e.message);
+    }
+  }
+  return hits;
+}
+
+// Acumula rows com geocode novo (pós-HERE) e faz upsert em lote no cnpj_cache.
+// Fire-and-forget — falha de rede no upsert não afeta a UX, o cache
+// simplesmente não cresce desta vez.
+var _pendingGeoUpserts = [];
+var _flushingGeoUpserts = false;
+
+async function flushCnpjGeoUpserts(force) {
+  if (_flushingGeoUpserts) return;
+  if (!_pendingGeoUpserts.length) return;
+  if (!force && _pendingGeoUpserts.length < 50) return;
+  _flushingGeoUpserts = true;
+  var batch = _pendingGeoUpserts.splice(0, _pendingGeoUpserts.length);
+  try {
+    // Dedup por CNPJ na própria batch — última escrita vence
+    var seen = new Map();
+    for (var i = 0; i < batch.length; i++) seen.set(batch[i].cnpj, batch[i]);
+    var payload = Array.from(seen.values());
+    var authToken = SUPABASE_ANON;
+    try {
+      if (typeof _supa !== 'undefined' && _supa && _supa.auth) {
+        var sess = await _supa.auth.getSession();
+        authToken = (sess && sess.data && sess.data.session && sess.data.session.access_token) || SUPABASE_ANON;
+      }
+    } catch (e) {}
+    await fetch(SUPABASE_URL + '/rest/v1/cnpj_cache?on_conflict=cnpj', {
+      method: 'POST',
+      headers: {
+        'apikey': SUPABASE_ANON,
+        'Authorization': 'Bearer ' + authToken,
+        'Content-Type': 'application/json',
+        'Prefer': 'resolution=merge-duplicates,return=minimal',
+      },
+      body: JSON.stringify(payload),
+      signal: AbortSignal.timeout(8000),
+    });
+  } catch (e) {
+    console.warn('[cnpj-geo-cache] upsert failed:', e && e.message);
+  } finally {
+    _flushingGeoUpserts = false;
+  }
+}
+
+// Enfileira uma linha pra upsert. Só linhas com cnpj 14d válido + lat/lon.
+function queueCnpjGeoUpsert(row) {
+  var key = _normalizeCnpj14(row && row.cnpj);
+  if (!key) return;
+  if (row.lat == null || row.lon == null) return;
+  _pendingGeoUpserts.push({
+    cnpj: key,
+    lat: row.lat,
+    lon: row.lon,
+    geo_address: row.geo_address || null,
+    uf_geocode: row.uf || null,
+    geocoded_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  });
+}
+
+// Reset dos campos do overlay compartilhado com Varejo 360.
+// Espelha _resetPlacesOverlayFields — chamado em entry points pra evitar
+// contaminação entre fluxos (Places, Varejo 360, geocoder, etc).
+function _resetVarejoOverlayFields() {
+  var cacheChip = document.getElementById('geo-cache');
+  if (cacheChip) { cacheChip.style.display = 'none'; cacheChip.textContent = '💾 0'; }
+  var fillCache = document.getElementById('geo-fill-cache');
+  if (fillCache) fillCache.style.width = '0%';
+  var fillApi = document.getElementById('geo-fill-api');
+  if (fillApi) fillApi.style.width = '0%';
+}
+
 // ─── Geocoding HERE (endereço → lat/lon) ─────────────────────────────────────
 // Usa structured geocoding (qq=) quando cidade/UF disponíveis para forçar
 // localidade correta. Fallback para freeform (q=) quando sem contexto.
@@ -2690,6 +2810,7 @@ async function startGeocoding() {
   // Mostrar barra flutuante discreta
   document.getElementById('geo-title-text').textContent = 'Buscando Receita + Geocodificando';
   _resetPlacesOverlayFields();
+  _resetVarejoOverlayFields();
   document.getElementById('geocoding-overlay').classList.add('active');
 
   // Centralizar mapa no Brasil enquanto carrega
@@ -2697,6 +2818,7 @@ async function startGeocoding() {
 
   // Limpar cache de geocoding para nova sessão
   Object.keys(_geoCache).forEach(k => delete _geoCache[k]);
+  _pendingGeoUpserts.length = 0;
   geocodingCancelled = false;
   geocodingActive = true;
 
@@ -2730,10 +2852,89 @@ async function startGeocoding() {
 
   allData = [];
 
-  for (let i = 0; i < rawCSVData.length; i += BATCH) {
+  // ─── Phase 1.5: Hidratação geográfica via cnpj_cache (Varejo 360 only) ──
+  // Antes de chamar HERE, consulta cnpj_cache pelos CNPJs únicos. Linhas com
+  // lat/lon salvos entram direto em allData e são removidas da fila do HERE.
+  // Falha gracioso: qualquer erro na hidratação cai para o fluxo padrão.
+  let cacheHits = 0;
+  let rowsToProcess = rawCSVData;
+  if (currentMapType === 'varejo360' && rawCSVData.length > 0) {
+    try {
+      document.getElementById('geo-current').textContent = 'Consultando cache de CNPJs...';
+      // Map CNPJ14 -> array de rows (uma loja pode aparecer em múltiplas SKUs)
+      const cnpjRowsMap = new Map();
+      const rowsSemCnpj = [];
+      for (const row of rawCSVData) {
+        const c14 = _normalizeCnpj14(row.cnpj || '');
+        if (c14) {
+          if (!cnpjRowsMap.has(c14)) cnpjRowsMap.set(c14, []);
+          cnpjRowsMap.get(c14).push(row);
+        } else {
+          rowsSemCnpj.push(row);
+        }
+      }
+
+      const uniqueCnpjs = Array.from(cnpjRowsMap.keys());
+      if (uniqueCnpjs.length > 0) {
+        const hits = await bulkCnpjGeocodeLookup(uniqueCnpjs);
+
+        // Pré-popular allData com linhas hidratadas + montar fila pro HERE
+        const remaining = [];
+        for (const [c14, rows] of cnpjRowsMap.entries()) {
+          const hit = hits.get(c14);
+          if (hit) {
+            // Aplica geocode em TODAS as linhas da mesma loja
+            for (const row of rows) {
+              if (!row.bandeira || row.bandeira === 'Desconhecido') row.bandeira = 'Carregando...';
+              row.lat = hit.lat;
+              row.lon = hit.lon;
+              row.geo_address = hit.geo_address || '';
+              if (!row.uf && hit.uf_geocode) row.uf = hit.uf_geocode;
+              row._fromCache = true;
+              allData.push(row);
+              cacheHits++;
+              ok++;
+            }
+          } else {
+            remaining.push(...rows);
+          }
+        }
+        rowsToProcess = remaining.concat(rowsSemCnpj);
+
+        // UI: chip 💾 + progress segment de cache
+        if (cacheHits > 0) {
+          const cacheChip = document.getElementById('geo-cache');
+          if (cacheChip) {
+            cacheChip.style.display = '';
+            cacheChip.textContent = '💾 ' + cacheHits.toLocaleString('pt-BR');
+          }
+          const cachePct = Math.round((cacheHits / total) * 100);
+          const fillCache = document.getElementById('geo-fill-cache');
+          if (fillCache) fillCache.style.width = cachePct + '%';
+          document.getElementById('geo-ok').textContent = ok.toLocaleString('pt-BR') + ' ✓';
+          document.getElementById('geo-current').textContent =
+            cacheHits.toLocaleString('pt-BR') + ' do cache · ' +
+            rowsToProcess.length.toLocaleString('pt-BR') + ' p/ geocodificar';
+
+          // Renderiza pins do cache imediatamente — usuário já vê resultado
+          filteredData = allData.slice();
+          renderMarkers();
+        }
+      }
+    } catch (e) {
+      console.warn('[cnpj-geo-cache] hydration failed, falling back to full HERE:', e && e.message);
+      rowsToProcess = rawCSVData;
+      allData = [];
+      ok = 0;
+      cacheHits = 0;
+    }
+  }
+
+  // Loop principal: processa apenas rows que não vieram do cache
+  for (let i = 0; i < rowsToProcess.length; i += BATCH) {
     if (geocodingCancelled) break;
 
-    const batch = rawCSVData.slice(i, Math.min(i + BATCH, rawCSVData.length));
+    const batch = rowsToProcess.slice(i, Math.min(i + BATCH, rowsToProcess.length));
 
     await Promise.all(batch.map(async (row) => {
       if (!row.bandeira || row.bandeira === 'Desconhecido') row.bandeira = 'Carregando...';
@@ -2805,6 +3006,15 @@ async function startGeocoding() {
           // Plot pin em tempo real — usuário já pode interagir
           allData.push(row);
 
+          // Persistir lat/lon em cnpj_cache para o próximo upload pular HERE.
+          // Só Varejo 360 — geocoder/reverse não tem CNPJ confiável.
+          // Fire-and-forget: queueCnpjGeoUpsert valida cnpj 14d + lat/lon,
+          // flushCnpjGeoUpserts(false) só dispara request a cada 50 enfileirados.
+          if (currentMapType === 'varejo360') {
+            queueCnpjGeoUpsert(row);
+            flushCnpjGeoUpserts(false);
+          }
+
           // Atualizar mapa a cada 200 novos pins (batch GeoJSON update é mais eficiente)
           if (allData.length % 200 === 0) {
             filteredData = allData.slice();
@@ -2846,6 +3056,12 @@ async function startGeocoding() {
     }
 
     await new Promise(r => setTimeout(r, DELAY));
+  }
+
+  // Flush final dos upserts pendentes — força mesmo com batch pequeno
+  // para garantir que todos os novos lat/lon sejam persistidos no cnpj_cache.
+  if (currentMapType === 'varejo360') {
+    try { await flushCnpjGeoUpserts(true); } catch(e) {}
   }
 
   geocodingActive = false;
@@ -4701,6 +4917,8 @@ function extractQueryTokens(query) {
 function _resetPlacesOverlayFields() {
   var cacheChip = document.getElementById('geo-cache');
   if (cacheChip) { cacheChip.style.display = 'none'; cacheChip.textContent = '💾 0'; }
+  var fillMain = document.getElementById('geo-fill');
+  if (fillMain) fillMain.style.width = '0%';
   var fillCache = document.getElementById('geo-fill-cache');
   if (fillCache) fillCache.style.width = '0%';
   var fillApi = document.getElementById('geo-fill-api');
@@ -5920,6 +6138,10 @@ function resetPlacesForNewSearch() {
   try { window.finishPlacesDiscovery = finishPlacesDiscovery; } catch(e) {}
   try { window.generateCircleGeoJSON = generateCircleGeoJSON; } catch(e) {}
   try { window.geocodeHERE = geocodeHERE; } catch(e) {}
+  try { window.bulkCnpjGeocodeLookup = bulkCnpjGeocodeLookup; } catch(e) {}
+  try { window.queueCnpjGeoUpsert = queueCnpjGeoUpsert; } catch(e) {}
+  try { window.flushCnpjGeoUpserts = flushCnpjGeoUpserts; } catch(e) {}
+  try { window._normalizeCnpj14 = _normalizeCnpj14; } catch(e) {}
   try { window.getSearchAreas = getSearchAreas; } catch(e) {}
   try { window.goToStep = goToStep; } catch(e) {}
   try { window.groupBy = groupBy; } catch(e) {}
