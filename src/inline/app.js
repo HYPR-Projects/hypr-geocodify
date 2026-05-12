@@ -2793,10 +2793,13 @@ async function startGeocoding() {
   // Mostrar mapa IMEDIATAMENTE — pins aparecerão em tempo real
   document.getElementById('gallery-screen').classList.add('hidden');
   document.getElementById('upload-zone').classList.add('hidden');
-  // Limpar dados ANTES de mostrar o mapa — evita flash dos dados anteriores
-  allData = []; filteredData = [];
-  if (map && map.getSource('pdvs')) {
-    map.getSource('pdvs').setData({ type: 'FeatureCollection', features: [] });
+  // Em modo append, preserva o mapa existente (pins, posição, dados).
+  // Pins novos serão somados aos existentes sem flash de tela vazia.
+  if (!window._appendMode) {
+    allData = []; filteredData = [];
+    if (map && map.getSource('pdvs')) {
+      map.getSource('pdvs').setData({ type: 'FeatureCollection', features: [] });
+    }
   }
 
   const appEl = document.getElementById('app');
@@ -2807,14 +2810,19 @@ async function startGeocoding() {
   await new Promise(r => setTimeout(r, 100));
   if (map) map.resize();
 
-  // Mostrar barra flutuante discreta
-  document.getElementById('geo-title-text').textContent = 'Buscando Receita + Geocodificando';
+  // Mostrar barra flutuante discreta — título contextual
+  document.getElementById('geo-title-text').textContent = window._appendMode
+    ? 'Adicionando PDVs ao mapa'
+    : 'Buscando Receita + Geocodificando';
   _resetPlacesOverlayFields();
   _resetVarejoOverlayFields();
   document.getElementById('geocoding-overlay').classList.add('active');
 
-  // Centralizar mapa no Brasil enquanto carrega
-  map.jumpTo({ center: [-47.93, -15.78], zoom: 4 });
+  // Em modo append, mantém posição/zoom do mapa atual.
+  // Em criação, centraliza no Brasil enquanto carrega.
+  if (!window._appendMode) {
+    map.jumpTo({ center: [-47.93, -15.78], zoom: 4 });
+  }
 
   // Limpar cache de geocoding para nova sessão
   Object.keys(_geoCache).forEach(k => delete _geoCache[k]);
@@ -2850,7 +2858,14 @@ async function startGeocoding() {
   const BATCH = 8;
   const DELAY = 80;
 
-  allData = [];
+  // Em criação, zera allData pra começar do zero. Em append, mantém os PDVs
+  // existentes — pins novos serão somados a eles.
+  if (!window._appendMode) {
+    allData = [];
+  }
+  // Baseline: número de PDVs já presentes antes do processamento. Usado pra
+  // dar fallback consistente em modo append se a hidratação cache falhar.
+  const _appendBaseline = allData.length;
 
   // ─── Phase 1.5: Hidratação geográfica via cnpj_cache (Varejo 360 only) ──
   // Antes de chamar HERE, consulta cnpj_cache pelos CNPJs únicos. Linhas com
@@ -2924,7 +2939,8 @@ async function startGeocoding() {
     } catch (e) {
       console.warn('[cnpj-geo-cache] hydration failed, falling back to full HERE:', e && e.message);
       rowsToProcess = rawCSVData;
-      allData = [];
+      // Restaura ao baseline (preserva pins existentes em modo append; zera em criação)
+      allData = allData.slice(0, _appendBaseline);
       ok = 0;
       cacheHits = 0;
     }
@@ -3672,6 +3688,19 @@ async function handleCSVFile(file) {
     document.getElementById('step-apikey-sub').textContent =
       `${info} — ${rows.length.toLocaleString('pt-BR')} linhas. Clique em iniciar para geocodificar.`;
 
+    // Modo append: usuário já está em mapa salvo, não precisa nomear/escolher período.
+    // Reaproveita meta do mapa atual e vai direto pra geocodificação.
+    if (window._appendMode && window._appendToMapId) {
+      window._pendingMapName = window._appendToMapName || window._currentOpenMapName || '';
+      window._pendingMapType = 'varejo360';
+      // Período: mantém o do mapa atual (não está acessível diretamente, mas o
+      // saveMapToSupabase só usa _pendingPeriodo na criação; em append, o INSERT
+      // em map_pdvs ignora isso)
+      window._pendingPeriodo = window._pendingPeriodo || null;
+      startGeocoding();
+      return;
+    }
+
     goToStep(2);
   };
   if (isXLSX) {
@@ -4135,21 +4164,39 @@ function cancelAppendMode() {
 // Insere as linhas geocodificadas em map_pdvs com on_conflict, mostra toast
 // com contagem de novos/duplicados, e recarrega o mapa pra fundir os dados.
 async function finishAppendToMap(mapId) {
-  var validRows = allData.filter(function(r) { return r.lat != null && r.lon != null; });
-  if (validRows.length === 0) {
-    showAppendToast(0, 0, allData.length);
+  // Em modo append, allData contém PDVs existentes (com `id` do banco) +
+  // novos (sem `id`). Só inserimos os novos.
+  var newRows = allData.filter(function(r) {
+    return !r.id && r.lat != null && r.lon != null;
+  });
+  var failedRows = allData.filter(function(r) {
+    return !r.id && (r.lat == null || r.lon == null);
+  });
+
+  if (newRows.length === 0) {
+    showAppendToast(0, 0, failedRows.length);
     window._appendMode = false;
     window._appendToMapId = null;
     return;
   }
 
-  var inserted = 0;
-  var ignored = 0;
+  // Baseline: contagem real no banco antes do INSERT. Usada pra calcular
+  // novos vs ignorados de forma confiável, sem depender do response do
+  // PostgREST (que tem comportamento variável com on_conflict).
+  var totalAntes = null;
+  try {
+    var beforeResp = await fetch(SUPABASE_URL + '/rest/v1/map_pdvs?map_id=eq.' + mapId + '&select=id', {
+      headers: { 'apikey': SUPABASE_ANON, 'Prefer': 'count=exact', 'Range': '0-0' },
+    });
+    var contentRange = beforeResp.headers.get('content-range') || '';
+    var m = contentRange.match(/\/(\d+)$/);
+    totalAntes = m ? parseInt(m[1], 10) : null;
+  } catch (e) {}
+
   var CHUNK = 500;
 
-  for (var i = 0; i < validRows.length; i += CHUNK) {
-    var chunk = validRows.slice(i, i + CHUNK).map(function(r) {
-      // Campos espelham o que startGeocoding produz; cnpj_14 é gerado pelo DB
+  for (var i = 0; i < newRows.length; i += CHUNK) {
+    var chunk = newRows.slice(i, i + CHUNK).map(function(r) {
       return {
         map_id: mapId,
         cnpj: r.cnpj || null,
@@ -4164,7 +4211,6 @@ async function finishAppendToMap(mapId) {
         situacao: r.situacao || null,
         atividade: r.atividade || null,
         cep: r.cep || null,
-        // Métricas de share (preserva tudo que veio do CSV)
         percentual_dimensao: r.percentual_dimensao != null ? Number(r.percentual_dimensao) : null,
         percentual_marca_dimensao: r.percentual_marca_dimensao != null ? Number(r.percentual_marca_dimensao) : null,
         percentual_diff_media_dimensao: r.percentual_diff_media_dimensao != null ? Number(r.percentual_diff_media_dimensao) : null,
@@ -4186,36 +4232,39 @@ async function finishAppendToMap(mapId) {
       };
     });
     try {
-      // ignore-duplicates: rows com (map_id, cnpj_14) já presentes são silenciosamente
-      // descartadas. return=representation devolve as linhas que ENTRARAM, permitindo
-      // contar quantas foram efetivamente inseridas.
-      var resp = await sbFetch('map_pdvs?on_conflict=map_id,cnpj_14', {
+      await sbFetch('map_pdvs?on_conflict=map_id,cnpj_14', {
         method: 'POST',
         headers: {
-          'Prefer': 'resolution=ignore-duplicates,return=representation',
+          'Prefer': 'resolution=ignore-duplicates,return=minimal',
         },
         body: JSON.stringify(chunk),
       });
-      var insertedCount = Array.isArray(resp) ? resp.length : 0;
-      inserted += insertedCount;
-      ignored += (chunk.length - insertedCount);
     } catch (e) {
       console.error('[append] chunk insert failed:', e && e.message);
-      // Continua os próximos chunks — falha parcial não bloqueia
     }
   }
 
-  // Atualiza row_count no saved_maps (refresco rápido — o trigger não existe)
+  // Recalcula total no banco e deriva contagens reais a partir da diferença.
+  // Robusto a comportamentos esperados do PostgREST com on_conflict + RLS.
+  var inserted = 0;
+  var ignored = newRows.length;
   try {
-    var countResp = await sbFetch('map_pdvs?map_id=eq.' + mapId + '&select=id', {
-      headers: { 'Prefer': 'count=exact' },
+    var afterResp = await fetch(SUPABASE_URL + '/rest/v1/map_pdvs?map_id=eq.' + mapId + '&select=id', {
+      headers: { 'apikey': SUPABASE_ANON, 'Prefer': 'count=exact', 'Range': '0-0' },
     });
-    var newTotal = Array.isArray(countResp) ? countResp.length : null;
-    if (newTotal != null) {
+    var contentRangeAfter = afterResp.headers.get('content-range') || '';
+    var m2 = contentRangeAfter.match(/\/(\d+)$/);
+    var totalDepois = m2 ? parseInt(m2[1], 10) : null;
+    if (totalAntes != null && totalDepois != null) {
+      inserted = Math.max(0, totalDepois - totalAntes);
+      ignored = newRows.length - inserted;
+    }
+    if (totalDepois != null) {
+      // Atualiza row_count em saved_maps
       await sbFetch('saved_maps?id=eq.' + mapId, {
         method: 'PATCH',
         headers: { 'Prefer': 'return=minimal' },
-        body: JSON.stringify({ row_count: newTotal, updated_at: new Date().toISOString() }),
+        body: JSON.stringify({ row_count: totalDepois, updated_at: new Date().toISOString() }),
       });
     }
   } catch (e) {}
@@ -4229,7 +4278,7 @@ async function finishAppendToMap(mapId) {
   if (banner) banner.style.display = 'none';
 
   // Toast antes de recarregar para o usuário ver o resultado
-  showAppendToast(inserted, ignored, allData.length - validRows.length);
+  showAppendToast(inserted, ignored, failedRows.length);
 
   // Recarregar o mapa com os dados consolidados (servidor é fonte da verdade)
   await openSavedMap(mapId, nameForReload, 'varejo360');
