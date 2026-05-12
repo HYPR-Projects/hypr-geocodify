@@ -25,8 +25,8 @@
   --sidebar-w: 280px;
   --right-w: 320px;
   --header-h: 56px;
-  --font: 'Urbanist', 'DM Sans', sans-serif;
-  --mono: 'DM Mono', monospace;
+  --font: 'Urbanist', sans-serif;
+  --mono: 'Urbanist', sans-serif;
   --radius: 12px;
   --radius-sm: 8px;
   --transition: 0.18s ease;
