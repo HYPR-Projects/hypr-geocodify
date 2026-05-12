@@ -4132,17 +4132,41 @@ function startAppendPdvs() {
   window._appendMode = true;
   window._appendToMapId = window._currentOpenMapId;
   window._appendToMapName = window._currentOpenMapName || 'mapa atual';
-  // Esconder o mapa, preparar upload zone configurado para Varejo 360
+
+  // Trocar de tela SEM resetar allData/filteredData/map source.
+  // selectMapType e showUploadZone zerariam tudo — em append a gente precisa
+  // preservar os PDVs já carregados para somar os novos por cima.
   document.getElementById('app').style.display = 'none';
-  // selectMapType reseta rawCSVData/allData/pendingMapName — exatamente o que queremos
-  selectMapType('varejo360');
+  document.getElementById('gallery-screen').classList.add('hidden');
+  document.getElementById('upload-zone').classList.remove('hidden');
+  // Reset apenas o necessário pro novo upload
+  rawCSVData = [];
+  window._pendingMapName = null;
+  window._pendingMapDesc = null;
+  window._pendingMapType = 'varejo360';
+  window._pendingPeriodo = null;
+
+  // Configurar UI do upload zone para Varejo 360 (sem chamar selectMapType)
+  var uploadTitle = document.querySelector('#drop-zone .upload-title');
+  var uploadSub = document.querySelector('#upload-zone .upload-sub');
+  var formatsMsg = document.getElementById('upload-formats-msg');
+  var startBtn = document.getElementById('btn-start-geo');
+  var periodoEl = document.getElementById('step2-periodo');
+  if (uploadTitle) uploadTitle.textContent = 'Adicionar PDVs ao mapa';
+  if (uploadSub) uploadSub.innerHTML = 'Suba um CSV com os novos PDVs. CNPJs que já estão no mapa serão ignorados automaticamente.';
+  if (formatsMsg) formatsMsg.textContent = 'Formato HYPR/Kantar · CSV com cnpj + share · CNPJ raiz (8 dígitos)';
+  if (startBtn) startBtn.textContent = 'Adicionar →';
+  if (periodoEl) periodoEl.style.display = 'none';
+  try { renderUploadTemplate('varejo360'); } catch(e) {}
+  var vtBtns = document.getElementById('view-toggle-btns');
+  if (vtBtns) vtBtns.style.display = 'none';
+  try { goToStep(1); } catch(e) {}
+
   // Mostrar banner indicando alvo do append
   var banner = document.getElementById('append-mode-banner');
   var nameEl = document.getElementById('append-mode-map-name');
   if (banner) banner.style.display = '';
   if (nameEl) nameEl.textContent = window._appendToMapName;
-  // Esconder o botão "Voltar para mapas" no upload zone enquanto está em append
-  // (o cancel button do banner cumpre o papel de volta)
 }
 
 function cancelAppendMode() {
