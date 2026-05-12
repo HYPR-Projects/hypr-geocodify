@@ -308,6 +308,13 @@ html.theme-switching, html.theme-switching *, html.theme-switching *::before, ht
   font-size: 9px; color: var(--text-muted);
   opacity: 0.7;
 }
+/* Quando há um mini-stat ativo, os outros ficam dimmed mas ainda mostram suas contagens */
+.overview-mini-stat.clickable.dimmed {
+  opacity: 0.4;
+}
+.overview-mini-stat.clickable.dimmed:hover {
+  opacity: 0.75;
+}
 
 /* Chip de filtro ativo aplicado via chart (share bucket, bandeira) */
 .chart-active-chip {
