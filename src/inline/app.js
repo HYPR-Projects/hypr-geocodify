@@ -590,6 +590,13 @@ function buildPopup(row) {
       <span class="popup-tickets-label">Tickets na amostra</span>
       <span class="popup-tickets-val">${parseInt(row.tickets_amostra || 0).toLocaleString('pt-BR')}</span>
     </div>
+    ${(!_isSharedMode && currentUser && row.id) ? `
+    <div class="popup-actions">
+      <button class="popup-delete-btn" onclick="deletePdvFromMap('${row.id}')" title="Remover este PDV do mapa">
+        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-2 14a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2"/></svg>
+        Remover do mapa
+      </button>
+    </div>` : ''}
   </div>`;
 }
 
@@ -4328,6 +4335,61 @@ function showAppendToast(inserted, ignored, failed) {
   setTimeout(function() { toast.classList.remove('active'); }, 8000);
 }
 
+// Remove um PDV específico do mapa. Disponível apenas no popup do dono do
+// mapa (não exposto em shared mode). Confirma com o usuário antes de deletar.
+async function deletePdvFromMap(rowId) {
+  if (!rowId) return;
+  if (_isSharedMode) return; // defesa em profundidade — não deveria nem ter sido renderizado
+  if (!currentUser) {
+    alert('Você precisa estar logado para remover PDVs.');
+    return;
+  }
+  var row = allData.find(function(r) { return r.id === rowId; });
+  if (!row) {
+    alert('PDV não encontrado no mapa.');
+    return;
+  }
+  var nomeDisplay = row.bandeira || row.razao_social || row.cnpj || 'este PDV';
+  if (!confirm('Remover "' + nomeDisplay + '" do mapa?\n\nA remoção é permanente. Você pode adicionar este PDV de volta subindo uma nova base.')) {
+    return;
+  }
+
+  // Fechar popup imediatamente — UX responsivo
+  try { if (_popup) _popup.remove(); } catch(e) {}
+
+  try {
+    // DELETE no Supabase
+    await sbFetch('map_pdvs?id=eq.' + encodeURIComponent(rowId), {
+      method: 'DELETE',
+      headers: { 'Prefer': 'return=minimal' },
+    });
+
+    // Remove de memória
+    allData = allData.filter(function(r) { return r.id !== rowId; });
+    filteredData = filteredData.filter(function(r) { return r.id !== rowId; });
+
+    // Re-render markers, filtros, painéis
+    try { renderMarkers(); } catch(e) {}
+    try { populateFilters(); } catch(e) {}
+    try { applyFilters(); } catch(e) {}
+    try { updatePanels(); } catch(e) {}
+
+    // Atualizar row_count no saved_maps
+    if (window._currentOpenMapId) {
+      try {
+        await sbFetch('saved_maps?id=eq.' + window._currentOpenMapId, {
+          method: 'PATCH',
+          headers: { 'Prefer': 'return=minimal' },
+          body: JSON.stringify({ row_count: allData.length, updated_at: new Date().toISOString() }),
+        });
+      } catch(e) {}
+    }
+  } catch (e) {
+    console.error('[delete-pdv] failed:', e && e.message);
+    alert('Erro ao remover PDV: ' + (e && e.message ? e.message : 'tente novamente.'));
+  }
+}
+
 async function openSavedMap(mapId, name, mapType) {
   // Limpar pendências de geocoding anterior — evita save acidental
   window._pendingMapName = null;
@@ -6471,6 +6533,7 @@ function resetPlacesForNewSearch() {
   try { window.startAppendPdvs = startAppendPdvs; } catch(e) {}
   try { window.cancelAppendMode = cancelAppendMode; } catch(e) {}
   try { window.finishAppendToMap = finishAppendToMap; } catch(e) {}
+  try { window.deletePdvFromMap = deletePdvFromMap; } catch(e) {}
   try { window.openShareModal = openShareModal; } catch(e) {}
   try { window.startReenrich = startReenrich; } catch(e) {}
   try { window.dismissReenrich = dismissReenrich; } catch(e) {}
