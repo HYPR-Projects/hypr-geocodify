@@ -3349,6 +3349,11 @@ async function startGeocoding() {
   
   document.getElementById('geocoding-overlay').classList.remove('active');
   try { checkReenrichBar(); } catch(e) {}
+  // Modo append: ao invés de abrir modal de salvar, faz INSERT no mapa existente
+  if (window._appendMode && window._appendToMapId) {
+    await finishAppendToMap(window._appendToMapId);
+    return;
+  }
   showSaveMapDialog();
 }
 
@@ -3799,6 +3804,12 @@ var THUMB_COLORS = ['#7C3AED','#2563EB','#059669','#DC2626','#D97706','#0891B2',
 
 function showGallery() {
   window._pendingGeocodingAfterLogin = false;
+  // Limpa qualquer modo append em curso (usuário voltou pra galeria)
+  window._appendMode = false;
+  window._appendToMapId = null;
+  window._appendToMapName = null;
+  var _appendBanner = document.getElementById('append-mode-banner');
+  if (_appendBanner) _appendBanner.style.display = 'none';
   try { history.replaceState(null, '', location.pathname); } catch(e) {}
   try { sessionStorage.removeItem('hypr_last_map'); } catch(e) {}
   // Resetar view e pendências
@@ -4066,6 +4077,182 @@ async function deleteMap(id, btn) {
       applyGalleryFilters(true);
     }
   } catch(e) { alert('Erro ao excluir: '+e.message); btn.disabled=false; }
+}
+
+// ─── Append PDVs a um mapa Varejo 360 existente ─────────────────────────────
+// Permite expandir um mapa salvo com nova lista de CSV sem refazer do zero.
+// O fluxo de geocoding (startGeocoding) é o MESMO de criação de mapa novo;
+// a diferença está apenas no final, onde ao invés de showSaveModal fazemos
+// INSERT em map_pdvs com on_conflict=map_id,cnpj_14.
+//
+// SCOPE: Varejo 360 apenas. Bloqueia em outros tipos no startAppendPdvs.
+function startAppendPdvs() {
+  if (!window._currentOpenMapId) {
+    alert('Abra um mapa primeiro para adicionar PDVs.');
+    return;
+  }
+  if (currentMapType !== 'varejo360') {
+    alert('Adicionar PDVs só está disponível para mapas Varejo 360.');
+    return;
+  }
+  if (!currentUser) {
+    alert('Você precisa estar logado para adicionar PDVs.');
+    return;
+  }
+  // Marcar modo append + alvo
+  window._appendMode = true;
+  window._appendToMapId = window._currentOpenMapId;
+  window._appendToMapName = window._currentOpenMapName || 'mapa atual';
+  // Esconder o mapa, preparar upload zone configurado para Varejo 360
+  document.getElementById('app').style.display = 'none';
+  // selectMapType reseta rawCSVData/allData/pendingMapName — exatamente o que queremos
+  selectMapType('varejo360');
+  // Mostrar banner indicando alvo do append
+  var banner = document.getElementById('append-mode-banner');
+  var nameEl = document.getElementById('append-mode-map-name');
+  if (banner) banner.style.display = '';
+  if (nameEl) nameEl.textContent = window._appendToMapName;
+  // Esconder o botão "Voltar para mapas" no upload zone enquanto está em append
+  // (o cancel button do banner cumpre o papel de volta)
+}
+
+function cancelAppendMode() {
+  window._appendMode = false;
+  window._appendToMapId = null;
+  window._appendToMapName = null;
+  var banner = document.getElementById('append-mode-banner');
+  if (banner) banner.style.display = 'none';
+  // Voltar para o mapa que estava aberto
+  if (window._currentOpenMapId && window._currentOpenMapName) {
+    document.getElementById('upload-zone').classList.add('hidden');
+    openSavedMap(window._currentOpenMapId, window._currentOpenMapName, 'varejo360');
+  } else {
+    showGallery();
+  }
+}
+
+// Chamado no fim do startGeocoding quando _appendMode está ativo.
+// Insere as linhas geocodificadas em map_pdvs com on_conflict, mostra toast
+// com contagem de novos/duplicados, e recarrega o mapa pra fundir os dados.
+async function finishAppendToMap(mapId) {
+  var validRows = allData.filter(function(r) { return r.lat != null && r.lon != null; });
+  if (validRows.length === 0) {
+    showAppendToast(0, 0, allData.length);
+    window._appendMode = false;
+    window._appendToMapId = null;
+    return;
+  }
+
+  var inserted = 0;
+  var ignored = 0;
+  var CHUNK = 500;
+
+  for (var i = 0; i < validRows.length; i += CHUNK) {
+    var chunk = validRows.slice(i, i + CHUNK).map(function(r) {
+      // Campos espelham o que startGeocoding produz; cnpj_14 é gerado pelo DB
+      return {
+        map_id: mapId,
+        cnpj: r.cnpj || null,
+        bandeira: r.bandeira || null,
+        marca: r.marca || null,
+        lat: r.lat,
+        lon: r.lon,
+        geo_address: r.geo_address || null,
+        uf: r.uf || null,
+        nome_fantasia: r.nome_fantasia || null,
+        razao_social: r.razao_social || null,
+        situacao: r.situacao || null,
+        atividade: r.atividade || null,
+        cep: r.cep || null,
+        // Métricas de share (preserva tudo que veio do CSV)
+        percentual_dimensao: r.percentual_dimensao != null ? Number(r.percentual_dimensao) : null,
+        percentual_marca_dimensao: r.percentual_marca_dimensao != null ? Number(r.percentual_marca_dimensao) : null,
+        percentual_diff_media_dimensao: r.percentual_diff_media_dimensao != null ? Number(r.percentual_diff_media_dimensao) : null,
+        oportunidade_dimensao: r.oportunidade_dimensao || null,
+        share_reais_sku: r.share_reais_sku != null ? Number(r.share_reais_sku) : null,
+        share_volume_sku: r.share_volume_sku != null ? Number(r.share_volume_sku) : null,
+        share_unidades_sku: r.share_unidades_sku != null ? Number(r.share_unidades_sku) : null,
+        share_reais_dimensao: r.share_reais_dimensao != null ? Number(r.share_reais_dimensao) : null,
+        share_volume_dimensao: r.share_volume_dimensao != null ? Number(r.share_volume_dimensao) : null,
+        share_unidades_dimensao: r.share_unidades_dimensao != null ? Number(r.share_unidades_dimensao) : null,
+        share_reais_sku_dimensao: r.share_reais_sku_dimensao != null ? Number(r.share_reais_sku_dimensao) : null,
+        share_volume_sku_dimensao: r.share_volume_sku_dimensao != null ? Number(r.share_volume_sku_dimensao) : null,
+        share_unidades_sku_dimensao: r.share_unidades_sku_dimensao != null ? Number(r.share_unidades_sku_dimensao) : null,
+        share_reais_sku_diff_media_dimensao: r.share_reais_sku_diff_media_dimensao != null ? Number(r.share_reais_sku_diff_media_dimensao) : null,
+        share_volume_sku_diff_media_dimensao: r.share_volume_sku_diff_media_dimensao != null ? Number(r.share_volume_sku_diff_media_dimensao) : null,
+        share_unidades_sku_diff_media_dimensao: r.share_unidades_sku_diff_media_dimensao != null ? Number(r.share_unidades_sku_diff_media_dimensao) : null,
+        tickets_amostra: r.tickets_amostra != null ? parseInt(r.tickets_amostra, 10) : null,
+        raw_data: r.raw_data || null,
+      };
+    });
+    try {
+      // ignore-duplicates: rows com (map_id, cnpj_14) já presentes são silenciosamente
+      // descartadas. return=representation devolve as linhas que ENTRARAM, permitindo
+      // contar quantas foram efetivamente inseridas.
+      var resp = await sbFetch('map_pdvs?on_conflict=map_id,cnpj_14', {
+        method: 'POST',
+        headers: {
+          'Prefer': 'resolution=ignore-duplicates,return=representation',
+        },
+        body: JSON.stringify(chunk),
+      });
+      var insertedCount = Array.isArray(resp) ? resp.length : 0;
+      inserted += insertedCount;
+      ignored += (chunk.length - insertedCount);
+    } catch (e) {
+      console.error('[append] chunk insert failed:', e && e.message);
+      // Continua os próximos chunks — falha parcial não bloqueia
+    }
+  }
+
+  // Atualiza row_count no saved_maps (refresco rápido — o trigger não existe)
+  try {
+    var countResp = await sbFetch('map_pdvs?map_id=eq.' + mapId + '&select=id', {
+      headers: { 'Prefer': 'count=exact' },
+    });
+    var newTotal = Array.isArray(countResp) ? countResp.length : null;
+    if (newTotal != null) {
+      await sbFetch('saved_maps?id=eq.' + mapId, {
+        method: 'PATCH',
+        headers: { 'Prefer': 'return=minimal' },
+        body: JSON.stringify({ row_count: newTotal, updated_at: new Date().toISOString() }),
+      });
+    }
+  } catch (e) {}
+
+  // Limpar flags antes do reload
+  var nameForReload = window._appendToMapName || window._currentOpenMapName;
+  window._appendMode = false;
+  window._appendToMapId = null;
+  window._appendToMapName = null;
+  var banner = document.getElementById('append-mode-banner');
+  if (banner) banner.style.display = 'none';
+
+  // Toast antes de recarregar para o usuário ver o resultado
+  showAppendToast(inserted, ignored, allData.length - validRows.length);
+
+  // Recarregar o mapa com os dados consolidados (servidor é fonte da verdade)
+  await openSavedMap(mapId, nameForReload, 'varejo360');
+}
+
+function showAppendToast(inserted, ignored, failed) {
+  var toast = document.getElementById('geo-toast');
+  if (!toast) return;
+  var title = document.getElementById('geo-toast-title');
+  var stats = document.getElementById('geo-toast-stats');
+  if (title) title.textContent = inserted > 0
+    ? '✓ PDVs adicionados ao mapa'
+    : 'Nenhum PDV novo adicionado';
+  if (stats) {
+    var parts = [];
+    parts.push('<strong>' + inserted.toLocaleString('pt-BR') + '</strong> novo' + (inserted !== 1 ? 's' : ''));
+    if (ignored > 0) parts.push(ignored.toLocaleString('pt-BR') + ' já no mapa');
+    if (failed > 0) parts.push('<span style="color:var(--lose);">' + failed.toLocaleString('pt-BR') + ' falharam no geocoding</span>');
+    stats.innerHTML = parts.join(' · ');
+  }
+  toast.classList.add('active');
+  // Auto-dismiss em 8s
+  setTimeout(function() { toast.classList.remove('active'); }, 8000);
 }
 
 async function openSavedMap(mapId, name, mapType) {
@@ -4534,6 +4721,15 @@ function toggleMoreMenu(ev) {
       // CSV: disponível quando há dados carregados e não está em modo shared
       var canCsv = (typeof allData !== 'undefined') && allData && allData.length > 0 && !_isSharedMode;
       csvItem.style.display = canCsv ? '' : 'none';
+    }
+    var appendItem = document.getElementById('menu-item-append');
+    if (appendItem) {
+      // Adicionar PDVs: só para mapas Varejo 360 já salvos, dono autenticado, fora do shared mode
+      var canAppend = currentMapType === 'varejo360'
+        && !!window._currentOpenMapId
+        && !!currentUser
+        && !_isSharedMode;
+      appendItem.style.display = canAppend ? '' : 'none';
     }
     dd.style.display = '';
     if (btn) btn.setAttribute('aria-expanded', 'true');
@@ -6199,6 +6395,9 @@ function resetPlacesForNewSearch() {
   try { window.showGeoToast = showGeoToast; } catch(e) {}
   try { window.showPlacesSetup = showPlacesSetup; } catch(e) {}
   try { window.showSaveMapDialog = showSaveMapDialog; } catch(e) {}
+  try { window.startAppendPdvs = startAppendPdvs; } catch(e) {}
+  try { window.cancelAppendMode = cancelAppendMode; } catch(e) {}
+  try { window.finishAppendToMap = finishAppendToMap; } catch(e) {}
   try { window.openShareModal = openShareModal; } catch(e) {}
   try { window.startReenrich = startReenrich; } catch(e) {}
   try { window.dismissReenrich = dismissReenrich; } catch(e) {}

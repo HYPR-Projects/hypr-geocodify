@@ -1459,3 +1459,37 @@ html.shared-loading-leaving #shared-loading {
   from { opacity: 0; }
   to { opacity: 1; }
 }
+
+/* ─── Append mode banner (Varejo 360 — adicionar PDVs a mapa existente) ─── */
+#append-mode-banner {
+  width: 100%;
+  max-width: 720px;
+  margin: 0 auto 16px;
+  padding: 0;
+}
+.append-banner-inner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  background: var(--accent-glow, rgba(196,127,0,0.08));
+  border: 1px solid var(--accent, #c47f00);
+  border-radius: 10px;
+  font-size: 13px;
+  color: var(--text);
+}
+.append-banner-inner svg { color: var(--accent, #c47f00); flex-shrink: 0; }
+.append-banner-inner span { flex: 1; line-height: 1.4; }
+.append-banner-inner strong { font-weight: 600; }
+.append-banner-cancel {
+  padding: 4px 10px;
+  font-size: 11px;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text-muted);
+  font-family: var(--font);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.append-banner-cancel:hover { color: var(--text); border-color: var(--text-muted); }
