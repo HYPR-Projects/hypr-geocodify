@@ -4501,14 +4501,53 @@ function escHtml(s) {
   return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
+// ── Card cover: bolinhas decorativas proporcionais à quantidade de registros ──
+// Usa PRNG seeded pelo ID do mapa para posições/tamanhos estáveis entre renders.
+// FNV-1a hash → seed determinístico
+function _fnv1aHash(str) {
+  var h = 2166136261;
+  for (var i = 0; i < str.length; i++) {
+    h ^= str.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return h >>> 0;
+}
+// mulberry32 PRNG — rápido e suficientemente bom para uso visual
+function _mulberry32(seed) {
+  return function() {
+    seed = (seed + 0x6D2B79F5) >>> 0;
+    var t = seed;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+// Quantidade de dots = log10(count+1) × 6 + 2, clamped 3..28
+function _dotsCountForRows(rowCount) {
+  var n = Math.max(0, parseInt(rowCount) || 0);
+  return Math.min(28, Math.max(3, Math.round(Math.log10(n + 1) * 6 + 2)));
+}
+// Gera o SVG dos dots dado um mapa (id + row_count)
+function _buildThumbDots(mapId, rowCount) {
+  var seedStr = String(mapId || 'fallback') + ':' + (rowCount || 0);
+  var rand = _mulberry32(_fnv1aHash(seedStr));
+  var n = _dotsCountForRows(rowCount);
+  var parts = [];
+  for (var i = 0; i < n; i++) {
+    var x = 8 + rand() * 84;             // 8% a 92% horizontal
+    var y = 10 + rand() * 80;            // 10% a 90% vertical
+    var r = 1.4 + rand() * 2.2;          // raio 1.4–3.6
+    var op = 0.28 + rand() * 0.5;        // opacidade 0.28–0.78
+    parts.push('<circle cx="' + x.toFixed(2) + '%" cy="' + y.toFixed(2) + '%" r="' + r.toFixed(2) + '" fill="white" opacity="' + op.toFixed(2) + '"/>');
+  }
+  return parts.join('');
+}
+
 function buildMapCard(m) {
   const card = document.createElement('div');
   card.className = 'map-card';
   const date = new Date(m.created_at).toLocaleDateString('pt-BR', { day:'2-digit', month:'short', year:'numeric' });
-  const dots = Array.from({length:30}, () => {
-    const x = 10 + Math.random()*80, y = 10 + Math.random()*80;
-    return `<circle cx="${x}%" cy="${y}%" r="${1.5+Math.random()*2}" fill="white" opacity="${0.3+Math.random()*0.5}"/>`;
-  }).join('');
+  const dots = _buildThumbDots(m.id, m.row_count);
   const typeLabels = {
     'geocoder':              { label: '📍 Lat/Lon Generator',  color: '#10b981', bg: 'rgba(16,185,129,0.2)',  c1: '#059669', c2: '#064e3b' },
     'reverse_geocoder':      { label: '🔄 Address Generator',  color: '#22d3ee', bg: 'rgba(34,211,238,0.2)',  c1: '#0891b2', c2: '#0c4a6e' },
