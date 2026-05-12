@@ -19,6 +19,7 @@
   --win: #10b981;
   --lose: #ef4444;
   --neutral: #f59e0b;
+  --absent: #94a3b8;
   --win-bg: rgba(16,185,129,0.12);
   --lose-bg: rgba(239,68,68,0.12);
   --sidebar-w: 280px;
@@ -109,6 +110,7 @@
   --win: #059669;
   --lose: #dc2626;
   --neutral: #d97706;
+  --absent: #64748b;
   --win-bg: rgba(16,185,129,0.1);
   --lose-bg: rgba(239,68,68,0.1);
   --glass-bg: rgba(255,255,255,0.8);
@@ -278,6 +280,7 @@ html.theme-switching, html.theme-switching *, html.theme-switching *::before, ht
 }
 .overview-mini-stat-val--win { color: var(--win, #1d9e75); }
 .overview-mini-stat-val--lose { color: var(--lose, #e24b4a); }
+.overview-mini-stat-val--absent { color: var(--absent, #94a3b8); }
 .overview-mini-stat-label {
   font-size: 10px; color: var(--text-muted);
   text-transform: uppercase; letter-spacing: 0.4px; margin-top: 4px;

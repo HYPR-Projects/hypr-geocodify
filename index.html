@@ -587,6 +587,7 @@
             <button class="badge active" data-v="">Todos</button>
             <button class="badge" data-v="acima">Acima</button>
             <button class="badge" data-v="abaixo">Abaixo</button>
+            <button class="badge" data-v="sem_presenca">Sem presença</button>
           </div>
         </div>
 
@@ -596,7 +597,8 @@
           <div class="color-legend">
             <div class="legend-item"><div class="legend-dot" style="background:var(--win)"></div>Acima da média</div>
             <div class="legend-item"><div class="legend-dot" style="background:var(--lose)"></div>Abaixo da média</div>
-            <div class="legend-item"><div class="legend-dot" style="background:var(--neutral)"></div>Na média (±2%)</div>
+            <div class="legend-item"><div class="legend-dot" style="background:var(--neutral)"></div>Na média (±2pp)</div>
+            <div class="legend-item"><div class="legend-dot" style="background:#94a3b8"></div>Sem presença</div>
           </div>
         </div>
 
@@ -799,6 +801,10 @@
             <div class="overview-mini-stat">
               <div class="overview-mini-stat-val overview-mini-stat-val--lose" id="ov-lose">—</div>
               <div class="overview-mini-stat-label">Perdendo</div>
+            </div>
+            <div class="overview-mini-stat">
+              <div class="overview-mini-stat-val overview-mini-stat-val--absent" id="ov-absent">—</div>
+              <div class="overview-mini-stat-label">Sem presença</div>
             </div>
             <div class="overview-mini-stat">
               <div class="overview-mini-stat-val" id="ov-bandeiras">—</div>
