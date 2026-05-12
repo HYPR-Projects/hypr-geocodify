@@ -331,6 +331,15 @@
 
 <!-- Upload Zone -->
 <div id="upload-zone" class="hidden">
+  <!-- Append mode banner — visível só quando adicionando PDVs a um mapa existente -->
+  <div id="append-mode-banner" style="display:none;">
+    <div class="append-banner-inner">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+      <span>Adicionando PDVs ao mapa: <strong id="append-mode-map-name"></strong></span>
+      <button class="append-banner-cancel" onclick="cancelAppendMode()">cancelar</button>
+    </div>
+  </div>
+
   <!-- Step indicators -->
   <div class="onboard-steps" id="onboard-steps">
     <div class="onboard-step active" id="step-1"><div class="onboard-step-num">1</div> Upload CSV</div>
@@ -478,6 +487,10 @@
         <button class="hdr-dropdown-item" id="menu-item-share" onclick="closeMoreMenu(); openShareModal();" role="menuitem">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>
           Compartilhar
+        </button>
+        <button class="hdr-dropdown-item" id="menu-item-append" onclick="closeMoreMenu(); startAppendPdvs();" role="menuitem" style="display:none;">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+          Adicionar PDVs
         </button>
         <button class="hdr-dropdown-item" id="menu-item-csv" onclick="closeMoreMenu(); downloadGeocoderCSV();" role="menuitem">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
