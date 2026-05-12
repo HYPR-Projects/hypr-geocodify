@@ -606,6 +606,7 @@
           <div class="badge-list" id="f-perf">
             <button class="badge active" data-v="">Todos</button>
             <button class="badge" data-v="acima">Acima</button>
+            <button class="badge" data-v="competindo">Competindo</button>
             <button class="badge" data-v="abaixo">Abaixo</button>
             <button class="badge" data-v="sem_presenca">Sem presença</button>
           </div>
@@ -810,19 +811,19 @@
         <!-- OVERVIEW TAB -->
         <div class="panel-tab-content active" id="tc-overview">
           <div class="overview-mini-stats">
-            <div class="overview-mini-stat">
+            <div class="overview-mini-stat clickable" data-perf="acima" title="Filtrar PDVs ganhando share">
               <div class="overview-mini-stat-val overview-mini-stat-val--win" id="ov-win">—</div>
               <div class="overview-mini-stat-label">Ganhando</div>
             </div>
-            <div class="overview-mini-stat">
+            <div class="overview-mini-stat clickable" data-perf="competindo" title="Filtrar PDVs competindo (na média com share)">
               <div class="overview-mini-stat-val" id="ov-compete">—</div>
               <div class="overview-mini-stat-label">Competindo</div>
             </div>
-            <div class="overview-mini-stat">
+            <div class="overview-mini-stat clickable" data-perf="abaixo" title="Filtrar PDVs perdendo share">
               <div class="overview-mini-stat-val overview-mini-stat-val--lose" id="ov-lose">—</div>
               <div class="overview-mini-stat-label">Perdendo</div>
             </div>
-            <div class="overview-mini-stat">
+            <div class="overview-mini-stat clickable" data-perf="sem_presenca" title="Filtrar PDVs sem presença">
               <div class="overview-mini-stat-val overview-mini-stat-val--absent" id="ov-absent">—</div>
               <div class="overview-mini-stat-label">Sem presença</div>
             </div>
@@ -854,6 +855,7 @@
 
           <div class="panel-section">
             <div class="panel-section-title">PDVs por Bandeira</div>
+            <div class="chart-active-chip" id="chip-bandeira-chart" style="display:none;"></div>
             <div class="chart-wrap" style="height:180px">
               <canvas id="chart-bandeiras"></canvas>
             </div>
@@ -861,6 +863,7 @@
 
           <div class="panel-section">
             <div class="panel-section-title">Distribuição de Share</div>
+            <div class="chart-active-chip" id="chip-share-bucket" style="display:none;"></div>
             <div class="chart-wrap" style="height:120px">
               <canvas id="chart-dist"></canvas>
             </div>
