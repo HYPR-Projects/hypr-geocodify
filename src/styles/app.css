@@ -207,6 +207,33 @@ html.theme-switching, html.theme-switching *, html.theme-switching *::before, ht
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   max-width: 240px;
 }
+/* Estado editável: indica clicabilidade sem ser intrusivo */
+.header-map-name.editable {
+  cursor: text;
+  padding: 2px 6px;
+  margin: -2px -6px;
+  border-radius: var(--radius-sm, 6px);
+  border: 1px solid transparent;
+  transition: background var(--transition), border-color var(--transition);
+}
+.header-map-name.editable:hover {
+  background: var(--surface2);
+  border-color: var(--border);
+}
+/* Input de edição inline — herda visual do span pra evitar layout shift */
+.header-map-name-input {
+  font-family: var(--font); font-size: 13px; font-weight: 500;
+  color: var(--text); background: var(--surface2);
+  border: 1px solid var(--accent, #6366f1);
+  border-radius: var(--radius-sm, 6px);
+  padding: 2px 6px; margin: -2px -6px;
+  min-width: 140px; max-width: 320px;
+  outline: none;
+}
+.header-map-name-input:focus { background: var(--bg); }
+/* Em modo share o nome não é editável (visual neutro) */
+.shared-mode .header-map-name.editable { cursor: default; }
+.shared-mode .header-map-name.editable:hover { background: transparent; border-color: transparent; }
 
 #header .divider { width: 1px; height: 24px; background: var(--border); margin: 0 4px; }
 
