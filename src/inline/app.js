@@ -175,6 +175,10 @@ var charts = {};
 var activeLayer = 'dark';
 var _popup = null;        // MapLibre popup atual
 
+// Modo seleção múltipla — Varejo 360
+var _selectionMode = false;
+var _selectedIds = new Set(); // row.id (UUID) dos pins selecionados
+
 // ─── Estilos de mapa (MapLibre style URLs) ───────────────────────────────────
 // OpenFreeMap — vector tiles WebGL gratuito + HERE raster para satellite
 var MAP_STYLES = null; // inicializado após _buildDarkStyle e _buildSatelliteStyle
@@ -367,9 +371,9 @@ function _setupMapSources() {
     paint: {
       'circle-color': ['get', 'color'],
       'circle-radius': ['interpolate', ['linear'], ['zoom'], 8, 4, 14, 7, 18, 10],
-      'circle-stroke-width': 1.5,
-      'circle-stroke-color': _cssVar('--circle-stroke-hover'),
-      'circle-opacity': 0.95,
+      'circle-stroke-width': ['case', ['==', ['get', '_selected'], 1], 3, 1.5],
+      'circle-stroke-color': ['case', ['==', ['get', '_selected'], 1], '#ffffff', _cssVar('--circle-stroke-hover')],
+      'circle-opacity': ['case', ['==', ['get', '_dim'], 1], 0.3, 0.95],
     },
   });
 }
@@ -388,11 +392,22 @@ function _setupMapInteractions() {
     });
   });
 
-  // Popup ao clicar no ponto
+  // Popup ao clicar no ponto (ou toggle de seleção em modo seleção)
   map.on('click', 'pdv-points', (e) => {
     const props = e.features[0].properties;
     const row = allData.find(r => r._mapId === props._mapId);
     if (!row) return;
+
+    // Modo seleção: toggle no Set, não abre popup
+    if (_selectionMode) {
+      if (!row.id) return; // pin não persistido no banco — não pode deletar
+      if (_selectedIds.has(row.id)) _selectedIds.delete(row.id);
+      else _selectedIds.add(row.id);
+      try { updateSelectionBar(); } catch(_) {}
+      renderMarkers();
+      return;
+    }
+
     if (_popup) _popup.remove();
     const coords = e.features[0].geometry.coordinates.slice();
     _popup = new maplibregl.Popup({ maxWidth: '340px', closeButton: true, anchor: 'bottom' })
@@ -465,10 +480,12 @@ function renderMarkers() {
       .filter(r => parseFloat(r.lat) && parseFloat(r.lon))
       .map((r, i) => {
         if (r._mapId === undefined) r._mapId = i;
+        var isSel = _selectionMode && r.id && _selectedIds.has(r.id);
+        var isDim = _selectionMode && !isSel;
         return {
           type: 'Feature',
           geometry: { type: 'Point', coordinates: [parseFloat(r.lon), parseFloat(r.lat)] },
-          properties: { color: pinColor(r), _mapId: r._mapId },
+          properties: { color: pinColor(r), _mapId: r._mapId, _selected: isSel ? 1 : 0, _dim: isDim ? 1 : 0 },
         };
       });
 
@@ -4398,6 +4415,121 @@ async function deletePdvFromMap(rowId) {
   }
 }
 
+// ─── Modo de seleção múltipla (Varejo 360) ──────────────────────────────────
+// Permite selecionar vários pins clicando neles em sequência e deletar em
+// massa. Disponível apenas para dono do mapa, fora do shared mode.
+//
+// Visual: pins selecionados ganham borda branca + opacidade 1.0; não-
+// selecionados ficam com opacidade 0.3. Popups bloqueados durante o modo.
+function startSelectionMode() {
+  if (currentMapType !== 'varejo360') {
+    alert('Seleção múltipla disponível apenas em mapas Varejo 360.');
+    return;
+  }
+  if (!currentUser || _isSharedMode) return;
+  if (_selectionMode) return; // já ativo
+
+  _selectionMode = true;
+  _selectedIds = new Set();
+  // Fecha qualquer popup aberto
+  try { if (_popup) _popup.remove(); } catch(e) {}
+  // Cursor crosshair pra dar feedback visual
+  try { map.getCanvas().style.cursor = 'crosshair'; } catch(e) {}
+  // Mostra barra flutuante
+  var bar = document.getElementById('selection-bar');
+  if (bar) bar.classList.add('active');
+  updateSelectionBar();
+  // ESC sai do modo
+  document.addEventListener('keydown', _selectionEscHandler);
+  // Re-render pra aplicar dim
+  renderMarkers();
+}
+
+function exitSelectionMode() {
+  if (!_selectionMode) return;
+  _selectionMode = false;
+  _selectedIds = new Set();
+  try { map.getCanvas().style.cursor = ''; } catch(e) {}
+  var bar = document.getElementById('selection-bar');
+  if (bar) bar.classList.remove('active');
+  document.removeEventListener('keydown', _selectionEscHandler);
+  renderMarkers();
+}
+
+function _selectionEscHandler(e) {
+  if (e.key === 'Escape') {
+    e.preventDefault();
+    exitSelectionMode();
+  }
+}
+
+function updateSelectionBar() {
+  var count = _selectedIds.size;
+  var countEl = document.getElementById('selection-count');
+  if (countEl) countEl.textContent = count.toLocaleString('pt-BR');
+  var deleteBtn = document.getElementById('selection-delete-btn');
+  if (deleteBtn) {
+    deleteBtn.disabled = count === 0;
+    var label = document.getElementById('selection-delete-label');
+    if (label) label.textContent = count > 0 ? ('Remover ' + count.toLocaleString('pt-BR')) : 'Remover selecionados';
+  }
+}
+
+async function bulkDeleteSelected() {
+  if (!_selectionMode) return;
+  var ids = Array.from(_selectedIds);
+  if (ids.length === 0) return;
+  if (_isSharedMode || !currentUser) return;
+  var mapId = window._currentOpenMapId;
+  if (!mapId) return;
+
+  if (!confirm('Remover ' + ids.length.toLocaleString('pt-BR') + ' PDVs do mapa?\n\nA remoção é permanente.')) {
+    return;
+  }
+
+  // Desativar botão durante o processo
+  var deleteBtn = document.getElementById('selection-delete-btn');
+  if (deleteBtn) deleteBtn.disabled = true;
+
+  var deleted = 0;
+  // DELETE em chunks (filtro in.() — Supabase aceita).
+  var CHUNK = 100;
+  try {
+    for (var i = 0; i < ids.length; i += CHUNK) {
+      var slice = ids.slice(i, i + CHUNK);
+      var idList = slice.map(encodeURIComponent).join(',');
+      await sbFetch('map_pdvs?id=in.(' + idList + ')', {
+        method: 'DELETE',
+        headers: { 'Prefer': 'return=minimal' },
+      });
+      deleted += slice.length;
+    }
+    // Remove de memória
+    var idSet = new Set(ids);
+    allData = allData.filter(function(r) { return !idSet.has(r.id); });
+    filteredData = filteredData.filter(function(r) { return !idSet.has(r.id); });
+
+    // Atualiza row_count
+    try {
+      await sbFetch('saved_maps?id=eq.' + mapId, {
+        method: 'PATCH',
+        headers: { 'Prefer': 'return=minimal' },
+        body: JSON.stringify({ row_count: allData.length, updated_at: new Date().toISOString() }),
+      });
+    } catch(e) {}
+
+    // Sai do modo e re-renderiza
+    exitSelectionMode();
+    try { populateFilters(); } catch(e) {}
+    try { applyFilters(); } catch(e) {}
+    try { updatePanels(); } catch(e) {}
+  } catch (e) {
+    console.error('[bulk-delete] failed:', e && e.message);
+    alert('Erro ao remover PDVs: ' + (e && e.message ? e.message : 'tente novamente.') + '\n\n' + deleted + ' de ' + ids.length + ' foram removidos antes do erro.');
+    if (deleteBtn) deleteBtn.disabled = false;
+  }
+}
+
 async function openSavedMap(mapId, name, mapType) {
   // Limpar pendências de geocoding anterior — evita save acidental
   window._pendingMapName = null;
@@ -4405,6 +4537,8 @@ async function openSavedMap(mapId, name, mapType) {
   window._pendingMapType = null;
   window._pendingPeriodo = null;
   rawCSVData = [];
+  // Limpar modo seleção se ativo de algum mapa anterior
+  try { if (typeof exitSelectionMode === 'function' && _selectionMode) exitSelectionMode(); } catch(e) {}
   // Track open map for share feature
   window._currentOpenMapId = mapId;
   window._currentOpenMapName = name;
@@ -4873,6 +5007,16 @@ function toggleMoreMenu(ev) {
         && !!currentUser
         && !_isSharedMode;
       appendItem.style.display = canAppend ? '' : 'none';
+    }
+    var selectItem = document.getElementById('menu-item-select');
+    if (selectItem) {
+      // Selecionar PDVs: mesmo gating do Adicionar (V360 + dono + não shared) + tem dados
+      var canSelect = currentMapType === 'varejo360'
+        && !!window._currentOpenMapId
+        && !!currentUser
+        && !_isSharedMode
+        && (typeof allData !== 'undefined') && allData && allData.length > 0;
+      selectItem.style.display = canSelect ? '' : 'none';
     }
     dd.style.display = '';
     if (btn) btn.setAttribute('aria-expanded', 'true');
@@ -6542,6 +6686,10 @@ function resetPlacesForNewSearch() {
   try { window.cancelAppendMode = cancelAppendMode; } catch(e) {}
   try { window.finishAppendToMap = finishAppendToMap; } catch(e) {}
   try { window.deletePdvFromMap = deletePdvFromMap; } catch(e) {}
+  try { window.startSelectionMode = startSelectionMode; } catch(e) {}
+  try { window.exitSelectionMode = exitSelectionMode; } catch(e) {}
+  try { window.bulkDeleteSelected = bulkDeleteSelected; } catch(e) {}
+  try { window.updateSelectionBar = updateSelectionBar; } catch(e) {}
   try { window.openShareModal = openShareModal; } catch(e) {}
   try { window.startReenrich = startReenrich; } catch(e) {}
   try { window.dismissReenrich = dismissReenrich; } catch(e) {}

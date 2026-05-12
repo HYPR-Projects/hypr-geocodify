@@ -236,6 +236,22 @@
   </div>
 </div>
 
+<!-- Selection bar (Varejo 360) -->
+<div id="selection-bar" role="toolbar" aria-label="Seleção de PDVs">
+  <div class="selection-bar-info">
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><polyline points="14 17 16 19 21 14"/></svg>
+    <span><strong id="selection-count">0</strong> selecionados</span>
+    <span class="selection-bar-hint">Clique nos pins para selecionar · Esc para sair</span>
+  </div>
+  <div class="selection-bar-actions">
+    <button id="selection-delete-btn" class="selection-bar-btn danger" onclick="bulkDeleteSelected()" disabled>
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-2 14a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2L5 6"/></svg>
+      <span id="selection-delete-label">Remover selecionados</span>
+    </button>
+    <button class="selection-bar-btn ghost" onclick="exitSelectionMode()">Cancelar</button>
+  </div>
+</div>
+
 <!-- Places Discovery: floating panel (rendered inside #app over map) -->
 
 <!-- Modal: Selecionar tipo de mapa -->
@@ -491,6 +507,10 @@
         <button class="hdr-dropdown-item" id="menu-item-append" onclick="closeMoreMenu(); startAppendPdvs();" role="menuitem" style="display:none;">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
           Adicionar PDVs
+        </button>
+        <button class="hdr-dropdown-item" id="menu-item-select" onclick="closeMoreMenu(); startSelectionMode();" role="menuitem" style="display:none;">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><polyline points="14 17 16 19 21 14"/></svg>
+          Selecionar PDVs
         </button>
         <button class="hdr-dropdown-item" id="menu-item-csv" onclick="closeMoreMenu(); downloadGeocoderCSV();" role="menuitem">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
