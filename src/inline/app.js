@@ -5391,13 +5391,95 @@ function setHeaderMapName(name) {
   if (!wrap || !el) return;
   if (name && String(name).trim()) {
     el.textContent = name;
-    el.setAttribute('title', name);
+    el.setAttribute('title', _isSharedMode ? name : 'Clique para renomear');
+    // Sinaliza editabilidade conforme o modo
+    if (_isSharedMode) {
+      el.classList.remove('editable');
+    } else {
+      el.classList.add('editable');
+    }
     wrap.removeAttribute('hidden');
   } else {
     el.textContent = '';
     el.removeAttribute('title');
+    el.classList.remove('editable');
     wrap.setAttribute('hidden', '');
   }
+}
+
+// ── Edição inline do nome do mapa ────────────────────────────────────────────
+// Clique no nome substitui o <span> por um <input>; Enter ou blur salva, Escape cancela.
+// Bloqueado em modo share (read-only).
+function startEditMapName() {
+  if (_isSharedMode) return;
+  if (!window._currentOpenMapId) return;
+  if (document.getElementById('header-map-name-input')) return; // já em edição
+
+  var span = document.getElementById('header-map-name');
+  if (!span) return;
+  var currentName = (span.textContent || '').trim();
+
+  var input = document.createElement('input');
+  input.type = 'text';
+  input.id = 'header-map-name-input';
+  input.className = 'header-map-name header-map-name-input';
+  input.value = currentName;
+  input.maxLength = 100;
+  input.setAttribute('aria-label', 'Renomear mapa');
+
+  span.replaceWith(input);
+  input.focus();
+  input.select();
+
+  var done = false;
+  function finish(save) {
+    if (done) return;
+    done = true;
+    var trimmed = (input.value || '').trim();
+    var newName = (save && trimmed) ? trimmed : currentName;
+
+    // Recria o span no mesmo lugar
+    var newSpan = document.createElement('span');
+    newSpan.className = 'header-map-name editable';
+    newSpan.id = 'header-map-name';
+    newSpan.textContent = newName;
+    newSpan.setAttribute('title', 'Clique para renomear');
+    input.replaceWith(newSpan);
+
+    if (save && newName !== currentName) {
+      saveMapName(newName).catch(function(err) {
+        console.error('Erro ao renomear mapa:', err);
+        // Rollback visual
+        var rb = document.getElementById('header-map-name');
+        if (rb) rb.textContent = currentName;
+        alert('Não foi possível renomear o mapa. Tente novamente.');
+      });
+    }
+  }
+
+  input.addEventListener('keydown', function(e) {
+    if (e.key === 'Enter') { e.preventDefault(); finish(true); }
+    else if (e.key === 'Escape') { e.preventDefault(); finish(false); }
+  });
+  input.addEventListener('blur', function() { finish(true); });
+}
+
+async function saveMapName(newName) {
+  if (!window._currentOpenMapId) throw new Error('No open map id');
+  await sbFetch('saved_maps?id=eq.' + window._currentOpenMapId, {
+    method: 'PATCH',
+    headers: { 'Prefer': 'return=minimal' },
+    body: JSON.stringify({ name: newName, updated_at: new Date().toISOString() }),
+  });
+  // Atualiza caches conhecidos
+  window._currentOpenMapName = newName;
+  try {
+    var last = JSON.parse(sessionStorage.getItem('hypr_last_map') || '{}');
+    if (last && last.mapId === window._currentOpenMapId) {
+      last.mapName = newName;
+      sessionStorage.setItem('hypr_last_map', JSON.stringify(last));
+    }
+  } catch(e) {}
 }
 
 function toggleMoreMenu(ev) {
@@ -6995,6 +7077,18 @@ function resetPlacesForNewSearch() {
       try { selectBandeiraFromChart(name); } catch(err) { console.error(err); }
     });
   }
+
+  // Clique no nome do mapa no header → edição inline (read-only em modo share)
+  var nameWrap = document.getElementById('header-map-name-wrap');
+  if (nameWrap) {
+    nameWrap.addEventListener('click', function(e) {
+      var span = e.target.closest('#header-map-name');
+      if (!span) return;
+      if (span.classList.contains('editable')) {
+        try { startEditMapName(); } catch(err) { console.error(err); }
+      }
+    });
+  }
 })();
 
 
@@ -7137,6 +7231,8 @@ function resetPlacesForNewSearch() {
   try { window.dismissReenrich = dismissReenrich; } catch(e) {}
   try { window.checkReenrichBar = checkReenrichBar; } catch(e) {}
   try { window.setHeaderMapName = setHeaderMapName; } catch(e) {}
+  try { window.startEditMapName = startEditMapName; } catch(e) {}
+  try { window.saveMapName = saveMapName; } catch(e) {}
   try { window.toggleMoreMenu = toggleMoreMenu; } catch(e) {}
   try { window.closeMoreMenu = closeMoreMenu; } catch(e) {}
   try { window.openShareModalFromCard = openShareModalFromCard; } catch(e) {}
