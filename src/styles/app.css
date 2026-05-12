@@ -285,6 +285,48 @@ html.theme-switching, html.theme-switching *, html.theme-switching *::before, ht
   font-size: 10px; color: var(--text-muted);
   text-transform: uppercase; letter-spacing: 0.4px; margin-top: 4px;
 }
+/* Mini-stats clicáveis (filtro por clique) */
+.overview-mini-stat.clickable {
+  cursor: pointer;
+  transition: background 0.15s, box-shadow 0.15s, transform 0.1s;
+  position: relative;
+  border: 1px solid transparent;
+}
+.overview-mini-stat.clickable:hover {
+  background: var(--surface3, var(--surface2));
+  box-shadow: inset 0 0 0 1px var(--border, rgba(255,255,255,0.08));
+}
+.overview-mini-stat.clickable:active { transform: scale(0.98); }
+.overview-mini-stat.clickable.active {
+  background: var(--accent-glow, rgba(99,102,241,0.12));
+  border-color: var(--accent, #6366f1);
+  box-shadow: 0 0 0 1px var(--accent, #6366f1);
+}
+.overview-mini-stat.clickable.active::after {
+  content: '✕';
+  position: absolute; top: 4px; right: 6px;
+  font-size: 9px; color: var(--text-muted);
+  opacity: 0.7;
+}
+
+/* Chip de filtro ativo aplicado via chart (share bucket, bandeira) */
+.chart-active-chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 10px; font-weight: 500;
+  background: var(--accent-glow, rgba(99,102,241,0.12));
+  color: var(--accent, #6366f1);
+  border: 1px solid var(--accent, #6366f1);
+  border-radius: 12px;
+  padding: 3px 10px;
+  margin-bottom: 8px;
+  cursor: pointer;
+  transition: opacity 0.15s;
+  user-select: none;
+}
+.chart-active-chip:hover { opacity: 0.8; }
+.chart-active-chip .chip-close {
+  font-size: 11px; line-height: 1; opacity: 0.7;
+}
 
 #main { display: flex; flex: 1; overflow: hidden; }
 
