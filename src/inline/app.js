@@ -146,7 +146,12 @@ function ensureChartJS() {
   return _loadScript(
     'https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js',
     'sha384-bs/nf9FbdNouRbMiFcrcZfLXYPKiPaGVGplVbv7dLGECccEXDW+S3zjqSKR5ZEaD'
-  );
+  ).then(function() {
+    // Aplica Urbanist como fonte default em todos os charts (labels, tooltips, eixos, legenda)
+    if (window.Chart && window.Chart.defaults) {
+      window.Chart.defaults.font.family = "'Urbanist', sans-serif";
+    }
+  });
 }
 
 function ensureXLSX() {
@@ -1809,12 +1814,20 @@ async function renderBarChart(id, labels, data, colors) {
   await ensureChartJS();
   destroyChart(id);
   const ctx = document.getElementById(id).getContext('2d');
+  // Formatador pt-BR para valores percentuais: 3.982 → "3,98%"
+  function _fmtPctBR(v) {
+    if (v == null || isNaN(v)) return '—';
+    return v.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + '%';
+  }
   charts[id] = new Chart(ctx, {
     type: 'bar',
     data: { labels, datasets: [{ data, backgroundColor: colors, borderRadius: 4, borderSkipped: false }] },
     options: { ...chartDefaults, responsive: true, maintainAspectRatio: false,
+      plugins: { ...chartDefaults.plugins, tooltip: { ...(chartDefaults.plugins && chartDefaults.plugins.tooltip || {}),
+        callbacks: { label: function(ctx) { return _fmtPctBR(ctx.parsed.y); } }
+      }},
       scales: { x: { grid: { color: _cssVar('--surface-subtle') }, ticks: { color: _cssVar('--text-muted'), font: { size: 10 } } },
-        y: { grid: { color: _cssVar('--surface-subtle') }, ticks: { color: _cssVar('--text-muted'), font: { size: 10 }, callback: v => v.toFixed(1) + '%' } } }
+        y: { grid: { color: _cssVar('--surface-subtle') }, ticks: { color: _cssVar('--text-muted'), font: { size: 10 }, callback: function(v) { return _fmtPctBR(v); } } } }
     }
   });
 }
