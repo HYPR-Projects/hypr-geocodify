@@ -393,12 +393,44 @@ function _setupMapSources() {
 }
 
 function _setupMapInteractions() {
-  // Expandir cluster ao clicar
+  // Expandir cluster ao clicar — ou selecionar leaves se Cmd/Ctrl+click (V360)
   map.on('click', 'clusters', (e) => {
     const features = map.queryRenderedFeatures(e.point, { layers: ['clusters'] });
     if (!features.length) return;
     const clusterId = features[0].properties.cluster_id;
     const coords = features[0].geometry.coordinates;
+
+    // Cmd (Mac) / Ctrl (Win/Linux) + click: seleciona todos os pins do cluster
+    // em vez de expandir. Gating: V360 + dono + não shared.
+    const isModifierClick = e.originalEvent && (e.originalEvent.metaKey || e.originalEvent.ctrlKey);
+    if (isModifierClick
+        && currentMapType === 'varejo360'
+        && currentUser && !_isSharedMode) {
+      const src = map.getSource('pdvs');
+      if (src && typeof src.getClusterLeaves === 'function') {
+        src.getClusterLeaves(clusterId, Infinity, 0).then((leaves) => {
+          if (!_selectionMode) startSelectionMode();
+          var added = 0;
+          leaves.forEach((leaf) => {
+            var mapId = leaf.properties && leaf.properties._mapId;
+            if (mapId === undefined) return;
+            var row = allData.find((r) => r._mapId === mapId);
+            if (row && row.id && !_selectedIds.has(row.id)) {
+              _selectedIds.add(row.id);
+              added++;
+            }
+          });
+          console.debug('[cluster-select] adicionados:', added, 'de', leaves.length, 'leaves');
+          try { updateSelectionBar(); } catch(_) {}
+          renderMarkers();
+        }).catch((err) => {
+          console.warn('[cluster-select] getClusterLeaves falhou:', err);
+        });
+        return;
+      }
+    }
+
+    // Comportamento padrão: zoom in
     map.getSource('pdvs').getClusterExpansionZoom(clusterId).then(zoom => {
       map.easeTo({ center: coords, zoom: Math.min(zoom + 0.5, 14), duration: 400 });
     }).catch(() => {
@@ -553,34 +585,74 @@ function _setupBoxSelection() {
 
     if (!hadBox) return; // não houve drag — handler de click cuida
 
-    // Query features renderizadas dentro do bbox em pixels
+    // Query features renderizadas dentro do bbox em pixels — pins individuais
+    // e clusters separadamente (clusters precisam de getClusterLeaves async).
     var bbox = [
       [Math.min(startBackup.x, endPt.x), Math.min(startBackup.y, endPt.y)],
       [Math.max(startBackup.x, endPt.x), Math.max(startBackup.y, endPt.y)],
     ];
-    var feats;
-    try { feats = map.queryRenderedFeatures(bbox, { layers: ['pdv-points'] }); }
-    catch(err) { console.warn('[box-select] queryRenderedFeatures falhou:', err); feats = []; }
+    var pinFeats, clusterFeats;
+    try { pinFeats = map.queryRenderedFeatures(bbox, { layers: ['pdv-points'] }); }
+    catch(err) { console.warn('[box-select] queryRenderedFeatures(pdv-points) falhou:', err); pinFeats = []; }
+    try { clusterFeats = map.queryRenderedFeatures(bbox, { layers: ['clusters'] }); }
+    catch(err) { console.warn('[box-select] queryRenderedFeatures(clusters) falhou:', err); clusterFeats = []; }
 
-    if (!feats.length) {
-      console.debug('[box-select] nenhum pin no retângulo');
+    if (!pinFeats.length && !clusterFeats.length) {
+      console.debug('[box-select] nenhum pin/cluster no retângulo');
       return;
     }
 
     if (!_selectionMode) startSelectionMode();
-    var added = 0;
-    feats.forEach(function(f) {
+
+    // 1) Pins individuais — sync
+    var addedIndividual = 0;
+    pinFeats.forEach(function(f) {
       var mapId = f.properties && f.properties._mapId;
       if (mapId === undefined) return;
       var row = allData.find(function(r) { return r._mapId === mapId; });
       if (row && row.id && !_selectedIds.has(row.id)) {
         _selectedIds.add(row.id);
-        added++;
+        addedIndividual++;
       }
     });
-    console.debug('[box-select] adicionados:', added, 'de', feats.length, 'visíveis');
-    try { updateSelectionBar(); } catch(_) {}
-    renderMarkers();
+
+    // 2) Clusters — async via getClusterLeaves
+    var src = map.getSource('pdvs');
+    if (!clusterFeats.length || !src || typeof src.getClusterLeaves !== 'function') {
+      console.debug('[box-select] adicionados:', addedIndividual, 'pin(s) | visíveis:', pinFeats.length);
+      try { updateSelectionBar(); } catch(_) {}
+      renderMarkers();
+      return;
+    }
+
+    var leafPromises = clusterFeats.map(function(cf) {
+      var cid = cf.properties && cf.properties.cluster_id;
+      if (cid === undefined) return Promise.resolve([]);
+      return src.getClusterLeaves(cid, Infinity, 0).catch(function(err) {
+        console.warn('[box-select] getClusterLeaves falhou para cluster', cid, err);
+        return [];
+      });
+    });
+
+    Promise.all(leafPromises).then(function(leavesArr) {
+      var addedFromClusters = 0;
+      leavesArr.forEach(function(leaves) {
+        leaves.forEach(function(leaf) {
+          var mapId = leaf.properties && leaf.properties._mapId;
+          if (mapId === undefined) return;
+          var row = allData.find(function(r) { return r._mapId === mapId; });
+          if (row && row.id && !_selectedIds.has(row.id)) {
+            _selectedIds.add(row.id);
+            addedFromClusters++;
+          }
+        });
+      });
+      console.debug('[box-select] adicionados:', addedIndividual + addedFromClusters,
+        '(pins:', addedIndividual, '| clusters:', addedFromClusters + ')',
+        '| visíveis:', pinFeats.length, 'pin(s),', clusterFeats.length, 'cluster(s)');
+      try { updateSelectionBar(); } catch(_) {}
+      renderMarkers();
+    });
   }
 
   function onKey(e) {
