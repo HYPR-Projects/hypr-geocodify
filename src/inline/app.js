@@ -5949,6 +5949,10 @@ var _placesMode = 'pin'; // 'pin' | 'states' | 'country'
 var _selectedStates = new Set();
 var _radiusPins = []; // [{lat, lon, radiusKm, marker, circleId}]
 var _placesDiscoveryCancelled = false;
+// Captures API errors during the most recent places discovery run. Surfaced
+// to the user when the search finishes with zero results, so failures like
+// HTTP 4xx/5xx don't silently masquerade as 'Nenhum resultado encontrado'.
+var _placesApiErrors = [];
 var _placesClickHandler = null;
 var _regionFilter = 'all';
 
@@ -6530,6 +6534,7 @@ async function startPlacesDiscovery() {
   var cacheChipEl = document.getElementById('geo-cache');
   if (cacheChipEl) { cacheChipEl.style.display = 'none'; cacheChipEl.textContent = '💾 0'; }
   _placesDiscoveryCancelled = false;
+  _placesApiErrors = [];
   geocodingActive = true;
   window._unloadHandler = function(e) { if (geocodingActive) { e.preventDefault(); return e.returnValue = 'Busca em andamento.'; } };
   window.addEventListener('beforeunload', window._unloadHandler);
@@ -6582,8 +6587,16 @@ async function startPlacesDiscovery() {
           var resp = await fetch('/api/places-search', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ action:'textSearch', query: query, lat:area.lat, lon:area.lon, radius:area.radiusM, pageToken:pageToken }) });
           var data = await resp.json();
           if (resp.ok && data.placeIds) { for (var pi=0;pi<data.placeIds.length;pi++) { var pid=data.placeIds[pi]; if(!seenIds[pid]){seenIds[pid]=true;allPlaceIds.push(pid);}else{skippedDupes++;} } pageToken=data.nextPageToken; }
-          else { errors++; pageToken=null; }
-        } catch(e) { errors++; pageToken=null; }
+          else {
+            console.error('[places-search] textSearch failed (pin mode)', { status: resp.status, error: data && data.error, query: query, area: area });
+            _placesApiErrors.push({ status: resp.status, error: (data && data.error) || 'unknown', phase: 'textSearch', mode: 'pin' });
+            errors++; pageToken=null;
+          }
+        } catch(e) {
+          console.error('[places-search] textSearch network error (pin mode)', e, { query: query, area: area });
+          _placesApiErrors.push({ status: 0, error: (e && e.message) || 'network', phase: 'textSearch', mode: 'pin' });
+          errors++; pageToken=null;
+        }
         pages++;
       } while (pageToken && pages < 3 && !_placesDiscoveryCancelled);
       var pv = Math.round((ai+1)/total*50);
@@ -6627,10 +6640,18 @@ async function startPlacesDiscovery() {
               pageToken=data.nextPageToken; success=true;
             } else if (resp.status === 429 && attempt === 0) {
               await new Promise(function(r){setTimeout(r,1000);}); // Wait 1s and retry
-            } else { errors++; pageToken=null; success=true; }
+            } else {
+              console.error('[places-search] textSearch failed (city/quadrant mode)', { status: resp.status, error: data && data.error, query: taskQuery, task: task && task.label });
+              _placesApiErrors.push({ status: resp.status, error: (data && data.error) || 'unknown', phase: 'textSearch', mode: 'task' });
+              errors++; pageToken=null; success=true;
+            }
           } catch(e) {
             if (attempt === 0) { await new Promise(function(r){setTimeout(r,500);}); }
-            else { errors++; pageToken=null; success=true; }
+            else {
+              console.error('[places-search] textSearch network error (city/quadrant mode)', e, { query: taskQuery, task: task && task.label });
+              _placesApiErrors.push({ status: 0, error: (e && e.message) || 'network', phase: 'textSearch', mode: 'task' });
+              errors++; pageToken=null; success=true;
+            }
           }
         }
         pages++;
@@ -6773,10 +6794,14 @@ async function startPlacesDiscovery() {
         }
       } else {
         // Entire batch failed — add all to retry
+        console.error('[places-search] details batch failed (Phase 2)', { status: resp2.status, error: data2 && data2.error, batchSize: batch.length });
+        _placesApiErrors.push({ status: resp2.status, error: (data2 && data2.error) || 'unknown', phase: 'details', mode: 'enrich' });
         for (var fi=0;fi<batch.length;fi++) failedIds.push(batch[fi]);
         errors++;
       }
     } catch(e) {
+      console.error('[places-search] details network error (Phase 2)', e, { batchSize: batch.length });
+      _placesApiErrors.push({ status: 0, error: (e && e.message) || 'network', phase: 'details', mode: 'enrich' });
       for (var fi=0;fi<batch.length;fi++) failedIds.push(batch[fi]);
       errors++;
     }
@@ -6942,7 +6967,21 @@ function finishPlacesDiscovery() {
     document.getElementById('places-panel').style.display = 'block';
     if (_placesMode === 'pin') enablePinMode();
     var errEl = document.getElementById('places-setup-error');
-    if (errEl) { errEl.textContent = 'Nenhum resultado encontrado. Tente outra busca ou amplie a área.'; errEl.style.display = 'block'; }
+    if (errEl) {
+      // If the search ended with zero results AND we recorded API errors, surface
+      // them to the user instead of the generic "nenhum resultado" — that message
+      // hid an HTTP 400 (locationRestriction.circle) bug for 4 weeks.
+      if (_placesApiErrors.length > 0) {
+        console.error('[places-search] search ended with ' + _placesApiErrors.length + ' API errors:', _placesApiErrors);
+        var firstErr = _placesApiErrors[0];
+        var httpLabel = firstErr.status > 0 ? 'HTTP ' + firstErr.status : 'erro de rede';
+        var errSnippet = (firstErr.error && typeof firstErr.error === 'string') ? firstErr.error.slice(0, 120) : '';
+        errEl.textContent = 'Erro na API (' + httpLabel + ')' + (errSnippet ? ': ' + errSnippet : '') + '. Tente novamente em alguns instantes ou abra o console (F12) para detalhes.';
+      } else {
+        errEl.textContent = 'Nenhum resultado encontrado. Tente outra busca ou amplie a área.';
+      }
+      errEl.style.display = 'block';
+    }
   }
   // Cleanup stats
   window._lastSearchStats = null;
@@ -7092,9 +7131,13 @@ async function retryPendingIds() {
           if (!returnedIds[newBatch[fi]]) newFailed.push(newBatch[fi]);
         }
       } else {
+        console.error('[places-search] retry details batch failed', { status: resp.status, error: data && data.error, batchSize: newBatch.length });
+        _placesApiErrors.push({ status: resp.status, error: (data && data.error) || 'unknown', phase: 'details', mode: 'retry' });
         for (var fi = 0; fi < newBatch.length; fi++) newFailed.push(newBatch[fi]);
       }
     } catch(e) {
+      console.error('[places-search] retry details network error', e, { batchSize: newBatch.length });
+      _placesApiErrors.push({ status: 0, error: (e && e.message) || 'network', phase: 'details', mode: 'retry' });
       for (var fi = 0; fi < newBatch.length; fi++) newFailed.push(newBatch[fi]);
     }
     processed += batch.length;
@@ -7443,4 +7486,5 @@ function resetPlacesForNewSearch() {
   try { window.sbFetch = sbFetch; } catch(e) {}
   try { window.escHtml = escHtml; } catch(e) {}
 })();
+
 
