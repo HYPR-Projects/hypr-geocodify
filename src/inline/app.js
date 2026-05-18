@@ -5347,6 +5347,11 @@ async function saveMapToSupabase() {
     // e desbloqueia features que dependem do ID (ex: openShareModal)
     window._currentOpenMapId = mapId;
     window._currentOpenMapName = name;
+    // Keep _savedMapId in sync — autoSaveExpandedPlaces and retryPendingIds
+    // read this variable to know which saved_map to append rows to. Without
+    // this, Aprofundar busca right after the initial save would fail to
+    // persist new places because the legacy openSavedMap-only path never ran.
+    window._savedMapId = mapId;
     // Mostrar nome do mapa no header (substitui a antiga aparição do botão Compartilhar separado)
     try { setHeaderMapName(name); } catch(e) {}
     // Limpar estado pendente — auto-save já consumiu
@@ -6685,10 +6690,9 @@ async function startDeepSearch() {
   // dictionary entry, falls through to single-query behavior automatically.
   var queryVariations = _lookupQueryVariations(query);
   var hasVariations = queryVariations.length > 1;
-  // Read depth level from selector (3/5/7/9). Falls back to 3 if missing.
-  var depthSelect = document.getElementById('deep-search-depth');
-  var gridN = parseInt(depthSelect && depthSelect.value, 10);
-  if (!gridN || !DEEP_SEARCH_PRESETS[gridN]) gridN = 3;
+  // Grid size fixed at 5x5 (Médio) — sweet spot of coverage vs cost. The depth
+  // selector was removed in favor of a single Aprofundar busca button.
+  var gridN = 5;
   var preset = DEEP_SEARCH_PRESETS[gridN];
   // Build sub-grid: for each pin × each query variation, add an entry with
   // a per-area `query` field. The pin-mode loop in startPlacesDiscovery reads
@@ -7209,9 +7213,13 @@ function finishPlacesDiscovery() {
     if (retryBtn) retryBtn.style.display = pendingCount > 0 ? 'block' : 'none';
     if (!wasAppend) {
       showSaveMapDialog();
-    } else if (wasAppend && window._savedMapId) {
-      // Auto-save new places to existing saved map
-      autoSaveExpandedPlaces(window._savedMapId);
+    } else {
+      // Auto-save new places to existing saved map. Prefer _savedMapId (set by
+      // both openSavedMap and the initial save flow), fall back to
+      // _currentOpenMapId for robustness against any code path that sets only
+      // the legacy variable.
+      var mapIdForAppend = window._savedMapId || window._currentOpenMapId;
+      if (mapIdForAppend) autoSaveExpandedPlaces(mapIdForAppend);
     }
   } else {
     document.getElementById('places-panel').style.display = 'block';
@@ -7295,11 +7303,18 @@ async function autoSaveExpandedPlaces(mapId) {
     var updateBody = { row_count: allData.length };
     // Also update payload with latest search context
     if (window._placesSearchQuery) {
+      var resolvedMode = window._placesSearchMode || _placesMode;
       updateBody.payload = {
         search_query: window._placesSearchQuery,
-        search_mode: window._placesSearchMode || _placesMode,
+        search_mode: resolvedMode,
         search_states: window._placesSearchStates || Array.from(_selectedStates),
         search_radius_km: parseFloat(document.getElementById('pin-radius-km')?.value) || 5,
+        // Preserve pins on append too — otherwise every Aprofundar busca on a
+        // saved map would erase search_pins from the payload, breaking the
+        // next reload's pin restoration and disabling Aprofundar busca itself.
+        search_pins: resolvedMode === 'pin'
+          ? _radiusPins.map(function(p) { return { lat: p.lat, lon: p.lon, radiusKm: p.radiusKm }; })
+          : null,
       };
     }
     await sbFetch('saved_maps?id=eq.' + mapId, {
@@ -7430,8 +7445,9 @@ async function retryPendingIds() {
   // autoSaveExpandedPlaces filters by !r.id so it also catches any previously
   // unsaved rows from earlier retries. Safe to call even when nothing new came
   // back from this retry — the function short-circuits when no new rows exist.
-  if (window._savedMapId) {
-    await autoSaveExpandedPlaces(window._savedMapId);
+  var mapIdForRetry = window._savedMapId || window._currentOpenMapId;
+  if (mapIdForRetry) {
+    await autoSaveExpandedPlaces(mapIdForRetry);
   }
 }
 
@@ -7739,6 +7755,7 @@ function resetPlacesForNewSearch() {
   try { window.sbFetch = sbFetch; } catch(e) {}
   try { window.escHtml = escHtml; } catch(e) {}
 })();
+
 
 
 
