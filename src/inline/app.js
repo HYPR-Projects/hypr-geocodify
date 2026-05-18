@@ -5953,6 +5953,10 @@ var _placesDiscoveryCancelled = false;
 // to the user when the search finishes with zero results, so failures like
 // HTTP 4xx/5xx don't silently masquerade as 'Nenhum resultado encontrado'.
 var _placesApiErrors = [];
+// When set (non-null), getSearchAreas() returns these sub-areas instead of
+// mapping _radiusPins. Used by startDeepSearch() to inject a 3x3 sub-pin grid
+// over each existing pin without disturbing the visible pin markers.
+var _deepSearchSubAreas = null;
 var _placesClickHandler = null;
 var _regionFilter = 'all';
 
@@ -6341,6 +6345,11 @@ function generateCircleGeoJSON(lat, lon, radiusKm) {
 
 async function getSearchAreas() {
   if (_placesMode === 'pin') {
+    // Deep search injects a pre-computed sub-grid; bypass _radiusPins to avoid
+    // disturbing the visible pin markers while still feeding the same pipeline.
+    if (_deepSearchSubAreas && _deepSearchSubAreas.length > 0) {
+      return { mode: 'pin', areas: _deepSearchSubAreas.slice() };
+    }
     return { mode: 'pin', areas: _radiusPins.map(function(p) { return { lat: p.lat, lon: p.lon, radiusM: p.radiusKm * 1000 }; }) };
   }
   await ensureBRCities();
@@ -6494,6 +6503,95 @@ function startExpandSearch() {
   
   // Trigger estimate update (will enable run button if states were restored)
   if (restoredContext) updatePlacesEstimate();
+}
+
+// Generate a 3x3 sub-pin grid that tiles a parent pin's circle. Each sub-pin
+// has a smaller radius (R/2.5) and centers are offset by R*0.6 — chosen to
+// give meaningful overlap while keeping sub-areas small enough that the Google
+// Places ranking re-prioritizes hyperlocal results. Returns { lat, lon, radiusM }.
+function _generateDeepSearchGrid(centerLat, centerLon, parentRadiusKm) {
+  var subRadiusKm = Math.max(parentRadiusKm / 2.5, 2);
+  var offsetKm = parentRadiusKm * 0.6;
+  var dLatDeg = offsetKm / 111.32;
+  var dLonDeg = offsetKm / (111.32 * Math.cos(centerLat * Math.PI / 180));
+  var areas = [];
+  for (var dy = -1; dy <= 1; dy++) {
+    for (var dx = -1; dx <= 1; dx++) {
+      areas.push({
+        lat: +(centerLat + dy * dLatDeg).toFixed(5),
+        lon: +(centerLon + dx * dLonDeg).toFixed(5),
+        radiusM: subRadiusKm * 1000,
+      });
+    }
+  }
+  return areas;
+}
+
+// Aprofundar busca: subdivide each existing pin into a 3x3 sub-grid and run
+// the same pipeline in append mode. The Google Places ranking is recomputed
+// per sub-area, so hyperlocal results that were drowned out by globally
+// dominant ones in the original radius surface here.
+async function startDeepSearch() {
+  // Source pins: prefer visible _radiusPins; fall back to saved payload pins
+  // if user reloaded a saved map (pins aren't restored visually today).
+  var sourcePins = [];
+  if (_radiusPins && _radiusPins.length > 0) {
+    sourcePins = _radiusPins.map(function(p) { return { lat: p.lat, lon: p.lon, radiusKm: p.radiusKm }; });
+  } else if (window._savedMapPayload && Array.isArray(window._savedMapPayload.search_pins) && window._savedMapPayload.search_pins.length > 0) {
+    sourcePins = window._savedMapPayload.search_pins.map(function(p) {
+      return { lat: p.lat, lon: p.lon, radiusKm: p.radiusKm || window._savedMapPayload.search_radius_km || 5 };
+    });
+  }
+  if (sourcePins.length === 0) {
+    alert('Não há pins ativos para aprofundar. Posicione pelo menos um pin e refaça a busca, ou use "Expandir busca" para adicionar novas áreas.');
+    return;
+  }
+  // Recover the original query
+  var qInput = document.getElementById('places-query-input');
+  var query = (qInput && qInput.value || '').trim();
+  if (!query && window._savedMapPayload && window._savedMapPayload.search_query) {
+    query = window._savedMapPayload.search_query;
+    if (qInput) qInput.value = query;
+  }
+  if (!query) {
+    alert('Não foi possível recuperar a query original. Digite o termo de busca e tente novamente.');
+    return;
+  }
+  // Build sub-grid for all source pins
+  var subAreas = [];
+  sourcePins.forEach(function(p) {
+    var grid = _generateDeepSearchGrid(p.lat, p.lon, p.radiusKm);
+    for (var i = 0; i < grid.length; i++) subAreas.push(grid[i]);
+  });
+  // Confirmation with cost estimate. Place Details Pro = $0.017/req; cache hit
+  // rate is unknown at this point so we present an upper bound only.
+  var totalCalls = subAreas.length;
+  // Empirical observation from internal tests: ~155 unique IDs from 9 sub-pins
+  // covering a 20km radius. Scale linearly with pin count as a rough estimate.
+  var estimateNewPlaces = Math.round(155 * sourcePins.length);
+  var estimateMaxCostUSD = (estimateNewPlaces * 0.017).toFixed(2);
+  var msg = 'Aprofundar busca\n\n';
+  msg += '• Vai consultar ' + totalCalls + ' sub-áreas (grid 3x3 por pin)\n';
+  msg += '• Pins originais: ' + sourcePins.length + '\n';
+  msg += '• Estimativa: ~' + estimateNewPlaces + ' places novos\n';
+  msg += '• Custo máximo estimado: ~$' + estimateMaxCostUSD + ' (Place Details $0.017/req)\n';
+  msg += '• Custo real costuma ser bem menor pelo cache permanente\n\n';
+  msg += 'Continuar?';
+  if (!confirm(msg)) return;
+  // Wire append mode and inject sub-grid. _deepSearchSubAreas is consumed by
+  // getSearchAreas(); finishPlacesDiscovery clears it on completion.
+  _appendMode = true;
+  _deepSearchSubAreas = subAreas;
+  // Ensure pin mode is active so the pipeline takes the pin code path
+  if (_placesMode !== 'pin') {
+    _placesMode = 'pin';
+  }
+  // Hide results section so the overlay takes over
+  document.getElementById('places-results-section').style.display = 'none';
+  document.getElementById('places-panel').style.display = 'block';
+  document.getElementById('places-setup-error').style.display = 'none';
+  // Kick off the same pipeline used by the main search button
+  await startPlacesDiscovery();
 }
 
 async function startPlacesDiscovery() {
@@ -6985,6 +7083,8 @@ function finishPlacesDiscovery() {
   }
   // Cleanup stats
   window._lastSearchStats = null;
+  // Clear deep-search sub-grid so the next regular search reads _radiusPins
+  _deepSearchSubAreas = null;
   // Update floating badge
   var badgeDetail = wasAppend ? (foundDetails > 0 ? '+' + foundDetails + ' novos' : dupes > 0 ? 'nenhum novo' : '') : '';
   updatePlacesBadge(allData.length, badgeDetail);
@@ -7414,6 +7514,7 @@ function resetPlacesForNewSearch() {
   try { window._isSharedMode = _isSharedMode; } catch(e) {}
   try { window.showUploadZone = showUploadZone; } catch(e) {}
   try { window.startExpandSearch = startExpandSearch; } catch(e) {}
+  try { window.startDeepSearch = startDeepSearch; } catch(e) {}
   try { window.startGeocoding = startGeocoding; } catch(e) {}
   try { window.startGeocodingFromStep2 = startGeocodingFromStep2; } catch(e) {}
   try { window.startPlacesDiscovery = startPlacesDiscovery; } catch(e) {}
@@ -7486,5 +7587,6 @@ function resetPlacesForNewSearch() {
   try { window.sbFetch = sbFetch; } catch(e) {}
   try { window.escHtml = escHtml; } catch(e) {}
 })();
+
 
 
