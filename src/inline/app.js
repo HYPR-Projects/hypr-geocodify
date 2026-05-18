@@ -6612,14 +6612,34 @@ function _lookupQueryVariations(query) {
 // has a smaller radius (R/2.5) and centers are offset by R*0.6 — chosen to
 // give meaningful overlap while keeping sub-areas small enough that the Google
 // Places ranking re-prioritizes hyperlocal results. Returns { lat, lon, radiusM }.
-function _generateDeepSearchGrid(centerLat, centerLon, parentRadiusKm) {
-  var subRadiusKm = Math.max(parentRadiusKm / 2.5, 2);
-  var offsetKm = parentRadiusKm * 0.6;
+// Empirical estimates per pin (parent radius ~20km, dense urban area like SP centro).
+// Used to populate the cost preview in the Aprofundar busca modal. Values are
+// upper bounds — cache hits in places_cache reduce the real cost significantly.
+var DEEP_SEARCH_PRESETS = {
+  3: { label: 'Leve',       estPerPin: 180  },
+  5: { label: 'Médio',      estPerPin: 470  },
+  7: { label: 'Profundo',   estPerPin: 830  },
+  9: { label: 'Exaustivo',  estPerPin: 1350 },
+};
+
+// Build an NxN sub-pin grid that tiles the parent circle. The Google Places
+// ranking is recomputed per sub-area, so hyperlocal results that were drowned
+// out by globally dominant ones in the original radius surface here.
+// Formula validated empirically: offset = 2*parentR/(N-1), subR = offset/2
+// gives the best IDs-per-call ratio (180/470/868/1354 unique IDs for N=3/5/7/9
+// at parent radius 20km in SP centro for the query "Açougue").
+function _generateDeepSearchGrid(centerLat, centerLon, parentRadiusKm, gridN) {
+  gridN = gridN || 3;
+  if (gridN < 2) gridN = 3;
+  var offsetKm = (2 * parentRadiusKm) / (gridN - 1);
+  var subRadiusKm = Math.max(offsetKm / 2, 1);
   var dLatDeg = offsetKm / 111.32;
   var dLonDeg = offsetKm / (111.32 * Math.cos(centerLat * Math.PI / 180));
   var areas = [];
-  for (var dy = -1; dy <= 1; dy++) {
-    for (var dx = -1; dx <= 1; dx++) {
+  var half = (gridN - 1) / 2;
+  for (var i = 0; i < gridN; i++) {
+    for (var j = 0; j < gridN; j++) {
+      var dy = i - half, dx = j - half;
       areas.push({
         lat: +(centerLat + dy * dLatDeg).toFixed(5),
         lon: +(centerLon + dx * dLonDeg).toFixed(5),
@@ -6665,13 +6685,18 @@ async function startDeepSearch() {
   // dictionary entry, falls through to single-query behavior automatically.
   var queryVariations = _lookupQueryVariations(query);
   var hasVariations = queryVariations.length > 1;
+  // Read depth level from selector (3/5/7/9). Falls back to 3 if missing.
+  var depthSelect = document.getElementById('deep-search-depth');
+  var gridN = parseInt(depthSelect && depthSelect.value, 10);
+  if (!gridN || !DEEP_SEARCH_PRESETS[gridN]) gridN = 3;
+  var preset = DEEP_SEARCH_PRESETS[gridN];
   // Build sub-grid: for each pin × each query variation, add an entry with
   // a per-area `query` field. The pin-mode loop in startPlacesDiscovery reads
   // area.query and falls back to the global query when absent (backwards-compat
   // with non-deep searches).
   var subAreas = [];
   sourcePins.forEach(function(p) {
-    var grid = _generateDeepSearchGrid(p.lat, p.lon, p.radiusKm);
+    var grid = _generateDeepSearchGrid(p.lat, p.lon, p.radiusKm, gridN);
     queryVariations.forEach(function(q) {
       for (var i = 0; i < grid.length; i++) {
         subAreas.push({ lat: grid[i].lat, lon: grid[i].lon, radiusM: grid[i].radiusM, query: q });
@@ -6681,21 +6706,21 @@ async function startDeepSearch() {
   // Confirmation with cost estimate. Place Details Pro = $0.017/req; cache hit
   // rate is unknown at this point so we present an upper bound only.
   var totalCalls = subAreas.length;
-  // Empirical observations (SP centro, raio 20km):
-  //   - Single-query 3x3 grid: ~131 unique IDs
-  //   - 5-query 3x3 grid: ~435 unique IDs
-  // Scale by query count and pin count as a rough estimate.
-  var estimatePerPin = hasVariations ? Math.round(131 + (queryVariations.length - 1) * 75) : 131;
-  var estimateNewPlaces = estimatePerPin * sourcePins.length;
+  // Empirical per-pin yields (SP centro, parent radius 20km, single query):
+  //   3x3 → ~180, 5x5 → ~470, 7x7 → ~830, 9x9 → ~1350 unique IDs
+  // Multi-query variations overlap ~60% with each other, so each extra
+  // variation contributes roughly 40% of its solo yield on top.
+  var basePerPin = preset.estPerPin;
+  var multiQueryBonus = hasVariations ? 1 + 0.4 * (queryVariations.length - 1) : 1;
+  var estimateNewPlaces = Math.round(basePerPin * multiQueryBonus * sourcePins.length);
   var estimateMaxCostUSD = (estimateNewPlaces * 0.017).toFixed(2);
   var msg = 'Aprofundar busca\n\n';
+  msg += '• Profundidade: ' + preset.label + ' (grid ' + gridN + 'x' + gridN + ', ' + (gridN * gridN) + ' sub-pins por pin)\n';
   msg += '• Pins originais: ' + sourcePins.length + '\n';
   if (hasVariations) {
     msg += '• Variações detectadas: ' + queryVariations.length + ' (' + queryVariations.slice(0, 3).join(', ') + (queryVariations.length > 3 ? '…' : '') + ')\n';
-    msg += '• Sub-buscas: ' + totalCalls + ' (grid 3x3 × ' + queryVariations.length + ' termos)\n';
-  } else {
-    msg += '• Sub-buscas: ' + totalCalls + ' (grid 3x3 — sem variações conhecidas para essa query)\n';
   }
+  msg += '• Sub-buscas totais: ' + totalCalls + '\n';
   msg += '• Estimativa: ~' + estimateNewPlaces + ' places novos\n';
   msg += '• Custo máximo estimado: ~$' + estimateMaxCostUSD + ' (Place Details $0.017/req)\n';
   msg += '• Custo real costuma ser bem menor pelo cache permanente\n\n';
@@ -7714,6 +7739,7 @@ function resetPlacesForNewSearch() {
   try { window.sbFetch = sbFetch; } catch(e) {}
   try { window.escHtml = escHtml; } catch(e) {}
 })();
+
 
 
 
