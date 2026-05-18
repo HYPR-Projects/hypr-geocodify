@@ -6579,7 +6579,7 @@ async function startPlacesDiscovery() {
       var area = areas[ai], pageToken = null, pages = 0;
       do {
         try {
-          var resp = await fetch('/api/places-search', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ action:'textSearch', query: query+', Brasil', lat:area.lat, lon:area.lon, radius:area.radiusM, pageToken:pageToken }) });
+          var resp = await fetch('/api/places-search', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ action:'textSearch', query: query, lat:area.lat, lon:area.lon, radius:area.radiusM, pageToken:pageToken }) });
           var data = await resp.json();
           if (resp.ok && data.placeIds) { for (var pi=0;pi<data.placeIds.length;pi++) { var pid=data.placeIds[pi]; if(!seenIds[pid]){seenIds[pid]=true;allPlaceIds.push(pid);}else{skippedDupes++;} } pageToken=data.nextPageToken; }
           else { errors++; pageToken=null; }
@@ -6606,7 +6606,7 @@ async function startPlacesDiscovery() {
       // HYBRID: city tasks use text query, quadrant tasks use bbox
       var taskQuery;
       if (task.cityName) {
-        taskQuery = query + ', ' + task.cityName + ', ' + task.uf + ', Brasil';
+        taskQuery = query + ', ' + task.cityName + ', ' + task.uf;
       } else {
         taskQuery = query;  // Quadrant mode: just the search term + bbox
       }
@@ -7443,3 +7443,4 @@ function resetPlacesForNewSearch() {
   try { window.sbFetch = sbFetch; } catch(e) {}
   try { window.escHtml = escHtml; } catch(e) {}
 })();
+
