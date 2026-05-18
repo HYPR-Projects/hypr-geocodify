@@ -4413,15 +4413,85 @@ var _galleryPage = 1;
 var _galleryPerPage = 30;
 var _galleryFiltered = []; // Current filtered set
 
+// ─── Gallery KPIs (big numbers na home) ─────────────────────────────────────
+// Baseline historico HYPR (PDVs ja mapeados antes do Geocodify). Atualizar este
+// valor manualmente quando houver bump significativo (novo deal, base externa).
+// O KPI 'Historico HYPR' exibe: BASELINE + soma de row_count de TODOS os mapas
+// do Geocodify (nao filtrado), para representar o footprint cumulativo total.
+var HYPR_HISTORICAL_BASELINE = 2217396;
+
+var _kpiState = { mapas: 0, pdvs: 0, mes: 0, historic: 0 };
+
+function _fmtKpiInt(n) { return Math.round(n).toLocaleString('pt-BR'); }
+
+function _fmtKpiBig(n) {
+  n = Math.round(n);
+  if (n < 1000) return n.toLocaleString('pt-BR');
+  if (n < 10000) return (n / 1000).toFixed(1).replace('.', ',') + 'k';
+  if (n < 1000000) return Math.round(n / 1000) + 'k';
+  return (n / 1000000).toFixed(2).replace('.', ',') + 'M';
+}
+
+function _easeOutCubic(t) { return 1 - Math.pow(1 - t, 3); }
+
+function _animateKpi(el, from, to, duration, fmt) {
+  if (!el) return;
+  if (from === to) { el.textContent = fmt(to); return; }
+  var start = performance.now();
+  function frame(now) {
+    var t = Math.min(1, (now - start) / duration);
+    var current = from + (to - from) * _easeOutCubic(t);
+    el.textContent = fmt(current);
+    if (t < 1) requestAnimationFrame(frame);
+    else el.textContent = fmt(to);
+  }
+  requestAnimationFrame(frame);
+}
+
+function updateGalleryKPIs(filtered) {
+  if (!filtered) return;
+  var nMapas = filtered.length;
+  var nPdvs = filtered.reduce(function(s, m) { return s + (parseInt(m.row_count) || 0); }, 0);
+  // Ultimos 30 dias rolling (respeita filtro tipo/criador/busca)
+  var cutoff = Date.now() - 30 * 24 * 3600 * 1000;
+  var nMes = filtered.filter(function(m) {
+    if (!m.created_at) return false;
+    return new Date(m.created_at).getTime() >= cutoff;
+  }).length;
+  // Historico HYPR: NAO reage a filtros. Soma TODOS os mapas (_galleryMaps).
+  var totalAllMaps = (_galleryMaps || []).reduce(function(s, m) { return s + (parseInt(m.row_count) || 0); }, 0);
+  var nHistoric = HYPR_HISTORICAL_BASELINE + totalAllMaps;
+
+  var elMapas = document.getElementById('kpi-mapas');
+  var elPdvs = document.getElementById('kpi-pdvs');
+  var elMes = document.getElementById('kpi-mes');
+  var elHistoric = document.getElementById('kpi-historic');
+
+  _animateKpi(elMapas, _kpiState.mapas, nMapas, 300, _fmtKpiInt);
+  _animateKpi(elPdvs, _kpiState.pdvs, nPdvs, 300, _fmtKpiBig);
+  _animateKpi(elMes, _kpiState.mes, nMes, 300, _fmtKpiInt);
+  _animateKpi(elHistoric, _kpiState.historic, nHistoric, 300, _fmtKpiBig);
+
+  // Tooltips com numeros completos
+  if (elPdvs) elPdvs.title = nPdvs.toLocaleString('pt-BR') + ' PDVs no recorte';
+  if (elHistoric) elHistoric.title = 'Baseline ' + HYPR_HISTORICAL_BASELINE.toLocaleString('pt-BR') +
+    ' + ' + totalAllMaps.toLocaleString('pt-BR') + ' no Geocodify = ' +
+    nHistoric.toLocaleString('pt-BR') + ' PDVs total';
+
+  _kpiState = { mapas: nMapas, pdvs: nPdvs, mes: nMes, historic: nHistoric };
+}
+
 async function loadGallery() {
   var loading = document.getElementById('gallery-loading');
   var grid = document.getElementById('gallery-grid');
   var empty = document.getElementById('gallery-empty');
   var filters = document.getElementById('gallery-filters');
+  var kpis = document.getElementById('gallery-kpis');
   loading.style.display = 'block';
   grid.style.display = 'none';
   empty.style.display = 'none';
   if (filters) filters.style.display = 'none';
+  if (kpis) kpis.style.display = 'none';
   document.getElementById('gallery-pagination').style.display = 'none';
 
   try {
@@ -4442,6 +4512,7 @@ async function loadGallery() {
       });
     }
     if (filters) filters.style.display = 'flex';
+    if (kpis) kpis.style.display = 'grid';
     _galleryPage = 1;
     applyGalleryFilters();
   } catch (e) {
@@ -4479,6 +4550,10 @@ function applyGalleryFilters(keepPage) {
   _galleryFiltered = filtered;
   if (!keepPage) _galleryPage = 1;
   
+  // Atualiza big numbers da home (reage ao filtro). Historico HYPR e' fixo
+  // baseado em _galleryMaps, nao em filtered, portanto sempre consistente.
+  try { updateGalleryKPIs(filtered); } catch(e) {}
+
   if (filtered.length === 0) {
     grid.innerHTML = '';
     grid.style.display = 'none';
@@ -4685,6 +4760,10 @@ async function deleteMap(id, btn) {
       document.getElementById('gallery-grid').style.display = 'none';
       document.getElementById('gallery-pagination').style.display = 'none';
       document.getElementById('gallery-empty').style.display = 'block';
+      var _kpisEl = document.getElementById('gallery-kpis');
+      if (_kpisEl) _kpisEl.style.display = 'none';
+      var _filtersEl = document.getElementById('gallery-filters');
+      if (_filtersEl) _filtersEl.style.display = 'none';
     } else {
       applyGalleryFilters(true);
     }
