@@ -764,7 +764,15 @@
       <button onclick="setMapView('list')" style="width:100%;padding:8px;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);font-size:12px;font-family:var(--font);cursor:pointer;">📋 Ver lista</button>
       <button onclick="downloadGeocoderCSV()" style="width:100%;padding:8px;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);font-size:12px;font-family:var(--font);cursor:pointer;">⬇ Baixar CSV</button>
       <button onclick="startExpandSearch()" style="width:100%;padding:8px;background:transparent;border:1px solid var(--accent);border-radius:var(--radius-sm);color:var(--accent-light);font-size:12px;font-family:var(--font);cursor:pointer;" title="Adicionar pins em outras áreas para incluir novos places">➕ Expandir busca <span style="color:var(--text-muted);font-weight:400;">· novas áreas</span></button>
-      <button id="btn-deep-search" onclick="startDeepSearch()" style="width:100%;padding:8px;background:transparent;border:1px solid var(--accent);border-radius:var(--radius-sm);color:var(--accent-light);font-size:12px;font-family:var(--font);cursor:pointer;" title="Subdividir os pins atuais em sub-áreas para encontrar mais places no mesmo raio">🔍 Aprofundar busca <span style="color:var(--text-muted);font-weight:400;">· mesma área</span></button>
+      <div style="display:flex;gap:6px;align-items:stretch;">
+        <select id="deep-search-depth" title="Profundidade: mais sub-buscas = mais cobertura, custo proporcional" style="flex:0 0 110px;padding:8px;background:transparent;border:1px solid var(--accent);border-radius:var(--radius-sm);color:var(--accent-light);font-size:11px;font-family:var(--font);cursor:pointer;">
+          <option value="3">Leve · 3x3</option>
+          <option value="5" selected>Médio · 5x5</option>
+          <option value="7">Profundo · 7x7</option>
+          <option value="9">Exaustivo · 9x9</option>
+        </select>
+        <button id="btn-deep-search" onclick="startDeepSearch()" style="flex:1;padding:8px;background:transparent;border:1px solid var(--accent);border-radius:var(--radius-sm);color:var(--accent-light);font-size:12px;font-family:var(--font);cursor:pointer;" title="Subdividir os pins atuais em sub-áreas para encontrar mais places no mesmo raio">🔍 Aprofundar busca <span style="color:var(--text-muted);font-weight:400;">· mesma área</span></button>
+      </div>
       <button id="btn-retry-pending" onclick="retryPendingIds()" style="display:none;width:100%;padding:8px;background:transparent;border:1px solid var(--neutral);border-radius:var(--radius-sm);color:var(--neutral);font-size:12px;font-family:var(--font);cursor:pointer;">🔄 Recuperar pendentes</button>
       <button onclick="resetPlacesForNewSearch()" style="width:100%;padding:8px;background:transparent;border:1px solid rgba(255,255,255,0.1);border-radius:var(--radius-sm);color:var(--text-muted);font-size:12px;font-family:var(--font);cursor:pointer;">🔄 Nova busca (limpa tudo)</button>
     </div>
@@ -921,4 +929,5 @@
 
 </body>
 </html>
+
 
