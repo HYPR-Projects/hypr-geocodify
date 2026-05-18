@@ -88,14 +88,25 @@ async function handleTextSearch(body) {
       }
     };
   } else if (lat != null && lon != null && radius) {
-    // locationRestriction.circle: HARD constraint — Google returns only results inside the circle.
-    // (locationBias.circle is soft and leaks results outside the radius.)
-    // Google limits circle radius to 50000m; clamp just in case.
+    // Text Search (New) does NOT support locationRestriction.circle — only rectangle.
+    // (circle is allowed in locationBias, which is SOFT and silently ignored when
+    // the textQuery contains an explicit location like ", Brasil"; and in the
+    // searchNearby endpoint, which doesn't accept a free-text query.) So we
+    // convert the requested circle into a circumscribing bbox and use
+    // locationRestriction.rectangle — same HARD-constraint field Estados/Brasil
+    // already uses successfully.
+    //
+    // The bbox is ~27% larger in area than the circle, so a few results may land
+    // in the corners outside the intended radius. The Phase-2 haversine filter
+    // on the client (with 10% tolerance) already discards those — no client
+    // change required. Google caps radius at 50km; clamp to be safe.
     const clampedRadius = Math.min(Math.max(Number(radius) || 0, 1), 50000);
+    const dLat = clampedRadius / 111320;
+    const dLon = clampedRadius / (111320 * Math.cos(lat * Math.PI / 180));
     payload.locationRestriction = {
-      circle: {
-        center: { latitude: lat, longitude: lon },
-        radius: clampedRadius,
+      rectangle: {
+        low:  { latitude: lat - dLat, longitude: lon - dLon },
+        high: { latitude: lat + dLat, longitude: lon + dLon },
       }
     };
   }
@@ -319,3 +330,4 @@ function parseRetryAfter(headerValue) {
   }
   return null;
 }
+
