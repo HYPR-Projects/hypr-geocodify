@@ -6562,6 +6562,52 @@ function startExpandSearch() {
   if (restoredContext) updatePlacesEstimate();
 }
 
+// Synonyms for common pt-BR category queries. When Aprofundar busca runs with
+// a query that matches one of these keys (normalized), the deep search iterates
+// over the variations too, dramatically increasing coverage. Google treats each
+// term as a partially-disjoint set — "açougue" alone tops out at ~130 places in
+// SP centro, but with variations it reaches ~430. Marca/brand queries should
+// NOT have variations (no entry → falls through to single-query behavior).
+var _PLACES_VARIATIONS = {
+  'acougue': ['Casa de carnes', 'Frigorífico', 'Boutique de carnes', 'Carnes'],
+  'padaria': ['Panificadora', 'Panificação', 'Padaria artesanal', 'Casa do pão'],
+  'farmacia': ['Drogaria', 'Drogasil', 'Farmácia popular', 'Drogaria popular'],
+  'pet shop': ['Petshop', 'Agropet', 'Casa de rações', 'Clínica veterinária'],
+  'restaurante': ['Lanchonete', 'Bistrô', 'Cantina', 'Comida brasileira', 'Self-service'],
+  'supermercado': ['Mercado', 'Mercadinho', 'Hortifruti', 'Empório', 'Atacarejo'],
+  'posto de gasolina': ['Posto', 'Conveniência', 'Posto de combustível'],
+  'bar': ['Boteco', 'Pub', 'Cervejaria', 'Choperia'],
+  'sorveteria': ['Açaí', 'Gelateria', 'Casa de sorvetes'],
+  'pizzaria': ['Pizza', 'Rodízio de pizza'],
+  'salao de beleza': ['Cabeleireiro', 'Barbearia', 'Salão', 'Studio de beleza'],
+  'academia': ['Crossfit', 'Studio de pilates', 'Box de crossfit'],
+  'escola': ['Colégio', 'Educação infantil', 'Berçário'],
+  'clinica': ['Consultório', 'Clínica médica', 'Centro médico'],
+  'oficina': ['Mecânica', 'Auto center', 'Oficina mecânica'],
+};
+
+// Returns [originalQuery, ...variations] if the normalized query matches a known
+// category; otherwise returns [originalQuery] (single-query behavior preserved
+// for brand names and unknown terms).
+function _lookupQueryVariations(query) {
+  var orig = (query || '').trim();
+  if (!orig) return [];
+  // Normalize: lowercase + strip accents + collapse spaces
+  var norm = orig.toLowerCase()
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .replace(/\s+/g, ' ').trim();
+  var variations = _PLACES_VARIATIONS[norm];
+  if (!variations) return [orig];
+  // Dedupe in case the dictionary itself contains the original (case-insensitive)
+  var all = [orig];
+  for (var i = 0; i < variations.length; i++) {
+    var v = variations[i];
+    var vNorm = v.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+    if (vNorm !== norm) all.push(v);
+  }
+  return all;
+}
+
 // Generate a 3x3 sub-pin grid that tiles a parent pin's circle. Each sub-pin
 // has a smaller radius (R/2.5) and centers are offset by R*0.6 — chosen to
 // give meaningful overlap while keeping sub-areas small enough that the Google
@@ -6614,22 +6660,42 @@ async function startDeepSearch() {
     alert('Não foi possível recuperar a query original. Digite o termo de busca e tente novamente.');
     return;
   }
-  // Build sub-grid for all source pins
+  // Look up category variations. If the query is a known generic term (açougue,
+  // padaria, etc.), iterate over synonyms too. For brand/name queries with no
+  // dictionary entry, falls through to single-query behavior automatically.
+  var queryVariations = _lookupQueryVariations(query);
+  var hasVariations = queryVariations.length > 1;
+  // Build sub-grid: for each pin × each query variation, add an entry with
+  // a per-area `query` field. The pin-mode loop in startPlacesDiscovery reads
+  // area.query and falls back to the global query when absent (backwards-compat
+  // with non-deep searches).
   var subAreas = [];
   sourcePins.forEach(function(p) {
     var grid = _generateDeepSearchGrid(p.lat, p.lon, p.radiusKm);
-    for (var i = 0; i < grid.length; i++) subAreas.push(grid[i]);
+    queryVariations.forEach(function(q) {
+      for (var i = 0; i < grid.length; i++) {
+        subAreas.push({ lat: grid[i].lat, lon: grid[i].lon, radiusM: grid[i].radiusM, query: q });
+      }
+    });
   });
   // Confirmation with cost estimate. Place Details Pro = $0.017/req; cache hit
   // rate is unknown at this point so we present an upper bound only.
   var totalCalls = subAreas.length;
-  // Empirical observation from internal tests: ~155 unique IDs from 9 sub-pins
-  // covering a 20km radius. Scale linearly with pin count as a rough estimate.
-  var estimateNewPlaces = Math.round(155 * sourcePins.length);
+  // Empirical observations (SP centro, raio 20km):
+  //   - Single-query 3x3 grid: ~131 unique IDs
+  //   - 5-query 3x3 grid: ~435 unique IDs
+  // Scale by query count and pin count as a rough estimate.
+  var estimatePerPin = hasVariations ? Math.round(131 + (queryVariations.length - 1) * 75) : 131;
+  var estimateNewPlaces = estimatePerPin * sourcePins.length;
   var estimateMaxCostUSD = (estimateNewPlaces * 0.017).toFixed(2);
   var msg = 'Aprofundar busca\n\n';
-  msg += '• Vai consultar ' + totalCalls + ' sub-áreas (grid 3x3 por pin)\n';
   msg += '• Pins originais: ' + sourcePins.length + '\n';
+  if (hasVariations) {
+    msg += '• Variações detectadas: ' + queryVariations.length + ' (' + queryVariations.slice(0, 3).join(', ') + (queryVariations.length > 3 ? '…' : '') + ')\n';
+    msg += '• Sub-buscas: ' + totalCalls + ' (grid 3x3 × ' + queryVariations.length + ' termos)\n';
+  } else {
+    msg += '• Sub-buscas: ' + totalCalls + ' (grid 3x3 — sem variações conhecidas para essa query)\n';
+  }
   msg += '• Estimativa: ~' + estimateNewPlaces + ' places novos\n';
   msg += '• Custo máximo estimado: ~$' + estimateMaxCostUSD + ' (Place Details $0.017/req)\n';
   msg += '• Custo real costuma ser bem menor pelo cache permanente\n\n';
@@ -6737,18 +6803,22 @@ async function startPlacesDiscovery() {
     for (var ai = 0; ai < areas.length; ai++) {
       if (_placesDiscoveryCancelled) break;
       var area = areas[ai], pageToken = null, pages = 0;
+      // Deep search injects a per-area query (multi-query mode). For regular
+      // searches and single-query deep searches, area.query is undefined and
+      // we fall back to the global query read from the input field.
+      var areaQuery = area.query || query;
       do {
         try {
-          var resp = await fetch('/api/places-search', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ action:'textSearch', query: query, lat:area.lat, lon:area.lon, radius:area.radiusM, pageToken:pageToken }) });
+          var resp = await fetch('/api/places-search', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ action:'textSearch', query: areaQuery, lat:area.lat, lon:area.lon, radius:area.radiusM, pageToken:pageToken }) });
           var data = await resp.json();
           if (resp.ok && data.placeIds) { for (var pi=0;pi<data.placeIds.length;pi++) { var pid=data.placeIds[pi]; if(!seenIds[pid]){seenIds[pid]=true;allPlaceIds.push(pid);}else{skippedDupes++;} } pageToken=data.nextPageToken; }
           else {
-            console.error('[places-search] textSearch failed (pin mode)', { status: resp.status, error: data && data.error, query: query, area: area });
+            console.error('[places-search] textSearch failed (pin mode)', { status: resp.status, error: data && data.error, query: areaQuery, area: area });
             _placesApiErrors.push({ status: resp.status, error: (data && data.error) || 'unknown', phase: 'textSearch', mode: 'pin' });
             errors++; pageToken=null;
           }
         } catch(e) {
-          console.error('[places-search] textSearch network error (pin mode)', e, { query: query, area: area });
+          console.error('[places-search] textSearch network error (pin mode)', e, { query: areaQuery, area: area });
           _placesApiErrors.push({ status: 0, error: (e && e.message) || 'network', phase: 'textSearch', mode: 'pin' });
           errors++; pageToken=null;
         }
@@ -7644,6 +7714,7 @@ function resetPlacesForNewSearch() {
   try { window.sbFetch = sbFetch; } catch(e) {}
   try { window.escHtml = escHtml; } catch(e) {}
 })();
+
 
 
 
