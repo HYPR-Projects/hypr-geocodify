@@ -132,6 +132,24 @@
     </div>
   </div>
   <div class="gallery-body">
+    <div id="gallery-kpis" class="gallery-kpis" style="display:none;">
+      <div class="kpi-cell" title="Total de mapas no recorte atual">
+        <span class="kpi-label">Mapas</span>
+        <span class="kpi-value" id="kpi-mapas">0</span>
+      </div>
+      <div class="kpi-cell" title="Soma de PDVs nos mapas do recorte">
+        <span class="kpi-label">PDVs no Geocodify</span>
+        <span class="kpi-value" id="kpi-pdvs">0</span>
+      </div>
+      <div class="kpi-cell" title="Mapas criados nos últimos 30 dias">
+        <span class="kpi-label">Últimos 30 dias</span>
+        <span class="kpi-value" id="kpi-mes">0</span>
+      </div>
+      <div class="kpi-cell kpi-cell--historic" title="Baseline histórico HYPR + soma de todos os PDVs no Geocodify (não reage a filtros)">
+        <span class="kpi-label">Histórico HYPR</span>
+        <span class="kpi-value" id="kpi-historic">0</span>
+      </div>
+    </div>
     <div id="gallery-filters" class="gallery-filters" style="display:none;">
       <input type="text" id="gf-search" class="gf-input" aria-label="Buscar mapas" placeholder="Buscar por nome, descrição ou criador..." oninput="applyGalleryFilters()">
       <select id="gf-type" class="gf-select" onchange="applyGalleryFilters()">
