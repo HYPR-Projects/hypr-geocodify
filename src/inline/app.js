@@ -6274,11 +6274,38 @@ function setPlacesMode(mode) {
 }
 
 function enablePinMode() {
-  if (!map) return;
+  // When Places Discovery opens, setPlacesMode('pin') fires synchronously while
+  // initMap() is still inside a setTimeout. On that first call map is null and
+  // the original early-return left the click handler unregistered — users had
+  // to switch to Estados and back to Pin+Raio to "wake it up". Poll briefly
+  // until the map exists, then re-enter.
+  if (!map) {
+    if (window._enablePinDeferred) return;
+    window._enablePinDeferred = true;
+    var attempts = 0;
+    var poll = setInterval(function() {
+      attempts++;
+      if (map) {
+        clearInterval(poll);
+        window._enablePinDeferred = false;
+        if (_placesMode === 'pin') enablePinMode();
+      } else if (attempts >= 50) {  // ~7.5s safety cap
+        clearInterval(poll);
+        window._enablePinDeferred = false;
+        console.warn('[places] map never became available; pin mode could not be enabled');
+      }
+    }, 150);
+    return;
+  }
   map.getCanvas().style.cursor = 'crosshair';
   if (_placesClickHandler) map.off('click', _placesClickHandler);
   _placesClickHandler = function(e) {
-    var features = map.queryRenderedFeatures(e.point, { layers: ['pdv-points', 'clusters'] });
+    // Defensive: layers may not exist yet if _setupMapSources hasn't run.
+    // Treat any error from queryRenderedFeatures as "no features", which lets
+    // the user drop a pin even on a fresh map with no PDV layers yet.
+    var features = [];
+    try { features = map.queryRenderedFeatures(e.point, { layers: ['pdv-points', 'clusters'] }); }
+    catch(err) { features = []; }
     if (features.length > 0) return;
     addRadiusPin(e.lngLat.lat, e.lngLat.lng);
   };
@@ -7617,6 +7644,7 @@ function resetPlacesForNewSearch() {
   try { window.sbFetch = sbFetch; } catch(e) {}
   try { window.escHtml = escHtml; } catch(e) {}
 })();
+
 
 
 
