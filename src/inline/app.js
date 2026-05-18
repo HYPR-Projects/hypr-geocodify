@@ -5167,6 +5167,30 @@ async function openSavedMap(mapId, name, mapType) {
         var qInput = document.getElementById('places-query-input');
         if (qInput) qInput.value = plPayload.search_query;
       }
+      // Restore the original search pins visually if the payload has them.
+      // Required for Aprofundar busca to work on previously-saved maps.
+      // Older saves predate this field — they silently no-op here.
+      if (plPayload && Array.isArray(plPayload.search_pins) && plPayload.search_pins.length > 0) {
+        var restorePins = function() {
+          try {
+            clearAllPins();
+            var radiusInput = document.getElementById('pin-radius-km');
+            var prevRadiusValue = radiusInput ? radiusInput.value : null;
+            plPayload.search_pins.forEach(function(p) {
+              if (typeof p.lat !== 'number' || typeof p.lon !== 'number') return;
+              if (radiusInput) radiusInput.value = p.radiusKm || plPayload.search_radius_km || 5;
+              addRadiusPin(p.lat, p.lon);
+            });
+            if (radiusInput && prevRadiusValue !== null) radiusInput.value = prevRadiusValue;
+          } catch(e) {
+            console.warn('[places] could not restore search pins:', e);
+          }
+        };
+        // addRadiusPin calls map.addSource/addLayer, which requires the style
+        // to be loaded. Defer if it isn't yet.
+        if (map && map.isStyleLoaded()) restorePins();
+        else if (map) map.once('styledata', restorePins);
+      }
       updatePlacesBadge(allData.length);
     }
     // Renderizar pins — aguardar style estar pronto se necessário
@@ -5250,6 +5274,12 @@ async function saveMapToSupabase() {
         search_mode: window._placesSearchMode || _placesMode || 'pin',
         search_states: window._placesSearchStates || Array.from(_selectedStates),
         search_radius_km: parseFloat(document.getElementById('pin-radius-km')?.value) || 5,
+        // Persist the actual pin positions so that reloading a saved map can
+        // restore them visually and enable features like Aprofundar busca,
+        // which depends on knowing where the original areas were.
+        search_pins: (window._placesSearchMode || _placesMode) === 'pin'
+          ? _radiusPins.map(function(p) { return { lat: p.lat, lon: p.lon, radiusKm: p.radiusKm }; })
+          : null,
       };
     }
     const saved = await sbFetch('saved_maps', {
@@ -7587,6 +7617,7 @@ function resetPlacesForNewSearch() {
   try { window.sbFetch = sbFetch; } catch(e) {}
   try { window.escHtml = escHtml; } catch(e) {}
 })();
+
 
 
 
