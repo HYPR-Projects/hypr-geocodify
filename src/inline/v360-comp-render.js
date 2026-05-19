@@ -820,6 +820,8 @@
       const brands = brandsList();
       return classifyRow(row, getMode(), brands.perspective, brands.others, getTicketsFloor());
     },
+    // Lista de marcas + colorMap (consumido pelos donut clusters em modo Categoria)
+    brandsList,
     STATE,
     STATE_COLORS,
     STATE_LABELS,
