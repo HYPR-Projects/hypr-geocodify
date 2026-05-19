@@ -62,6 +62,16 @@
   // ─── Estado interno ─────────────────────────────────────────────────────
   let _hookActive = false;
   let _ticketsFloor = 5; // sobrescrito pelo state de V360Comp
+
+  // PR3: getter dinâmico - permite slider de piso atualizar em tempo real
+  function getTicketsFloor() {
+    if (window._v360TicketsFloorOverride != null) return window._v360TicketsFloorOverride;
+    if (window.V360Comp?.getState) {
+      const st = window.V360Comp.getState();
+      if (st && st.ticketsFloor != null) return st.ticketsFloor;
+    }
+    return _ticketsFloor;
+  }
   let _classifyCache = new Map(); // cnpj_14 -> { state, leaderBrand, gap }
   let _classifyCacheKey = '';
 
@@ -267,7 +277,7 @@
     const persp = getPerspectiveBrand();
     const brands = brandsList();
     const others = brands.others;
-    const cls = classifyRow(row, mode, persp, others, _ticketsFloor);
+    const cls = classifyRow(row, mode, persp, others, getTicketsFloor());
     if (!cls) return null;
 
     if (mode === 'duelo') {
@@ -311,13 +321,13 @@
     const maxShare = Math.max(...data.map(d => d.share || 0), 0.01);
 
     // Classificação atual (chip de estado)
-    const cls = classifyRow(row, mode, persp, brands.others, _ticketsFloor);
+    const cls = classifyRow(row, mode, persp, brands.others, getTicketsFloor());
     const stateLabel = cls ? STATE_LABELS[cls.state] : '';
     const stateColor = cls ? STATE_COLORS[cls.state] : '#94a3b8';
 
     let rowsHtml = '';
     for (const d of data) {
-      const lowConf = d.tickets > 0 && d.tickets < _ticketsFloor;
+      const lowConf = d.tickets > 0 && d.tickets < getTicketsFloor();
       const sharePct = d.share != null ? d.share * 100 : null;
       const wPct = sharePct != null ? Math.min(sharePct / (maxShare * 100) * 100, 100) : 0;
       const valLabel = sharePct == null ? '—' : sharePct.toFixed(1) + '%';
@@ -398,7 +408,7 @@
     let baseWins = 0, otherWins = 0, ties = 0, baseTickets = 0;
 
     for (const row of data) {
-      const cls = classifyRow(row, 'duelo', baseBrand, [otherBrand], _ticketsFloor);
+      const cls = classifyRow(row, 'duelo', baseBrand, [otherBrand], getTicketsFloor());
       if (!cls) continue;
       counts[cls.state]++;
       if (cls.baseShare > 0 || cls.otherShare > 0) {
@@ -461,7 +471,7 @@
     let whitespaceCount = 0;
 
     for (const row of data) {
-      const cls = classifyRow(row, 'categoria', baseBrand, others, _ticketsFloor);
+      const cls = classifyRow(row, 'categoria', baseBrand, others, getTicketsFloor());
       if (!cls) continue;
       if (cls.state === STATE.WHITESPACE) { whitespaceCount++; continue; }
       if (cls.leaderBrand) brandWins[cls.leaderBrand] = (brandWins[cls.leaderBrand] || 0) + 1;
@@ -522,7 +532,7 @@
       const sharesByBrand = {};
       for (const b of brands) {
         const bd = getShareForBrand(row, b);
-        const s = validShare(bd, _ticketsFloor);
+        const s = validShare(bd, getTicketsFloor());
         sharesByBrand[b] = s || 0;
       }
       for (let i = 0; i < n; i++) {
@@ -616,7 +626,7 @@
     const mode = getMode();
     if (mode === 'solo') return true;
     const brands = brandsList();
-    const cls = classifyRow(row, mode, brands.perspective, brands.others, _ticketsFloor);
+    const cls = classifyRow(row, mode, brands.perspective, brands.others, getTicketsFloor());
     if (!cls) return true;
     switch (_activeStateFilter) {
       case 'state-win': return cls.state === STATE.DOMINANCE || cls.state === STATE.LEADERSHIP || cls.state === STATE.EXCLUSIVE;
@@ -755,7 +765,7 @@
     getMode,
     classifyRow: (row) => {
       const brands = brandsList();
-      return classifyRow(row, getMode(), brands.perspective, brands.others, _ticketsFloor);
+      return classifyRow(row, getMode(), brands.perspective, brands.others, getTicketsFloor());
     },
     STATE,
     STATE_COLORS,

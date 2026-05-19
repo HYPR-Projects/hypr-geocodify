@@ -13,3 +13,4 @@ import './styles/app.css';
 import './inline/app.js';
 import './inline/v360-competitors.js';
 import './inline/v360-comp-render.js';
+import './inline/v360-comp-pr3.js';
