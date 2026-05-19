@@ -329,54 +329,43 @@ function _setupMapSources() {
   });
   try { if (map.getSource('pdvs')) map.removeSource('pdvs'); } catch(e) {}
 
+  // Limpar donut markers de render anterior (troca de layer/tema)
+  _clearClusterDonuts();
+
   map.addSource('pdvs', {
     type: 'geojson',
     data: { type: 'FeatureCollection', features: [] },
     cluster: true,
-    clusterMaxZoom: 12,      // acima de zoom 12, mostra pontos individuais
-    clusterRadius: 40,        // raio em pixels para agrupar
-    clusterProperties: {      // agregar cor dominante para colorir o cluster
-      'has_green':  ['+', ['case', ['==', ['get','color'], _cssVar('--win')], 1, 0]],
-      'has_red':    ['+', ['case', ['==', ['get','color'], _cssVar('--lose')], 1, 0]],
+    clusterMaxZoom: 11,       // transição mais cedo para dots individuais
+    clusterRadius: 44,        // raio em pixels para agrupar
+    // Agregar contagem por categoria de performance — usado pelos donut markers
+    clusterProperties: {
+      'c_win':     ['+', ['case', ['==', ['get','cat'], 1], 1, 0]],
+      'c_lose':    ['+', ['case', ['==', ['get','cat'], 2], 1, 0]],
+      'c_neutral': ['+', ['case', ['==', ['get','cat'], 3], 1, 0]],
+      'c_absent':  ['+', ['case', ['==', ['get','cat'], 4], 1, 0]],
     }
   });
 
-  // Layer de clusters — tamanho proporcional à contagem, cor neutra azul
+  // Layer de clusters — INVISÍVEL (opacity 0) mas preservada para
+  // queryRenderedFeatures (box-select, click handler). Os donuts visíveis
+  // são renderizados via _renderClusterDonuts() como HTML markers por cima.
   map.addLayer({
     id: 'clusters',
     type: 'circle',
     source: 'pdvs',
     filter: ['has', 'point_count'],
     paint: {
-      'circle-color': _cssVar('--cluster-color'),
+      'circle-color': 'rgba(0,0,0,0)',
       'circle-radius': ['interpolate', ['linear'], ['get', 'point_count'],
-        1, 14, 10, 20, 50, 26, 200, 32, 1000, 38
+        1, 18, 10, 24, 50, 30, 200, 36, 1000, 42
       ],
-      'circle-opacity': 0.85,
-      'circle-stroke-width': 2,
-      'circle-stroke-color': _cssVar('--circle-stroke'),
+      'circle-opacity': 0,
+      'circle-stroke-width': 0,
     },
   });
 
-  // Layer de contagem dos clusters
-  map.addLayer({
-    id: 'cluster-count',
-    type: 'symbol',
-    source: 'pdvs',
-    filter: ['has', 'point_count'],
-    layout: {
-      'text-field': ['case',
-        ['>=', ['get', 'point_count'], 1000],
-        ['concat', ['to-string', ['floor', ['/', ['get', 'point_count'], 1000]]], 'k'],
-        ['to-string', ['get', 'point_count']]
-      ],
-      'text-font': ['Noto Sans Bold'],
-      'text-size': 11,
-    },
-    paint: { 'text-color': _cssVar('--text-canvas') },
-  });
-
-  // Layer de pontos individuais (não clusterizados)
+  // Layer de pontos individuais (não clusterizados) — maiores e com halo sutil
   map.addLayer({
     id: 'pdv-points',
     type: 'circle',
@@ -384,12 +373,287 @@ function _setupMapSources() {
     filter: ['!', ['has', 'point_count']],
     paint: {
       'circle-color': ['get', 'color'],
-      'circle-radius': ['interpolate', ['linear'], ['zoom'], 8, 4, 14, 7, 18, 10],
+      'circle-radius': ['interpolate', ['linear'], ['zoom'], 8, 5, 12, 7, 14, 9, 18, 12],
       'circle-stroke-width': ['case', ['==', ['get', '_selected'], 1], 3, 1.5],
       'circle-stroke-color': ['case', ['==', ['get', '_selected'], 1], '#ffffff', _cssVar('--circle-stroke-hover')],
       'circle-opacity': ['case', ['==', ['get', '_dim'], 1], 0.3, 0.95],
+      'circle-blur': 0.05,
     },
   });
+
+  // Hook de re-render dos donuts sempre que viewport ou source mudarem
+  _bindClusterDonutEvents();
+}
+
+// ─── Cluster Donut Markers ───────────────────────────────────────────────────
+// Renderiza HTML markers sobre cada cluster com um donut SVG mostrando a
+// composição por categoria (win/lose/neutral/absent). Markers são poolados
+// e reutilizados a cada sync para evitar GC churn.
+var _clusterMarkerPool = new Map(); // cluster_id -> { marker, el, sig }
+var _clusterDonutBound = false;
+var _clusterDonutRAF = null;
+
+function _clearClusterDonuts() {
+  if (_clusterMarkerPool && _clusterMarkerPool.size) {
+    _clusterMarkerPool.forEach(function(entry) {
+      try { entry.marker.remove(); } catch(_) {}
+    });
+    _clusterMarkerPool.clear();
+  }
+}
+
+function _bindClusterDonutEvents() {
+  if (_clusterDonutBound || !map) return;
+  _clusterDonutBound = true;
+  var schedule = function() {
+    if (_clusterDonutRAF) return;
+    _clusterDonutRAF = requestAnimationFrame(function() {
+      _clusterDonutRAF = null;
+      _renderClusterDonuts();
+    });
+  };
+  map.on('move', schedule);
+  map.on('moveend', schedule);
+  map.on('zoom', schedule);
+  map.on('zoomend', schedule);
+  map.on('sourcedata', function(e) {
+    if (e.sourceId === 'pdvs' && e.isSourceLoaded) schedule();
+  });
+}
+
+function _renderClusterDonuts() {
+  if (!map || !map.getLayer('clusters')) return;
+  // Skip enquanto estilo não carregou — evita query em source não pronta
+  try { if (!map.isStyleLoaded()) return; } catch(_) { return; }
+
+  var feats;
+  try {
+    feats = map.queryRenderedFeatures({ layers: ['clusters'] });
+  } catch(_) {
+    return;
+  }
+
+  var seen = new Set();
+  for (var i = 0; i < feats.length; i++) {
+    var f = feats[i];
+    var p = f.properties || {};
+    var cid = p.cluster_id;
+    if (cid === undefined || cid === null) continue;
+    seen.add(cid);
+
+    var total = p.point_count || 0;
+    var win = p.c_win || 0, lose = p.c_lose || 0, neu = p.c_neutral || 0, abs = p.c_absent || 0;
+
+    // Signature para evitar re-render desnecessário (mesmo cluster com mesma composição)
+    var sig = total + '|' + win + '|' + lose + '|' + neu + '|' + abs;
+    var entry = _clusterMarkerPool.get(cid);
+    var coords = f.geometry && f.geometry.coordinates;
+    if (!coords) continue;
+
+    if (!entry) {
+      var el = document.createElement('div');
+      el.className = 'cluster-donut';
+      el.style.cssText = 'position:absolute;transform:translate(-50%,-50%);cursor:pointer;pointer-events:auto;';
+      el.innerHTML = _buildDonutSVG(total, win, lose, neu, abs);
+      _attachDonutInteractions(el, cid, coords);
+      var marker = new maplibregl.Marker({ element: el, anchor: 'center' })
+        .setLngLat(coords)
+        .addTo(map);
+      _clusterMarkerPool.set(cid, { marker: marker, el: el, sig: sig });
+    } else {
+      if (entry.sig !== sig) {
+        entry.el.innerHTML = _buildDonutSVG(total, win, lose, neu, abs);
+        entry.sig = sig;
+      }
+      try { entry.marker.setLngLat(coords); } catch(_) {}
+    }
+  }
+
+  // Remover markers que não estão mais visíveis
+  _clusterMarkerPool.forEach(function(entry, cid) {
+    if (!seen.has(cid)) {
+      try { entry.marker.remove(); } catch(_) {}
+      _clusterMarkerPool.delete(cid);
+    }
+  });
+}
+
+// SVG do donut — tamanho proporcional à contagem (curva mais suave que a antiga)
+function _buildDonutSVG(total, win, lose, neu, abs) {
+  // Raio externo: escala log-suavizada
+  var R; // raio do círculo externo
+  if (total <= 5)         R = 16;
+  else if (total <= 25)   R = 19;
+  else if (total <= 75)   R = 22;
+  else if (total <= 200)  R = 26;
+  else if (total <= 500)  R = 30;
+  else                    R = 34;
+
+  var sw = Math.max(4, Math.round(R * 0.22)); // espessura do anel
+  var size = R * 2 + 4;
+  var cx = size / 2, cy = size / 2;
+  var ringR = R - sw / 2; // raio do centro do stroke
+  var circ = 2 * Math.PI * ringR;
+
+  // Cores: lidas do CSS via getComputedStyle uma vez (cache em _pinColors)
+  if (!_pinColors) _refreshPinColors();
+  var colors = {
+    win: _pinColors.win,
+    lose: _pinColors.lose,
+    neutral: _pinColors.neutral,
+    absent: _pinColors.absent,
+  };
+
+  // Frações (somam 1)
+  var safeTotal = Math.max(1, total);
+  var fracs = [
+    { c: colors.win,     n: win },
+    { c: colors.neutral, n: neu },
+    { c: colors.lose,    n: lose },
+    { c: colors.absent,  n: abs },
+  ];
+
+  // Construir segmentos como stroke-dasharray rotativos
+  var segs = '';
+  var offset = 0;
+  for (var i = 0; i < fracs.length; i++) {
+    var seg = fracs[i];
+    if (seg.n <= 0) continue;
+    var len = (seg.n / safeTotal) * circ;
+    segs += '<circle cx="' + cx + '" cy="' + cy + '" r="' + ringR +
+      '" fill="none" stroke="' + seg.c + '" stroke-width="' + sw +
+      '" stroke-dasharray="' + len.toFixed(2) + ' ' + (circ - len).toFixed(2) +
+      '" stroke-dashoffset="' + (-offset).toFixed(2) + '"/>';
+    offset += len;
+  }
+
+  // Label: número (com formatação k para >=1000)
+  var label = total >= 1000 ? (Math.floor(total / 100) / 10).toFixed(1).replace(/\.0$/, '') + 'k' : String(total);
+  var fontSize = R >= 28 ? 12 : R >= 22 ? 11 : 10;
+
+  // Fundo central preenchido (assenta o número e cobre o "buraco" no light theme)
+  var bgFill = _cssVar('--map-bg') || (document.documentElement.getAttribute('data-theme') === 'light' ? '#ffffff' : '#0d1117');
+
+  return '<svg width="' + size + '" height="' + size + '" viewBox="0 0 ' + size + ' ' + size + '" style="display:block;overflow:visible">' +
+    // Halo externo sutil
+    '<circle cx="' + cx + '" cy="' + cy + '" r="' + (R + 0.5) + '" fill="none" stroke="' + (_cssVar('--circle-stroke') || 'rgba(255,255,255,0.4)') + '" stroke-width="0.5"/>' +
+    // Preenchimento interno (cobre o "miolo" do donut)
+    '<circle cx="' + cx + '" cy="' + cy + '" r="' + (ringR - sw / 2 + 0.5) + '" fill="' + bgFill + '"/>' +
+    // Segmentos do donut (rotação -90° para começar no topo)
+    '<g transform="rotate(-90 ' + cx + ' ' + cy + ')">' + segs + '</g>' +
+    // Número central
+    '<text x="' + cx + '" y="' + cy + '" text-anchor="middle" dominant-baseline="central" font-size="' + fontSize + '" font-weight="600" font-family="Urbanist, sans-serif" fill="' + (_cssVar('--text-canvas') || '#ffffff') + '">' + label + '</text>' +
+    '</svg>';
+}
+
+// Tooltip + click handlers para cada donut
+function _attachDonutInteractions(el, clusterId, coords) {
+  var tooltipEl = null;
+
+  el.addEventListener('mouseenter', function() {
+    var entry = _clusterMarkerPool.get(clusterId);
+    if (!entry) return;
+    // Re-query features para pegar contagens atualizadas
+    var feats = map.queryRenderedFeatures({ layers: ['clusters'] });
+    var feat = null;
+    for (var i = 0; i < feats.length; i++) {
+      if (feats[i].properties && feats[i].properties.cluster_id === clusterId) { feat = feats[i]; break; }
+    }
+    if (!feat) return;
+    var p = feat.properties || {};
+    var total = p.point_count || 0;
+    var win = p.c_win || 0, lose = p.c_lose || 0, neu = p.c_neutral || 0, abs = p.c_absent || 0;
+    if (tooltipEl) { try { tooltipEl.remove(); } catch(_) {} }
+    tooltipEl = _buildClusterTooltip(total, win, lose, neu, abs);
+    document.body.appendChild(tooltipEl);
+    _positionTooltipNearEl(tooltipEl, el);
+  });
+
+  el.addEventListener('mousemove', function() {
+    if (tooltipEl) _positionTooltipNearEl(tooltipEl, el);
+  });
+
+  el.addEventListener('mouseleave', function() {
+    if (tooltipEl) { try { tooltipEl.remove(); } catch(_) {} tooltipEl = null; }
+  });
+
+  el.addEventListener('click', function(ev) {
+    // Cmd/Ctrl+click: delega para o handler nativo do map (que faz select de leaves)
+    // Comportamento padrão: zoom in
+    var isModifier = ev.metaKey || ev.ctrlKey;
+    if (isModifier && currentMapType === 'varejo360' && currentUser && !_isSharedMode) {
+      var src = map.getSource('pdvs');
+      if (src && typeof src.getClusterLeaves === 'function') {
+        src.getClusterLeaves(clusterId, Infinity, 0).then(function(leaves) {
+          if (!_selectionMode) startSelectionMode();
+          var added = 0;
+          leaves.forEach(function(leaf) {
+            var mapId = leaf.properties && leaf.properties._mapId;
+            if (mapId === undefined) return;
+            var row = allData.find(function(r) { return r._mapId === mapId; });
+            if (row && row.id && !_selectedIds.has(row.id)) {
+              _selectedIds.add(row.id);
+              added++;
+            }
+          });
+          try { updateSelectionBar(); } catch(_) {}
+          renderMarkers();
+        }).catch(function(){});
+        return;
+      }
+    }
+    // Zoom in
+    var src2 = map.getSource('pdvs');
+    if (src2 && typeof src2.getClusterExpansionZoom === 'function') {
+      src2.getClusterExpansionZoom(clusterId).then(function(zoom) {
+        map.easeTo({ center: coords, zoom: Math.min(zoom + 0.5, 14), duration: 400 });
+      }).catch(function() {
+        map.easeTo({ center: coords, zoom: map.getZoom() + 2, duration: 400 });
+      });
+    }
+  });
+}
+
+function _buildClusterTooltip(total, win, lose, neu, abs) {
+  var el = document.createElement('div');
+  el.className = 'cluster-tooltip';
+  if (!_pinColors) _refreshPinColors();
+  var rows = [
+    { label: 'Vence',        n: win,  c: _pinColors.win },
+    { label: 'Disputa',      n: neu,  c: _pinColors.neutral },
+    { label: 'Perde',        n: lose, c: _pinColors.lose },
+    { label: 'Sem presença', n: abs,  c: _pinColors.absent },
+  ].filter(function(r) { return r.n > 0; });
+
+  var totalFmt = total.toLocaleString('pt-BR');
+  var html = '<div class="cluster-tt-header">' + totalFmt + ' PDV' + (total !== 1 ? 's' : '') + '</div>';
+  html += '<div class="cluster-tt-body">';
+  rows.forEach(function(r) {
+    var pct = total > 0 ? Math.round((r.n / total) * 100) : 0;
+    html += '<div class="cluster-tt-row">' +
+      '<span class="cluster-tt-dot" style="background:' + r.c + '"></span>' +
+      '<span class="cluster-tt-label">' + r.label + '</span>' +
+      '<span class="cluster-tt-val">' + r.n.toLocaleString('pt-BR') + ' <span class="cluster-tt-pct">· ' + pct + '%</span></span>' +
+      '</div>';
+  });
+  html += '</div>';
+  el.innerHTML = html;
+  return el;
+}
+
+function _positionTooltipNearEl(tooltipEl, anchorEl) {
+  var rect = anchorEl.getBoundingClientRect();
+  var ttRect = tooltipEl.getBoundingClientRect();
+  var pad = 10;
+  var top = rect.top - ttRect.height - pad;
+  var left = rect.left + rect.width / 2 - ttRect.width / 2;
+  // Se não couber acima, mostra abaixo
+  if (top < 8) top = rect.bottom + pad;
+  // Clamp horizontal
+  left = Math.max(8, Math.min(window.innerWidth - ttRect.width - 8, left));
+  tooltipEl.style.position = 'fixed';
+  tooltipEl.style.top = top + 'px';
+  tooltipEl.style.left = left + 'px';
 }
 
 function _setupMapInteractions() {
@@ -489,9 +753,7 @@ function _setupMapInteractions() {
     });
   });
 
-  // Cursor pointer
-  map.on('mouseenter', 'clusters', () => map.getCanvas().style.cursor = 'pointer');
-  map.on('mouseleave', 'clusters', () => map.getCanvas().style.cursor = '');
+  // Cursor pointer (apenas pdv-points — donut markers HTML já têm cursor:pointer inline)
   map.on('mouseenter', 'pdv-points', () => map.getCanvas().style.cursor = 'pointer');
   map.on('mouseleave', 'pdv-points', () => map.getCanvas().style.cursor = '');
 
@@ -704,6 +966,25 @@ function pinColor(row) {
   return _pinColors.neutral;
 }
 
+// Categoria numérica (1=win, 2=lose, 3=neutral, 4=absent, 0=outros)
+// Usada pelo clusterProperties para agregação eficiente no donut.
+function pinCategory(row) {
+  if (currentMapType === 'places_discovery') return 0;
+  // V360 Competitors: se há módulo customizado de cor, retorna 0 (não agregamos)
+  try {
+    if (window.V360CompRender && typeof window.V360CompRender.pinColor === 'function') {
+      // Quando módulo de concorrentes está ativo, donut perde sentido — agregamos como neutral
+      return 3;
+    }
+  } catch(_) {}
+  const diff = parseFloat(row.percentual_diff_media_dimensao || 0);
+  if (diff > 2) return 1;   // win
+  if (diff < -2) return 2;  // lose
+  const share = parseFloat(row.share_reais_sku_dimensao || 0);
+  if (share <= 0) return 4; // absent
+  return 3;                  // neutral
+}
+
 // ─── Render Markers (GeoJSON source update) ──────────────────────────────────
 function renderMarkers() {
   if (!map) return;
@@ -726,7 +1007,7 @@ function renderMarkers() {
         return {
           type: 'Feature',
           geometry: { type: 'Point', coordinates: [parseFloat(r.lon), parseFloat(r.lat)] },
-          properties: { color: pinColor(r), _mapId: r._mapId, _selected: isSel ? 1 : 0, _dim: isDim ? 1 : 0 },
+          properties: { color: pinColor(r), cat: pinCategory(r), _mapId: r._mapId, _selected: isSel ? 1 : 0, _dim: isDim ? 1 : 0 },
         };
       });
 

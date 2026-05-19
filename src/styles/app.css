@@ -737,6 +737,44 @@ input[type="range"]::-webkit-slider-thumb {
 .popup-tickets-label { font-size: 11px; color: var(--text-muted); }
 .popup-tickets-val { font-size: 12px; font-family: var(--mono); color: var(--text); font-weight: 500; }
 
+/* ─── Cluster Donut Markers ─────────────────────────────────────────────── */
+.cluster-donut {
+  filter: drop-shadow(0 2px 6px rgba(0,0,0,0.25));
+  transition: transform 0.15s ease;
+  will-change: transform;
+}
+.cluster-donut:hover { transform: translate(-50%, -50%) scale(1.06); z-index: 10; }
+[data-theme="light"] .cluster-donut { filter: drop-shadow(0 2px 4px rgba(0,0,0,0.12)); }
+
+.cluster-tooltip {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md, 10px);
+  padding: 10px 12px;
+  min-width: 180px;
+  max-width: 240px;
+  font-family: 'Urbanist', sans-serif;
+  font-size: 12px;
+  color: var(--text);
+  box-shadow: 0 8px 24px rgba(0,0,0,0.32), 0 2px 8px rgba(0,0,0,0.18);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  pointer-events: none;
+  z-index: 9999;
+  animation: cluster-tt-in 120ms ease-out;
+}
+@keyframes cluster-tt-in { from { opacity: 0; transform: translateY(2px); } to { opacity: 1; transform: translateY(0); } }
+.cluster-tt-header {
+  font-size: 13px; font-weight: 600; color: var(--text);
+  padding-bottom: 8px; margin-bottom: 8px; border-bottom: 1px solid var(--border);
+}
+.cluster-tt-body { display: flex; flex-direction: column; gap: 5px; }
+.cluster-tt-row { display: flex; align-items: center; gap: 8px; font-size: 11.5px; }
+.cluster-tt-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
+.cluster-tt-label { color: var(--text-dim); flex: 1; }
+.cluster-tt-val { color: var(--text); font-variant-numeric: tabular-nums; font-weight: 500; }
+.cluster-tt-pct { color: var(--text-muted); font-weight: 400; }
+
 /* ─── Map Overlay Stats ─────────────────────────────────────────────────── */
 #map-overlay {
   position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%);
