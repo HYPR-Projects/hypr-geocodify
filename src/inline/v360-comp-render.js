@@ -134,7 +134,15 @@
       };
     }
     // Competitor
-    const cnpj14 = row.cnpj_14;
+    let cnpj14 = row.cnpj_14;
+    if (!cnpj14) {
+      // Fallback: extrai do campo cnpj (mapas antigos não têm cnpj_14 em allData)
+      const s = String(row.cnpj || '');
+      const m = s.match(/\b(\d{14})\b/);
+      cnpj14 = m ? m[1] : (s.replace(/\D/g, '').slice(0, 14) || null);
+      if (cnpj14 && cnpj14.length === 14) row.cnpj_14 = cnpj14; // hidrata em memória
+      else cnpj14 = null;
+    }
     if (!cnpj14 || !window.V360Comp) return null;
     const pdv = window.V360Comp.getCompetitorPdv(brandName, cnpj14);
     if (!pdv) return null;
