@@ -1010,6 +1010,237 @@ input[type="range"]::-webkit-slider-thumb {
 .popup-tickets-label { font-size: 11px; color: var(--text-muted); }
 .popup-tickets-val { font-size: 12px; font-family: var(--mono); color: var(--text); font-weight: 500; }
 
+/* ─── V360 Popup Extension (Fase 4) ───────────────────────────────────────
+   Bloco injetado no popup do PDV em modo V360 com concorrentes.
+   Contém: state badge + meta (gap pp) + share por marca + 2 metric cards.
+   ───────────────────────────────────────────────────────────────────────── */
+.v360-popup-ext {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+/* State row: badge competitivo + meta com gap em pp */
+.popup-state-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.popup-state-row .meta {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--text-faint);
+}
+
+/* State badge — usa estados do v360-comp-render.STATE */
+.state-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 9px;
+  border-radius: var(--r-pill);
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  white-space: nowrap;
+}
+.state-badge.dominance,
+.state-badge.leadership { background: var(--win-bg); color: var(--win-hi); border: 1px solid var(--win-edge); }
+.state-badge.dispute    { background: var(--neutral-bg); color: var(--neutral); border: 1px solid var(--neutral-border); }
+.state-badge.behind,
+.state-badge.vulnerable { background: var(--lose-bg); color: var(--lose-hi); border: 1px solid var(--lose-edge); }
+.state-badge.opportunity{ background: var(--accent-bg); color: var(--accent-hi); border: 1px solid var(--accent-edge); }
+.state-badge.exclusive  { background: var(--purple-bg); color: var(--accent-light); border: 1px solid var(--indigo-border); }
+.state-badge.whitespace { background: var(--surface3); color: var(--text-muted); border: 1px solid var(--border-medium); }
+
+/* Bloco "Share por marca" — card com lista de brand rows */
+.popup-brands {
+  display: flex;
+  flex-direction: column;
+  background: var(--surface3);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  padding: 10px 12px;
+  gap: 8px;
+}
+.popup-brands-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  font-size: 9px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-weight: 700;
+}
+.popup-brands-head .hint {
+  font-weight: 500;
+  color: var(--text-faint);
+  font-family: var(--mono);
+}
+.popup-brand-row {
+  display: grid;
+  grid-template-columns: 14px 1fr 1fr 56px;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.popup-brand-row .pdot {
+  width: 7px; height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+  box-shadow: 0 0 6px currentColor;
+  margin: 0 3px;
+}
+.popup-brand-row .name {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+.popup-brand-row .name.lens {
+  font-weight: 700;
+  color: var(--text);
+}
+.popup-brand-row .name .base-tag {
+  font-size: 8px;
+  font-family: var(--mono);
+  font-weight: 600;
+  color: var(--text-faint);
+  background: var(--border);
+  padding: 1px 4px;
+  border-radius: 3px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.popup-brand-row .bar-wrap {
+  height: 8px;
+  background: var(--border);
+  border-radius: 2px;
+  overflow: hidden;
+}
+.popup-brand-row .bar-fill {
+  height: 100%;
+  background: currentColor;
+  border-radius: 2px;
+  opacity: 0.92;
+  transition: width 0.4s ease;
+}
+.popup-brand-row .val {
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text);
+  text-align: right;
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
+}
+.popup-brand-row .val .lowconf {
+  font-size: 10px;
+  color: var(--neutral);
+  cursor: help;
+}
+
+/* Metric cards (Gap + Share-of-shelf) */
+.popup-ext-metrics {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+.popup-ext-metric {
+  background: var(--surface3);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  padding: 8px 10px;
+}
+.popup-ext-metric .v {
+  font-family: var(--mono);
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--text);
+  line-height: 1;
+}
+.popup-ext-metric .v.pos { color: var(--win-hi); }
+.popup-ext-metric .v.neg { color: var(--lose-hi); }
+.popup-ext-metric .l {
+  font-size: 9px;
+  color: var(--text-faint);
+  margin-top: 4px;
+  line-height: 1.3;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+/* ─── Fase 4: Popup PDV em modo Duelo/Categoria ──────────────────────────
+   Quando .popup-inner tem .has-v360-ext (modo Duelo/Categoria), os blocos
+   legados redundantes são escondidos. O popup ext (.v360-popup-ext) já
+   cobre: state badge, share por marca, gap em pp, share-of-shelf, tickets.
+   ───────────────────────────────────────────────────────────────────────── */
+.popup-inner.has-v360-ext .popup-metrics--legacy,
+.popup-inner.has-v360-ext .popup-section-title--legacy-share,
+.popup-inner.has-v360-ext .popup-share-bars--legacy,
+.popup-inner.has-v360-ext .popup-tickets--legacy {
+  display: none;
+}
+/* Quando legados estão escondidos, o popup ext não precisa do border-top
+   (já vem direto após o header). */
+.popup-inner.has-v360-ext .v360-popup-ext {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: none;
+}
+
+/* Tickets na amostra dentro do popup ext (Fase 4) — big number + label,
+   destacado em card próprio com border-top de separação. */
+.popup-ext-tickets {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 12px;
+  background: var(--surface3);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+}
+.popup-ext-tickets .v {
+  font-family: var(--mono);
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--text);
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+.popup-ext-tickets .l {
+  font-size: 9px;
+  color: var(--text-faint);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.popup-ext-tickets.lowconf .v { color: var(--neutral); }
+.popup-ext-tickets .warn {
+  color: var(--neutral);
+  cursor: help;
+  font-weight: 700;
+}
+
 /* ─── Cluster Donut Markers ─────────────────────────────────────────────── */
 .cluster-donut {
   filter: drop-shadow(0 2px 6px rgba(0,0,0,0.25));
