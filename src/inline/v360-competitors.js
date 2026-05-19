@@ -1,0 +1,794 @@
+// ────────────────────────────────────────────────────────────────────────────
+// V360 Competitors — PR1: Upload + Storage Infrastructure
+// ────────────────────────────────────────────────────────────────────────────
+// Reusa: SUPABASE_URL, SUPABASE_ANON, _supa, sbFetch, ensureXLSX, parseCSV
+// (todos definidos globalmente em src/inline/app.js)
+//
+// Escopo PR1:
+//   - Botão "+ Concorrente" no header (varejo360, não-shared)
+//   - Modal de upload XLSX/CSV
+//   - Parse + validação + match contra allData (CNPJs do mapa atual)
+//   - Persistência em map_competitors + map_competitor_pdvs
+//   - Dropdown "Perspectiva" (a partir do 1º concorrente)
+//   - Carregamento ao abrir mapa salvo
+//   - Suporte a shared mode (read-only)
+//   - Detecção de marca base no upload original (popula saved_maps.base_brand)
+//
+// Fora do escopo (vai pro PR2):
+//   - Reclassificação de pinos por modo (Solo/Duelo/Categoria)
+//   - Overview adaptativa
+//   - Visualizações comparativas (matriz, scatter, etc)
+// ────────────────────────────────────────────────────────────────────────────
+
+(function() {
+  'use strict';
+
+  // ─── Estado ─────────────────────────────────────────────────────────────
+  const state = {
+    competitors: [],          // [{ id, brand_name, brand_color, row_count, matched_count, unmatched_count, pdvs: Map<cnpj_14, row> }]
+    perspectiveBrand: null,   // marca atualmente selecionada como "ponto de vista"
+    ticketsFloor: 5,          // piso de tickets pra considerar share válido (PR2 usa)
+    loadedForMapId: null,     // pra evitar reload redundante
+  };
+
+  // Paleta padrão de cores por marca (case-insensitive match no nome)
+  const BRAND_COLOR_PRESETS = {
+    'BUDWEISER': '#dc2626',
+    'HEINEKEN':  '#16a34a',
+    'STELLA':    '#eab308',
+    'STELLA ARTOIS': '#eab308',
+    'BRAHMA':    '#3b82f6',
+    'SKOL':      '#f59e0b',
+    'AMSTEL':    '#dc2626',
+    'CORONA':    '#fbbf24',
+    'ANTARCTICA':'#1e40af',
+    'EISENBAHN': '#7c2d12',
+    'PETRA':     '#991b1b',
+    'ITAIPAVA':  '#facc15',
+  };
+
+  // Paleta fallback (rodízio quando não tem preset)
+  const FALLBACK_COLORS = ['#7c3aed','#0891b2','#db2777','#65a30d','#ea580c','#0284c7'];
+  let _fallbackIdx = 0;
+
+  function pickBrandColor(brandName) {
+    const norm = String(brandName || '').toUpperCase().trim();
+    if (BRAND_COLOR_PRESETS[norm]) return BRAND_COLOR_PRESETS[norm];
+    for (const key in BRAND_COLOR_PRESETS) {
+      if (norm.includes(key) || key.includes(norm)) return BRAND_COLOR_PRESETS[key];
+    }
+    const c = FALLBACK_COLORS[_fallbackIdx % FALLBACK_COLORS.length];
+    _fallbackIdx++;
+    return c;
+  }
+
+  // ─── Util ───────────────────────────────────────────────────────────────
+  function extractCnpj14(value) {
+    // Aceita "44480747000160 - PARADA PINTO..." ou só os 14 dígitos
+    if (value == null) return null;
+    const m = String(value).match(/\b(\d{14})\b/);
+    return m ? m[1] : null;
+  }
+
+  function safeNum(v) {
+    if (v === null || v === undefined || v === '') return null;
+    const n = Number(v);
+    return Number.isFinite(n) ? n : null;
+  }
+
+  function getCurrentUserEmail() {
+    try {
+      const session = window._supa?.auth?.getSession?.() || null;
+      return window._currentUserEmail || null;
+    } catch(e) { return null; }
+  }
+
+  function isV360() {
+    return window.currentMapType === 'varejo360';
+  }
+
+  function isSharedMode() {
+    return !!window._isSharedMode;
+  }
+
+  // ─── Modal HTML (injetado uma vez) ──────────────────────────────────────
+  function ensureModal() {
+    if (document.getElementById('v360-comp-modal')) return;
+
+    const modal = document.createElement('div');
+    modal.id = 'v360-comp-modal';
+    modal.className = 'v360-comp-modal';
+    modal.style.cssText = 'display:none;position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,0.55);align-items:center;justify-content:center;';
+    modal.innerHTML = `
+      <div class="v360-comp-modal-box" style="background:var(--bg-elev,#fff);color:var(--text,#111);border-radius:14px;width:560px;max-width:92vw;max-height:88vh;overflow:auto;box-shadow:0 24px 80px rgba(0,0,0,0.4);font-family:'Urbanist',system-ui,sans-serif;">
+        <div style="padding:18px 22px 14px;border-bottom:1px solid var(--border,#e5e7eb);display:flex;align-items:center;justify-content:space-between;">
+          <div>
+            <div style="font-size:16px;font-weight:600;letter-spacing:-0.01em;">Adicionar marca concorrente</div>
+            <div style="font-size:11.5px;color:var(--text-muted,#6b7280);margin-top:3px;">Faça upload de uma base no mesmo formato do Varejo 360 (XLSX ou CSV)</div>
+          </div>
+          <button id="v360-comp-modal-close" style="background:none;border:none;font-size:22px;cursor:pointer;color:var(--text-muted,#6b7280);line-height:1;padding:0 4px;">×</button>
+        </div>
+
+        <div style="padding:20px 22px;">
+          <!-- Drop zone -->
+          <div id="v360-comp-drop" style="border:2px dashed var(--border,#d1d5db);border-radius:12px;padding:32px 20px;text-align:center;cursor:pointer;transition:all 0.15s;background:var(--bg-subtle,#fafafa);">
+            <div style="font-size:13.5px;font-weight:500;margin-bottom:4px;">Arraste o arquivo aqui ou clique</div>
+            <div style="font-size:11.5px;color:var(--text-muted,#6b7280);">XLSX ou CSV · até ~50MB</div>
+            <input type="file" id="v360-comp-file" accept=".xlsx,.xls,.csv" style="display:none;" />
+          </div>
+
+          <!-- Preview area (preenchido após parse) -->
+          <div id="v360-comp-preview" style="display:none;margin-top:18px;"></div>
+
+          <!-- Error area -->
+          <div id="v360-comp-error" style="display:none;margin-top:14px;padding:10px 12px;border-radius:8px;background:rgba(220,38,38,0.08);color:#dc2626;font-size:12px;"></div>
+        </div>
+
+        <div style="padding:14px 22px 18px;border-top:1px solid var(--border,#e5e7eb);display:flex;gap:8px;justify-content:flex-end;">
+          <button id="v360-comp-cancel" style="padding:8px 14px;border-radius:8px;border:1px solid var(--border,#d1d5db);background:transparent;color:var(--text,#111);font-size:12.5px;cursor:pointer;">Cancelar</button>
+          <button id="v360-comp-confirm" disabled style="padding:8px 16px;border-radius:8px;border:none;background:var(--accent,#2563eb);color:#fff;font-size:12.5px;font-weight:500;cursor:pointer;opacity:0.5;">Adicionar ao mapa</button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(modal);
+
+    // Eventos
+    modal.querySelector('#v360-comp-modal-close').onclick = closeModal;
+    modal.querySelector('#v360-comp-cancel').onclick = closeModal;
+    modal.onclick = (e) => { if (e.target === modal) closeModal(); };
+
+    const dropZone = modal.querySelector('#v360-comp-drop');
+    const fileInput = modal.querySelector('#v360-comp-file');
+    dropZone.onclick = () => fileInput.click();
+    dropZone.ondragover = (e) => { e.preventDefault(); dropZone.style.borderColor = 'var(--accent,#2563eb)'; dropZone.style.background = 'rgba(37,99,235,0.06)'; };
+    dropZone.ondragleave = () => { dropZone.style.borderColor = ''; dropZone.style.background = ''; };
+    dropZone.ondrop = (e) => {
+      e.preventDefault();
+      dropZone.style.borderColor = '';
+      dropZone.style.background = '';
+      if (e.dataTransfer.files[0]) handleFile(e.dataTransfer.files[0]);
+    };
+    fileInput.onchange = (e) => { if (e.target.files[0]) handleFile(e.target.files[0]); };
+
+    modal.querySelector('#v360-comp-confirm').onclick = onConfirm;
+  }
+
+  function openModal() {
+    ensureModal();
+    document.getElementById('v360-comp-modal').style.display = 'flex';
+    resetModalState();
+  }
+
+  function closeModal() {
+    const m = document.getElementById('v360-comp-modal');
+    if (m) m.style.display = 'none';
+  }
+
+  function resetModalState() {
+    const preview = document.getElementById('v360-comp-preview');
+    const err = document.getElementById('v360-comp-error');
+    const confirm = document.getElementById('v360-comp-confirm');
+    const fileInput = document.getElementById('v360-comp-file');
+    if (preview) { preview.style.display = 'none'; preview.innerHTML = ''; }
+    if (err) { err.style.display = 'none'; err.textContent = ''; }
+    if (confirm) { confirm.disabled = true; confirm.style.opacity = '0.5'; }
+    if (fileInput) fileInput.value = '';
+    delete window._v360CompPending;
+  }
+
+  function showError(msg) {
+    const err = document.getElementById('v360-comp-error');
+    if (err) { err.style.display = 'block'; err.textContent = msg; }
+  }
+
+  // ─── Parsing ────────────────────────────────────────────────────────────
+  async function handleFile(file) {
+    resetModalState();
+    const isXLSX = /\.xlsx?$/i.test(file.name);
+    const isCSV = /\.csv$/i.test(file.name);
+    if (!isXLSX && !isCSV) {
+      showError('Formato não suportado. Use XLSX ou CSV.');
+      return;
+    }
+
+    try {
+      let rows;
+      if (isXLSX) {
+        if (typeof window.ensureXLSX === 'function') await window.ensureXLSX();
+        rows = await parseXLSX(file);
+      } else {
+        rows = await parseCSVFile(file);
+      }
+      if (!rows || !rows.length) {
+        showError('Arquivo vazio ou sem linhas de dados reconhecíveis.');
+        return;
+      }
+      // Filtra a linha "TODOS OS CNPJS FILTRADOS" e linhas sem cnpj_14 válido
+      const dataRows = rows.filter(r => {
+        const c = extractCnpj14(r.cnpj || r.CNPJ);
+        return !!c;
+      });
+      if (!dataRows.length) {
+        showError('Não foi possível extrair nenhum CNPJ válido (14 dígitos) da coluna "cnpj".');
+        return;
+      }
+
+      // Detecta marca (1ª linha de dados)
+      const detectedBrand = String(dataRows[0].marca || dataRows[0].Marca || '').toUpperCase().trim();
+      if (!detectedBrand) {
+        showError('Coluna "marca" não encontrada ou vazia na primeira linha de dados.');
+        return;
+      }
+
+      // Valida formato: precisa ter share_reais_sku_dimensao OU share_reais_dimensao
+      const sample = dataRows[0];
+      if (sample.share_reais_sku_dimensao == null && sample.share_reais_dimensao == null) {
+        showError('Arquivo não tem coluna "share_reais_sku_dimensao". Verifique se é uma base no formato Varejo 360.');
+        return;
+      }
+
+      // Match contra allData (universo do mapa atual)
+      const universeSet = new Set();
+      const allData = window.allData || [];
+      for (const r of allData) {
+        const c = r.cnpj_14 || extractCnpj14(r.cnpj);
+        if (c) universeSet.add(c);
+      }
+
+      let matched = 0;
+      let withShare = 0;
+      const cnpjsSeen = new Set();
+      const normalizedRows = [];
+      for (const r of dataRows) {
+        const cnpj14 = extractCnpj14(r.cnpj || r.CNPJ);
+        if (!cnpj14) continue;
+        if (cnpjsSeen.has(cnpj14)) continue;
+        cnpjsSeen.add(cnpj14);
+
+        const matched_flag = universeSet.has(cnpj14);
+        if (matched_flag) matched++;
+
+        const shareR = safeNum(r.share_reais_sku_dimensao);
+        if (shareR != null && shareR > 0) withShare++;
+
+        normalizedRows.push({
+          cnpj_14: cnpj14,
+          matched: matched_flag,
+          share_reais_sku_dimensao: shareR,
+          share_volume_sku_dimensao: safeNum(r.share_volume_sku_dimensao),
+          share_unidades_sku_dimensao: safeNum(r.share_unidades_sku_dimensao),
+          share_reais_sku_diff_media_dimensao: safeNum(r.share_reais_sku_diff_media_dimensao),
+          share_volume_sku_diff_media_dimensao: safeNum(r.share_volume_sku_diff_media_dimensao),
+          share_unidades_sku_diff_media_dimensao: safeNum(r.share_unidades_sku_diff_media_dimensao),
+          tickets_amostra: r.tickets_amostra != null ? parseInt(r.tickets_amostra, 10) : null,
+          percentual_dimensao: safeNum(r.percentual_dimensao),
+          percentual_marca_dimensao: safeNum(r.percentual_marca_dimensao),
+          oportunidade_dimensao: r.oportunidade_dimensao != null ? String(r.oportunidade_dimensao) : null,
+        });
+      }
+
+      const total = normalizedRows.length;
+      const unmatched = total - matched;
+      const matchPct = total ? (matched / total * 100) : 0;
+
+      // Verifica se essa marca já está carregada
+      const alreadyLoaded = state.competitors.some(c => c.brand_name === detectedBrand);
+      const isBaseBrand = (window._currentMapBaseBrand || '').toUpperCase() === detectedBrand;
+
+      const suggestedColor = pickBrandColor(detectedBrand);
+
+      window._v360CompPending = {
+        brandName: detectedBrand,
+        color: suggestedColor,
+        filename: file.name,
+        rows: normalizedRows,
+        rowCount: total,
+        matchedCount: matched,
+        unmatchedCount: unmatched,
+        withShareCount: withShare,
+      };
+
+      renderPreview({
+        brandName: detectedBrand,
+        color: suggestedColor,
+        filename: file.name,
+        total,
+        matched,
+        unmatched,
+        matchPct,
+        withShare,
+        alreadyLoaded,
+        isBaseBrand,
+      });
+    } catch(e) {
+      console.error('[v360-comp] parse error:', e);
+      showError('Erro ao ler arquivo: ' + (e.message || e));
+    }
+  }
+
+  async function parseXLSX(file) {
+    const buf = await file.arrayBuffer();
+    const data = new Uint8Array(buf);
+    const wb = XLSX.read(data, { type: 'array' });
+    // Procura sheet "Dados" primeiro, senão usa a primeira
+    let sheetName = wb.SheetNames.find(n => /dados/i.test(n)) || wb.SheetNames[0];
+    const ws = wb.Sheets[sheetName];
+    const aoa = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
+    // Detecta header row
+    const knownCols = ['marca','cnpj','share_reais','tickets_amostra','percentual_dimensao'];
+    let headerRow = 0;
+    for (let r = 0; r < Math.min(aoa.length, 10); r++) {
+      const cells = (aoa[r] || []).map(c => String(c||'').toLowerCase().trim());
+      const matches = cells.filter(c => knownCols.some(kc => c.includes(kc))).length;
+      if (matches >= 2) { headerRow = r; break; }
+    }
+    const headers = (aoa[headerRow] || []).map(h => String(h||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').trim().replace(/\s+/g,'_'));
+    const rows = [];
+    for (let r = headerRow + 1; r < aoa.length; r++) {
+      const row = aoa[r];
+      if (!row || !row.some(v => v !== '' && v != null)) continue;
+      const obj = {};
+      headers.forEach((h,i) => { obj[h] = row[i] != null ? row[i] : ''; });
+      rows.push(obj);
+    }
+    return rows;
+  }
+
+  async function parseCSVFile(file) {
+    const text = await file.text();
+    if (typeof window.parseCSV === 'function') return window.parseCSV(text);
+    // Fallback simples (não deveria ser usado: parseCSV existe global)
+    const lines = text.split(/\r?\n/).filter(l => l.trim());
+    if (!lines.length) return [];
+    const headers = lines[0].split(',').map(h => h.toLowerCase().trim());
+    return lines.slice(1).map(line => {
+      const vals = line.split(',');
+      const obj = {};
+      headers.forEach((h,i) => { obj[h] = vals[i] || ''; });
+      return obj;
+    });
+  }
+
+  function renderPreview({ brandName, color, filename, total, matched, unmatched, matchPct, withShare, alreadyLoaded, isBaseBrand }) {
+    const preview = document.getElementById('v360-comp-preview');
+    const confirm = document.getElementById('v360-comp-confirm');
+    const matchColor = matchPct >= 90 ? '#16a34a' : matchPct >= 60 ? '#f59e0b' : '#dc2626';
+
+    let warning = '';
+    if (alreadyLoaded) {
+      warning = `<div style="margin-top:10px;padding:8px 10px;background:rgba(245,158,11,0.1);color:#92400e;border-radius:6px;font-size:11.5px;">⚠️ A marca <b>${brandName}</b> já está carregada nesse mapa. Confirmar irá substituir os dados existentes.</div>`;
+    } else if (isBaseBrand) {
+      warning = `<div style="margin-top:10px;padding:8px 10px;background:rgba(220,38,38,0.1);color:#991b1b;border-radius:6px;font-size:11.5px;">⚠️ A marca <b>${brandName}</b> é a marca base desse mapa. Não é possível adicioná-la como concorrente.</div>`;
+    }
+
+    preview.style.display = 'block';
+    preview.innerHTML = `
+      <div style="background:var(--bg-subtle,#f9fafb);border:1px solid var(--border,#e5e7eb);border-radius:10px;padding:14px;">
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;">
+          <div style="width:10px;height:10px;border-radius:50%;background:${color};flex-shrink:0;"></div>
+          <div style="flex:1;min-width:0;">
+            <div style="font-size:14px;font-weight:600;letter-spacing:-0.01em;">${brandName}</div>
+            <div style="font-size:11px;color:var(--text-muted,#6b7280);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${filename}</div>
+          </div>
+          <button id="v360-comp-color-btn" style="background:transparent;border:1px solid var(--border,#d1d5db);border-radius:6px;padding:4px 8px;font-size:10.5px;cursor:pointer;color:var(--text-muted,#6b7280);">Trocar cor</button>
+        </div>
+        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;">
+          <div>
+            <div style="font-size:10px;color:var(--text-muted,#6b7280);text-transform:uppercase;letter-spacing:0.04em;">Linhas</div>
+            <div style="font-size:18px;font-weight:600;margin-top:2px;">${total.toLocaleString('pt-BR')}</div>
+          </div>
+          <div>
+            <div style="font-size:10px;color:var(--text-muted,#6b7280);text-transform:uppercase;letter-spacing:0.04em;">Match c/ mapa</div>
+            <div style="font-size:18px;font-weight:600;margin-top:2px;color:${matchColor};">${matchPct.toFixed(1)}%</div>
+            <div style="font-size:10px;color:var(--text-muted,#6b7280);">${matched.toLocaleString('pt-BR')} de ${total.toLocaleString('pt-BR')}</div>
+          </div>
+          <div>
+            <div style="font-size:10px;color:var(--text-muted,#6b7280);text-transform:uppercase;letter-spacing:0.04em;">Com share &gt; 0</div>
+            <div style="font-size:18px;font-weight:600;margin-top:2px;">${withShare.toLocaleString('pt-BR')}</div>
+            <div style="font-size:10px;color:var(--text-muted,#6b7280);">${total ? (withShare/total*100).toFixed(0) : 0}% das linhas</div>
+          </div>
+        </div>
+        ${unmatched > 0 ? `<div style="margin-top:10px;font-size:11px;color:var(--text-muted,#6b7280);">${unmatched.toLocaleString('pt-BR')} CNPJ${unmatched===1?'':'s'} fora do universo do mapa (${(unmatched/total*100).toFixed(1)}%) — serão salvos mas marcados como "não casados"</div>` : ''}
+        ${warning}
+      </div>
+    `;
+
+    // Wire up color picker
+    const colorBtn = preview.querySelector('#v360-comp-color-btn');
+    if (colorBtn) {
+      colorBtn.onclick = () => promptColorChange(brandName);
+    }
+
+    if (isBaseBrand) {
+      confirm.disabled = true;
+      confirm.style.opacity = '0.5';
+    } else {
+      confirm.disabled = false;
+      confirm.style.opacity = '1';
+      confirm.textContent = alreadyLoaded ? 'Substituir dados' : 'Adicionar ao mapa';
+    }
+  }
+
+  function promptColorChange(brandName) {
+    const colors = ['#dc2626','#16a34a','#eab308','#3b82f6','#7c3aed','#0891b2','#db2777','#65a30d','#ea580c','#f59e0b'];
+    const html = colors.map(c => `<button data-color="${c}" style="width:28px;height:28px;border-radius:50%;border:2px solid transparent;background:${c};cursor:pointer;margin:2px;" onmouseover="this.style.borderColor='#000'" onmouseout="this.style.borderColor='transparent'"></button>`).join('');
+    const popup = document.createElement('div');
+    popup.style.cssText = 'position:fixed;inset:0;z-index:10000;background:rgba(0,0,0,0.3);display:flex;align-items:center;justify-content:center;';
+    popup.innerHTML = `<div style="background:#fff;padding:18px;border-radius:12px;text-align:center;"><div style="font-size:12px;margin-bottom:10px;font-weight:500;">Escolha a cor de ${brandName}</div>${html}<div><button id="v360-color-cancel" style="margin-top:10px;padding:5px 12px;background:transparent;border:1px solid #d1d5db;border-radius:6px;cursor:pointer;font-size:11px;">Cancelar</button></div></div>`;
+    document.body.appendChild(popup);
+    popup.querySelectorAll('button[data-color]').forEach(b => {
+      b.onclick = () => {
+        const c = b.dataset.color;
+        if (window._v360CompPending) window._v360CompPending.color = c;
+        // Atualiza preview dot
+        const dot = document.querySelector('#v360-comp-preview > div > div:first-child > div:first-child');
+        if (dot) dot.style.background = c;
+        popup.remove();
+      };
+    });
+    popup.querySelector('#v360-color-cancel').onclick = () => popup.remove();
+    popup.onclick = (e) => { if (e.target === popup) popup.remove(); };
+  }
+
+  // ─── Confirm & Save ──────────────────────────────────────────────────────
+  async function onConfirm() {
+    const pending = window._v360CompPending;
+    if (!pending) return;
+    const mapId = window._currentOpenMapId;
+    if (!mapId) {
+      showError('Mapa não está salvo. Salve o mapa antes de adicionar concorrentes.');
+      return;
+    }
+
+    const confirmBtn = document.getElementById('v360-comp-confirm');
+    confirmBtn.disabled = true;
+    confirmBtn.style.opacity = '0.5';
+    confirmBtn.textContent = 'Salvando...';
+
+    try {
+      // Se a marca já existe, faz DELETE primeiro (substituir dados)
+      const existing = state.competitors.find(c => c.brand_name === pending.brandName);
+      if (existing) {
+        await window.sbFetch('map_competitors?id=eq.' + existing.id, {
+          method: 'DELETE',
+          headers: { 'Prefer': 'return=minimal' }
+        });
+      }
+
+      // Cria competitor
+      const userEmail = window._currentUserEmail || 'unknown@hypr.mobi';
+      const created = await window.sbFetch('map_competitors', {
+        method: 'POST',
+        headers: { 'Prefer': 'return=representation' },
+        body: JSON.stringify([{
+          map_id: mapId,
+          brand_name: pending.brandName,
+          brand_color: pending.color,
+          source_filename: pending.filename,
+          row_count: pending.rowCount,
+          matched_count: pending.matchedCount,
+          unmatched_count: pending.unmatchedCount,
+          created_by: userEmail,
+        }])
+      });
+      const competitorId = Array.isArray(created) ? created[0].id : created.id;
+
+      // Chunks de 500 pra map_competitor_pdvs
+      const CHUNK = 500;
+      let saved = 0;
+      for (let i = 0; i < pending.rows.length; i += CHUNK) {
+        const chunk = pending.rows.slice(i, i+CHUNK).map(r => ({
+          competitor_id: competitorId,
+          cnpj_14: r.cnpj_14,
+          matched: r.matched,
+          share_reais_sku_dimensao: r.share_reais_sku_dimensao,
+          share_volume_sku_dimensao: r.share_volume_sku_dimensao,
+          share_unidades_sku_dimensao: r.share_unidades_sku_dimensao,
+          share_reais_sku_diff_media_dimensao: r.share_reais_sku_diff_media_dimensao,
+          share_volume_sku_diff_media_dimensao: r.share_volume_sku_diff_media_dimensao,
+          share_unidades_sku_diff_media_dimensao: r.share_unidades_sku_diff_media_dimensao,
+          tickets_amostra: r.tickets_amostra,
+          percentual_dimensao: r.percentual_dimensao,
+          percentual_marca_dimensao: r.percentual_marca_dimensao,
+          oportunidade_dimensao: r.oportunidade_dimensao,
+        }));
+        await window.sbFetch('map_competitor_pdvs', {
+          method: 'POST',
+          headers: { 'Prefer': 'return=minimal' },
+          body: JSON.stringify(chunk)
+        });
+        saved += chunk.length;
+        confirmBtn.textContent = `Salvando ${saved.toLocaleString('pt-BR')}/${pending.rowCount.toLocaleString('pt-BR')}...`;
+      }
+
+      // Atualiza state local
+      if (existing) {
+        state.competitors = state.competitors.filter(c => c.id !== existing.id);
+      }
+      const pdvMap = new Map();
+      for (const r of pending.rows) pdvMap.set(r.cnpj_14, r);
+      state.competitors.push({
+        id: competitorId,
+        brand_name: pending.brandName,
+        brand_color: pending.color,
+        row_count: pending.rowCount,
+        matched_count: pending.matchedCount,
+        unmatched_count: pending.unmatchedCount,
+        pdvs: pdvMap,
+      });
+
+      // Detecta + persiste base_brand se ainda não setado
+      await ensureBaseBrandPersisted();
+
+      closeModal();
+      renderHeaderUI();
+      showToast(`Concorrente "${pending.brandName}" adicionado · ${pending.matchedCount.toLocaleString('pt-BR')} PDVs com match`);
+    } catch(e) {
+      console.error('[v360-comp] save error:', e);
+      showError('Erro ao salvar: ' + (e.message || e));
+      confirmBtn.disabled = false;
+      confirmBtn.style.opacity = '1';
+      confirmBtn.textContent = 'Adicionar ao mapa';
+    }
+  }
+
+  async function ensureBaseBrandPersisted() {
+    if (window._currentMapBaseBrand) return;
+    const allData = window.allData || [];
+    if (!allData.length) return;
+    // Pega marca mais frequente em allData
+    const counts = {};
+    for (const r of allData) {
+      const m = String(r.marca || '').toUpperCase().trim();
+      if (!m) continue;
+      counts[m] = (counts[m] || 0) + 1;
+    }
+    const sorted = Object.entries(counts).sort((a,b) => b[1] - a[1]);
+    if (!sorted.length) return;
+    const baseBrand = sorted[0][0];
+    try {
+      await window.sbFetch('saved_maps?id=eq.' + window._currentOpenMapId, {
+        method: 'PATCH',
+        headers: { 'Prefer': 'return=minimal' },
+        body: JSON.stringify({ base_brand: baseBrand })
+      });
+      window._currentMapBaseBrand = baseBrand;
+      if (!state.perspectiveBrand) state.perspectiveBrand = baseBrand;
+    } catch(e) {
+      console.warn('[v360-comp] base_brand persist failed:', e.message);
+    }
+  }
+
+  // ─── Header UI ──────────────────────────────────────────────────────────
+  function renderHeaderUI() {
+    renderCompetitorButton();
+    renderPerspectiveDropdown();
+    renderCompetitorChips();
+  }
+
+  function renderCompetitorButton() {
+    let btn = document.getElementById('btn-add-competitor');
+    const shouldShow = isV360() && !isSharedMode() && !!window._currentOpenMapId;
+    if (!shouldShow) {
+      if (btn) btn.style.display = 'none';
+      return;
+    }
+    if (!btn) {
+      // Insere antes do btn-fullmap (header)
+      const reference = document.getElementById('btn-fullmap');
+      if (!reference) return;
+      btn = document.createElement('button');
+      btn.id = 'btn-add-competitor';
+      btn.className = 'hdr-btn hdr-btn-icon';
+      btn.title = 'Adicionar marca concorrente';
+      btn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="9" cy="7" r="4"/><path d="M3 21v-2a4 4 0 0 1 4-4h4a4 4 0 0 1 4 4v2"/><line x1="19" y1="8" x2="19" y2="14"/><line x1="22" y1="11" x2="16" y2="11"/></svg>`;
+      btn.onclick = openModal;
+      reference.parentNode.insertBefore(btn, reference);
+    }
+    btn.style.display = '';
+  }
+
+  function renderPerspectiveDropdown() {
+    let wrap = document.getElementById('v360-perspective-wrap');
+    const shouldShow = isV360() && state.competitors.length >= 1 && !!window._currentMapBaseBrand;
+    if (!shouldShow) {
+      if (wrap) wrap.style.display = 'none';
+      return;
+    }
+    if (!wrap) {
+      // Inserir após header-map-name-wrap
+      const reference = document.getElementById('header-map-name-wrap');
+      if (!reference) return;
+      wrap = document.createElement('div');
+      wrap.id = 'v360-perspective-wrap';
+      wrap.style.cssText = 'display:flex;align-items:center;gap:6px;margin-left:14px;padding:4px 10px;border-radius:8px;background:var(--bg-subtle,rgba(0,0,0,0.04));font-size:11.5px;';
+      wrap.innerHTML = `
+        <span style="color:var(--text-muted,#6b7280);text-transform:uppercase;font-size:9.5px;letter-spacing:0.06em;font-weight:600;">Perspectiva</span>
+        <select id="v360-perspective-select" style="background:transparent;border:none;font-size:12px;font-weight:600;cursor:pointer;outline:none;color:var(--text,#111);padding-right:4px;"></select>
+      `;
+      reference.parentNode.insertBefore(wrap, reference.nextSibling);
+      wrap.querySelector('#v360-perspective-select').onchange = (e) => {
+        state.perspectiveBrand = e.target.value;
+        // PR1: persistência local apenas; PR2 vai trigger redraw do mapa
+        try { window.dispatchEvent(new CustomEvent('v360:perspective-changed', { detail: { brand: e.target.value } })); } catch(_) {}
+      };
+    }
+    const select = wrap.querySelector('#v360-perspective-select');
+    const brands = [window._currentMapBaseBrand, ...state.competitors.map(c => c.brand_name)];
+    const current = state.perspectiveBrand || window._currentMapBaseBrand;
+    select.innerHTML = brands.map(b => `<option value="${b}" ${b===current?'selected':''}>${b}${b===window._currentMapBaseBrand?' (base)':''}</option>`).join('');
+    wrap.style.display = '';
+  }
+
+  function renderCompetitorChips() {
+    let wrap = document.getElementById('v360-comp-chips');
+    const shouldShow = isV360() && state.competitors.length > 0;
+    if (!shouldShow) {
+      if (wrap) wrap.style.display = 'none';
+      return;
+    }
+    if (!wrap) {
+      const reference = document.getElementById('v360-perspective-wrap');
+      if (!reference) return;
+      wrap = document.createElement('div');
+      wrap.id = 'v360-comp-chips';
+      wrap.style.cssText = 'display:flex;align-items:center;gap:6px;margin-left:8px;';
+      reference.parentNode.insertBefore(wrap, reference.nextSibling);
+    }
+    const canDelete = !isSharedMode();
+    wrap.innerHTML = state.competitors.map(c => `
+      <div data-comp-id="${c.id}" style="display:inline-flex;align-items:center;gap:6px;padding:4px 8px 4px 10px;border-radius:14px;background:var(--bg-subtle,rgba(0,0,0,0.04));font-size:11px;line-height:1;">
+        <span style="width:7px;height:7px;border-radius:50%;background:${c.brand_color};flex-shrink:0;"></span>
+        <span style="font-weight:500;">${c.brand_name}</span>
+        <span style="color:var(--text-muted,#6b7280);font-size:10px;">${c.matched_count.toLocaleString('pt-BR')}</span>
+        ${canDelete ? `<button data-del="${c.id}" title="Remover" style="background:none;border:none;color:var(--text-muted,#6b7280);cursor:pointer;padding:0 0 0 2px;font-size:13px;line-height:1;opacity:0.6;">×</button>` : ''}
+      </div>
+    `).join('');
+    wrap.style.display = 'flex';
+    if (canDelete) {
+      wrap.querySelectorAll('button[data-del]').forEach(b => {
+        b.onclick = (e) => {
+          e.stopPropagation();
+          const id = b.dataset.del;
+          const comp = state.competitors.find(c => c.id === id);
+          if (!comp) return;
+          if (!confirm(`Remover concorrente "${comp.brand_name}" deste mapa?`)) return;
+          deleteCompetitor(id);
+        };
+      });
+    }
+  }
+
+  async function deleteCompetitor(id) {
+    try {
+      await window.sbFetch('map_competitors?id=eq.' + id, {
+        method: 'DELETE',
+        headers: { 'Prefer': 'return=minimal' }
+      });
+      state.competitors = state.competitors.filter(c => c.id !== id);
+      // Se perspectiva atual foi removida, volta pra base
+      if (state.perspectiveBrand && !state.competitors.some(c => c.brand_name === state.perspectiveBrand) && state.perspectiveBrand !== window._currentMapBaseBrand) {
+        state.perspectiveBrand = window._currentMapBaseBrand;
+      }
+      renderHeaderUI();
+      showToast('Concorrente removido');
+    } catch(e) {
+      console.error('[v360-comp] delete error:', e);
+      showToast('Erro ao remover: ' + (e.message || e), true);
+    }
+  }
+
+  function showToast(msg, isError) {
+    const toast = document.createElement('div');
+    toast.style.cssText = `position:fixed;bottom:24px;left:50%;transform:translateX(-50%);padding:10px 18px;border-radius:8px;background:${isError?'#dc2626':'#111'};color:#fff;font-size:12.5px;font-family:'Urbanist',sans-serif;z-index:10001;box-shadow:0 8px 24px rgba(0,0,0,0.25);`;
+    toast.textContent = msg;
+    document.body.appendChild(toast);
+    setTimeout(() => toast.remove(), 3200);
+  }
+
+  // ─── Load on map open ───────────────────────────────────────────────────
+  async function loadForMap(mapId, sharedMode) {
+    if (!mapId) {
+      reset();
+      return;
+    }
+    if (state.loadedForMapId === mapId) {
+      renderHeaderUI();
+      return;
+    }
+    reset();
+    state.loadedForMapId = mapId;
+
+    // base_brand do saved_maps
+    try {
+      const meta = await window.sbFetch('saved_maps?id=eq.' + mapId + '&select=base_brand,tickets_floor');
+      if (Array.isArray(meta) && meta[0]) {
+        window._currentMapBaseBrand = meta[0].base_brand || null;
+        state.ticketsFloor = meta[0].tickets_floor || 5;
+      }
+    } catch(e) {
+      console.warn('[v360-comp] load meta failed:', e.message);
+    }
+
+    // Competitors + PDVs
+    try {
+      const comps = await window.sbFetch('map_competitors?map_id=eq.' + mapId + '&select=*&order=created_at.asc');
+      if (!Array.isArray(comps) || !comps.length) {
+        renderHeaderUI();
+        return;
+      }
+      for (const c of comps) {
+        const compState = {
+          id: c.id,
+          brand_name: c.brand_name,
+          brand_color: c.brand_color || pickBrandColor(c.brand_name),
+          row_count: c.row_count || 0,
+          matched_count: c.matched_count || 0,
+          unmatched_count: c.unmatched_count || 0,
+          pdvs: new Map(),
+        };
+        // Paginar pdvs
+        let page = 0;
+        const PAGE = 1000;
+        while (true) {
+          const pdvs = await window.sbFetch(`map_competitor_pdvs?competitor_id=eq.${c.id}&select=*&offset=${page*PAGE}&limit=${PAGE}`);
+          if (!pdvs || !pdvs.length) break;
+          for (const p of pdvs) compState.pdvs.set(p.cnpj_14, p);
+          if (pdvs.length < PAGE) break;
+          page++;
+        }
+        state.competitors.push(compState);
+      }
+      if (!state.perspectiveBrand && window._currentMapBaseBrand) {
+        state.perspectiveBrand = window._currentMapBaseBrand;
+      }
+      renderHeaderUI();
+      try { window.dispatchEvent(new CustomEvent('v360:competitors-loaded', { detail: { count: state.competitors.length } })); } catch(_) {}
+    } catch(e) {
+      console.warn('[v360-comp] load competitors failed:', e.message);
+    }
+  }
+
+  function reset() {
+    state.competitors = [];
+    state.perspectiveBrand = null;
+    state.loadedForMapId = null;
+    state.ticketsFloor = 5;
+    _fallbackIdx = 0;
+    // limpa UI
+    const ids = ['btn-add-competitor','v360-perspective-wrap','v360-comp-chips'];
+    for (const id of ids) {
+      const el = document.getElementById(id);
+      if (el) el.style.display = 'none';
+    }
+  }
+
+  // ─── API pública ────────────────────────────────────────────────────────
+  window.V360Comp = {
+    loadForMap,
+    reset,
+    renderHeaderUI,
+    openModal,
+    getState: () => ({
+      competitors: state.competitors.slice(),
+      perspectiveBrand: state.perspectiveBrand,
+      ticketsFloor: state.ticketsFloor,
+    }),
+    getCompetitorPdv: (brandName, cnpj14) => {
+      const c = state.competitors.find(x => x.brand_name === brandName);
+      return c ? c.pdvs.get(cnpj14) : null;
+    },
+  };
+
+  // ─── Auto-hook em entry points ──────────────────────────────────────────
+  // Quando openSavedMap rodar, dispara carregamento via window event
+  // (app.js dispara via setHeaderMapName/_resetPlacesOverlayFields wrappers)
+  window.addEventListener('v360:map-opened', (e) => {
+    const { mapId, sharedMode } = e.detail || {};
+    loadForMap(mapId, sharedMode);
+  });
+  window.addEventListener('v360:map-closed', () => {
+    reset();
+  });
+
+})();
