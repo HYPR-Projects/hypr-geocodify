@@ -11,3 +11,4 @@ window.addEventListener('unhandledrejection', (e) => {
 
 import './styles/app.css';
 import './inline/app.js';
+import './inline/v360-competitors.js';

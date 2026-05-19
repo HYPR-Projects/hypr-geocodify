@@ -4391,6 +4391,8 @@ function showGallery() {
   if (_lsGal) _lsGal.textContent = 'Geocodify';
   try { setHeaderMapName(''); } catch(e) {}
   try { closeMoreMenu(); } catch(e) {}
+  // V360 Competitors PR1: reseta estado ao voltar pra galeria
+  try { window.dispatchEvent(new CustomEvent('v360:map-closed')); } catch(_) {}
   const _vtGal = document.getElementById('view-toggle-btns');
   if (_vtGal) _vtGal.style.display = 'none';
   document.getElementById('gallery-screen').classList.remove('hidden');
@@ -5235,6 +5237,14 @@ async function openSavedMap(mapId, name, mapType) {
     }
     populateFilters(); updatePanels(); updateOverlay();
     checkReenrichBar();
+    // V360 Competitors PR1: dispara load de concorrentes
+    try {
+      if (currentMapType === 'varejo360') {
+        window.dispatchEvent(new CustomEvent('v360:map-opened', { detail: { mapId: mapId, sharedMode: false } }));
+      } else if (window.V360Comp) {
+        window.V360Comp.reset();
+      }
+    } catch(_) {}
     if (currentMapType === 'places_discovery' && allData.length > 0) {
       document.getElementById('places-panel').style.display = 'block';
       document.getElementById('places-results-section').style.display = 'block';
@@ -5604,6 +5614,14 @@ async function initSharedMode() {
     filteredData = allData.slice();
 
     populateFilters(); applyFilters(); updatePanels(); renderMarkers(); updateOverlay();
+
+    // V360 Competitors PR1: carrega concorrentes em shared mode
+    try {
+      window._currentOpenMapId = mapMeta.id; // necessário pra V360Comp.loadForMap
+      if (mapMeta.map_type === 'varejo360') {
+        window.dispatchEvent(new CustomEvent('v360:map-opened', { detail: { mapId: mapMeta.id, sharedMode: true } }));
+      }
+    } catch(_) {}
 
     // Zoom to data
     if (allData.length > 0 && map) {
