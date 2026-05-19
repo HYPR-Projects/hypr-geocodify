@@ -7834,13 +7834,44 @@ function resetPlacesForNewSearch() {
   try { window.updateRangeLabel = updateRangeLabel; } catch(e) {}
   try { window.updateRanking = updateRanking; } catch(e) {}
 
-  // Shared state
-  try { window.allData = allData; } catch(e) {}
-  try { window.filteredData = filteredData; } catch(e) {}
+  // Shared state — getter+setter pra sempre refletir a referência atual.
+  // Atribuição direta (window.X = X) seria capturada só no boot quando os
+  // arrays estão vazios. Setter permite que código externo (PR2) reatribua.
+  try {
+    Object.defineProperty(window, 'allData', {
+      get: () => allData,
+      set: (v) => { allData = v; },
+      configurable: true,
+    });
+    Object.defineProperty(window, 'filteredData', {
+      get: () => filteredData,
+      set: (v) => { filteredData = v; },
+      configurable: true,
+    });
+    Object.defineProperty(window, 'currentMapType', {
+      get: () => currentMapType,
+      set: (v) => { currentMapType = v; },
+      configurable: true,
+    });
+    Object.defineProperty(window, 'currentView', {
+      get: () => currentView,
+      set: (v) => { currentView = v; },
+      configurable: true,
+    });
+    Object.defineProperty(window, 'currentUser', {
+      get: () => currentUser,
+      set: (v) => { currentUser = v; },
+      configurable: true,
+    });
+  } catch(e) {
+    // Fallback se Object.defineProperty falhar
+    try { window.allData = allData; } catch(_) {}
+    try { window.filteredData = filteredData; } catch(_) {}
+    try { window.currentMapType = currentMapType; } catch(_) {}
+    try { window.currentView = currentView; } catch(_) {}
+    try { window.currentUser = currentUser; } catch(_) {}
+  }
   try { window.map = map; } catch(e) {}
-  try { window.currentMapType = currentMapType; } catch(e) {}
-  try { window.currentView = currentView; } catch(e) {}
-  try { window.currentUser = currentUser; } catch(e) {}
   try { window._supa = _supa; } catch(e) {}
   try { window.MAP_STYLES = MAP_STYLES; } catch(e) {}
   try { window.charts = charts; } catch(e) {}
