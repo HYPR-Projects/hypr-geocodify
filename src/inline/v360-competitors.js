@@ -504,11 +504,14 @@
       });
       const competitorId = Array.isArray(created) ? created[0].id : created.id;
 
-      // Chunks de 500 pra map_competitor_pdvs
+      // Chunks de 500 pra map_competitor_pdvs, processados em paralelo (4 simultâneos)
       const CHUNK = 500;
-      let saved = 0;
-      for (let i = 0; i < pending.rows.length; i += CHUNK) {
-        const chunk = pending.rows.slice(i, i+CHUNK).map(r => ({
+      const PARALLEL = 4;
+      const totalRows = pending.rows.length;
+      // Pré-monta payloads
+      const payloads = [];
+      for (let i = 0; i < totalRows; i += CHUNK) {
+        payloads.push(pending.rows.slice(i, i+CHUNK).map(r => ({
           competitor_id: competitorId,
           cnpj_14: r.cnpj_14,
           matched: r.matched,
@@ -522,14 +525,21 @@
           percentual_dimensao: r.percentual_dimensao,
           percentual_marca_dimensao: r.percentual_marca_dimensao,
           oportunidade_dimensao: r.oportunidade_dimensao,
-        }));
-        await window.sbFetch('map_competitor_pdvs', {
-          method: 'POST',
-          headers: { 'Prefer': 'return=minimal' },
-          body: JSON.stringify(chunk)
-        });
-        saved += chunk.length;
-        confirmBtn.textContent = `Salvando ${saved.toLocaleString('pt-BR')}/${pending.rowCount.toLocaleString('pt-BR')}...`;
+        })));
+      }
+      let saved = 0;
+      // Processa em batches paralelos para acelerar (3-4x mais rápido sem saturar Supabase)
+      for (let i = 0; i < payloads.length; i += PARALLEL) {
+        const batch = payloads.slice(i, i + PARALLEL);
+        await Promise.all(batch.map(payload =>
+          window.sbFetch('map_competitor_pdvs', {
+            method: 'POST',
+            headers: { 'Prefer': 'return=minimal' },
+            body: JSON.stringify(payload)
+          })
+        ));
+        saved += batch.reduce((s, p) => s + p.length, 0);
+        confirmBtn.textContent = `Salvando ${saved.toLocaleString('pt-BR')}/${totalRows.toLocaleString('pt-BR')}...`;
       }
 
       // Atualiza state local
@@ -553,6 +563,14 @@
 
       closeModal();
       renderHeaderUI();
+      // Notifica V360CompRender (hook em renderHeaderUI não pega chamadas
+      // internas porque o monkey-patch só substitui window.V360Comp.renderHeaderUI,
+      // e as chamadas locais usam o identifier original do módulo).
+      try {
+        window.dispatchEvent(new CustomEvent('v360:competitors-loaded', {
+          detail: { count: state.competitors.length, source: 'add' }
+        }));
+      } catch(_) {}
       showToast(`Concorrente "${pending.brandName}" adicionado · ${pending.matchedCount.toLocaleString('pt-BR')} PDVs com match`);
     } catch(e) {
       console.error('[v360-comp] save error:', e);
@@ -702,6 +720,11 @@
         state.perspectiveBrand = window._currentMapBaseBrand;
       }
       renderHeaderUI();
+      try {
+        window.dispatchEvent(new CustomEvent('v360:competitors-loaded', {
+          detail: { count: state.competitors.length, source: 'remove' }
+        }));
+      } catch(_) {}
       showToast('Concorrente removido');
     } catch(e) {
       console.error('[v360-comp] delete error:', e);
