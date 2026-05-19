@@ -609,103 +609,191 @@
   }
 
   // ─── Header UI ──────────────────────────────────────────────────────────
+  // Fase 2: tudo unificado em uma única cápsula central (#perspBar).
+  // Funções antigas (renderCompetitorButton, renderPerspectiveDropdown,
+  // renderCompetitorChips) foram substituídas por renderPerspBar().
   function renderHeaderUI() {
-    renderCompetitorButton();
-    renderPerspectiveDropdown();
-    renderCompetitorChips();
+    renderPerspBar();
+    // Limpa elementos legados que possam estar no DOM de sessões anteriores
+    // (caso o módulo seja recarregado num browser que já tinha rendered antigo)
+    _removeLegacyHeaderEls();
   }
 
-  function renderCompetitorButton() {
-    let btn = document.getElementById('btn-add-competitor');
-    const shouldShow = isV360() && !isSharedMode() && !!window._currentOpenMapId;
-    if (!shouldShow) {
-      if (btn) btn.style.display = 'none';
-      return;
+  function _removeLegacyHeaderEls() {
+    const legacy = ['btn-add-competitor', 'v360-perspective-wrap', 'v360-comp-chips'];
+    for (const id of legacy) {
+      const el = document.getElementById(id);
+      if (el && el.parentNode) el.parentNode.removeChild(el);
     }
-    if (!btn) {
-      // Insere antes do btn-fullmap (header)
-      const reference = document.getElementById('btn-fullmap');
-      if (!reference) return;
-      btn = document.createElement('button');
-      btn.id = 'btn-add-competitor';
-      btn.className = 'hdr-btn hdr-btn-icon';
-      btn.title = 'Adicionar marca concorrente';
-      btn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="9" cy="7" r="4"/><path d="M3 21v-2a4 4 0 0 1 4-4h4a4 4 0 0 1 4 4v2"/><line x1="19" y1="8" x2="19" y2="14"/><line x1="22" y1="11" x2="16" y2="11"/></svg>`;
-      btn.onclick = openModal;
-      reference.parentNode.insertBefore(btn, reference);
-    }
-    btn.style.display = '';
   }
 
-  function renderPerspectiveDropdown() {
-    let wrap = document.getElementById('v360-perspective-wrap');
-    const shouldShow = isV360() && state.competitors.length >= 1 && !!window._currentMapBaseBrand;
+  // Renderiza a perspective bar (cápsula central do header) com:
+  //   [chip lente · LENTE] [chip concorrente · ×] ... [+]
+  // Visível só em V360 com mapa aberto. Em outros modos: display:none.
+  function renderPerspBar() {
+    const bar = document.getElementById('perspBar');
+    if (!bar) return;
+
+    const baseBrand = window._currentMapBaseBrand;
+    const shouldShow = isV360() && !!baseBrand && !!window._currentOpenMapId;
     if (!shouldShow) {
-      if (wrap) wrap.style.display = 'none';
+      bar.style.display = 'none';
+      bar.innerHTML = '';
+      _closeLensMenu();
       return;
     }
-    if (!wrap) {
-      // Inserir após header-map-name-wrap
-      const reference = document.getElementById('header-map-name-wrap');
-      if (!reference) return;
-      wrap = document.createElement('div');
-      wrap.id = 'v360-perspective-wrap';
-      wrap.style.cssText = 'display:flex;align-items:center;gap:6px;margin-left:14px;padding:4px 10px;border-radius:8px;background:var(--bg-subtle,rgba(0,0,0,0.04));font-size:11.5px;';
-      wrap.innerHTML = `
-        <span style="color:var(--text-muted,#6b7280);text-transform:uppercase;font-size:9.5px;letter-spacing:0.06em;font-weight:600;">Perspectiva</span>
-        <select id="v360-perspective-select" style="background:transparent;border:none;font-size:12px;font-weight:600;cursor:pointer;outline:none;color:var(--text,#111);padding-right:4px;"></select>
-      `;
-      reference.parentNode.insertBefore(wrap, reference.nextSibling);
-      wrap.querySelector('#v360-perspective-select').onchange = (e) => {
-        state.perspectiveBrand = e.target.value;
-        // PR1: persistência local apenas; PR2 vai trigger redraw do mapa
-        try { window.dispatchEvent(new CustomEvent('v360:perspective-changed', { detail: { brand: e.target.value } })); } catch(_) {}
+
+    // Lente = perspectiveBrand (default = base_brand)
+    const lens = state.perspectiveBrand || baseBrand;
+    const canEdit = !isSharedMode();
+
+    // Lista ordenada: lente primeiro, depois os outros (base + competitors, sem duplicar lente)
+    const others = [];
+    if (baseBrand && baseBrand !== lens) {
+      others.push({ name: baseBrand, color: BRAND_COLOR_PRESETS[baseBrand.toUpperCase()] || '#94a3b8', isBase: true, compId: null, matched: null });
+    }
+    for (const c of state.competitors) {
+      if (c.brand_name === lens) continue; // pula se for a lente
+      others.push({ name: c.brand_name, color: c.brand_color || '#94a3b8', isBase: false, compId: c.id, matched: c.matched_count });
+    }
+
+    // Contagem da lente:
+    //   - se é a base: total de PDVs do mapa (allData.length, fallback a window._allDataLength)
+    //   - se é um concorrente: matched_count
+    let lensColor = BRAND_COLOR_PRESETS[String(lens).toUpperCase()] || '#94a3b8';
+    let lensCount = null;
+    if (lens === baseBrand) {
+      lensCount = (window.allData && window.allData.length) || null;
+    } else {
+      const lensComp = state.competitors.find(c => c.brand_name === lens);
+      if (lensComp) {
+        lensColor = lensComp.brand_color || lensColor;
+        lensCount = lensComp.matched_count;
+      }
+    }
+
+    // Render
+    const lensChipHTML = `
+      <button type="button" class="persp-chip lens" data-lens-chip="1" aria-expanded="false" aria-haspopup="menu"
+              title="Lente: ${_esc(lens)} — clique pra trocar a perspectiva"
+              style="color:${lensColor}">
+        <span class="persp-dot" aria-hidden="true"></span>
+        <span class="persp-name">${_esc(lens)}</span>
+        ${lensCount != null ? `<span class="persp-count">${lensCount.toLocaleString('pt-BR')}</span>` : ''}
+        <span class="lens-tag">lente</span>
+        ${others.length > 0 ? `<span class="lens-caret" aria-hidden="true"><svg width="10" height="10" viewBox="0 0 12 12"><path fill="currentColor" d="M6 8L1 3h10z"/></svg></span>` : ''}
+      </button>
+    `;
+
+    const otherChipsHTML = others.map(o => `
+      <span class="persp-chip" data-brand="${_esc(o.name)}" style="color:${o.color}">
+        <span class="persp-dot" aria-hidden="true"></span>
+        <span class="persp-name">${_esc(o.name)}</span>
+        ${o.matched != null ? `<span class="persp-count">${o.matched.toLocaleString('pt-BR')}</span>` : ''}
+        ${canEdit && o.compId ? `<button type="button" class="x" data-del-comp="${o.compId}" title="Remover concorrente" aria-label="Remover ${_esc(o.name)}">×</button>` : ''}
+      </span>
+    `).join('');
+
+    const addBtnHTML = canEdit
+      ? `<button type="button" class="persp-add" data-persp-add="1" title="Adicionar marca concorrente" aria-label="Adicionar marca concorrente">+</button>`
+      : '';
+
+    bar.innerHTML = lensChipHTML + otherChipsHTML + addBtnHTML;
+    bar.style.display = 'inline-flex';
+
+    // Bindings
+    const lensChip = bar.querySelector('[data-lens-chip="1"]');
+    if (lensChip) {
+      lensChip.onclick = (e) => {
+        e.stopPropagation();
+        // Só abre menu se há outras opções
+        if (others.length === 0) return;
+        _toggleLensMenu(lensChip);
       };
     }
-    const select = wrap.querySelector('#v360-perspective-select');
-    const brands = [window._currentMapBaseBrand, ...state.competitors.map(c => c.brand_name)];
-    const current = state.perspectiveBrand || window._currentMapBaseBrand;
-    select.innerHTML = brands.map(b => `<option value="${b}" ${b===current?'selected':''}>${b}${b===window._currentMapBaseBrand?' (base)':''}</option>`).join('');
-    wrap.style.display = '';
+    bar.querySelectorAll('button[data-del-comp]').forEach(b => {
+      b.onclick = (e) => {
+        e.stopPropagation();
+        const id = b.dataset.delComp;
+        const comp = state.competitors.find(c => c.id === id);
+        if (!comp) return;
+        if (!confirm(`Remover concorrente "${comp.brand_name}" deste mapa?`)) return;
+        deleteCompetitor(id);
+      };
+    });
+    const addBtn = bar.querySelector('[data-persp-add="1"]');
+    if (addBtn) addBtn.onclick = (e) => { e.stopPropagation(); openModal(); };
   }
 
-  function renderCompetitorChips() {
-    let wrap = document.getElementById('v360-comp-chips');
-    const shouldShow = isV360() && state.competitors.length > 0;
-    if (!shouldShow) {
-      if (wrap) wrap.style.display = 'none';
-      return;
+  // ─── Dropdown da lente (trocar perspectiva) ─────────────────────────────
+  function _toggleLensMenu(lensChip) {
+    const existing = document.getElementById('persp-lens-menu');
+    if (existing) { _closeLensMenu(); return; }
+
+    const baseBrand = window._currentMapBaseBrand;
+    const current = state.perspectiveBrand || baseBrand;
+    const all = [];
+    if (baseBrand) {
+      all.push({ name: baseBrand, color: BRAND_COLOR_PRESETS[baseBrand.toUpperCase()] || '#94a3b8', isBase: true });
     }
-    if (!wrap) {
-      const reference = document.getElementById('v360-perspective-wrap');
-      if (!reference) return;
-      wrap = document.createElement('div');
-      wrap.id = 'v360-comp-chips';
-      wrap.style.cssText = 'display:flex;align-items:center;gap:6px;margin-left:8px;';
-      reference.parentNode.insertBefore(wrap, reference.nextSibling);
+    for (const c of state.competitors) {
+      if (c.brand_name === baseBrand) continue;
+      all.push({ name: c.brand_name, color: c.brand_color || '#94a3b8', isBase: false });
     }
-    const canDelete = !isSharedMode();
-    wrap.innerHTML = state.competitors.map(c => `
-      <div data-comp-id="${c.id}" style="display:inline-flex;align-items:center;gap:6px;padding:4px 8px 4px 10px;border-radius:14px;background:var(--bg-subtle,rgba(0,0,0,0.04));font-size:11px;line-height:1;">
-        <span style="width:7px;height:7px;border-radius:50%;background:${c.brand_color};flex-shrink:0;"></span>
-        <span style="font-weight:500;">${c.brand_name}</span>
-        <span style="color:var(--text-muted,#6b7280);font-size:10px;">${c.matched_count.toLocaleString('pt-BR')}</span>
-        ${canDelete ? `<button data-del="${c.id}" title="Remover" style="background:none;border:none;color:var(--text-muted,#6b7280);cursor:pointer;padding:0 0 0 2px;font-size:13px;line-height:1;opacity:0.6;">×</button>` : ''}
-      </div>
+
+    const menu = document.createElement('div');
+    menu.id = 'persp-lens-menu';
+    menu.className = 'persp-lens-menu';
+    menu.setAttribute('role', 'menu');
+    menu.innerHTML = all.map(b => `
+      <button type="button" class="persp-lens-menu-item ${b.name === current ? 'current' : ''}"
+              data-set-lens="${_esc(b.name)}" role="menuitem">
+        <span class="pdot" style="color:${b.color};background:${b.color}"></span>
+        <span>${_esc(b.name)}${b.isBase ? ' (base)' : ''}</span>
+      </button>
     `).join('');
-    wrap.style.display = 'flex';
-    if (canDelete) {
-      wrap.querySelectorAll('button[data-del]').forEach(b => {
-        b.onclick = (e) => {
-          e.stopPropagation();
-          const id = b.dataset.del;
-          const comp = state.competitors.find(c => c.id === id);
-          if (!comp) return;
-          if (!confirm(`Remover concorrente "${comp.brand_name}" deste mapa?`)) return;
-          deleteCompetitor(id);
-        };
-      });
+    lensChip.appendChild(menu);
+    lensChip.setAttribute('aria-expanded', 'true');
+
+    menu.querySelectorAll('button[data-set-lens]').forEach(b => {
+      b.onclick = (e) => {
+        e.stopPropagation();
+        const newLens = b.dataset.setLens;
+        if (newLens === current) { _closeLensMenu(); return; }
+        state.perspectiveBrand = newLens;
+        try { window.dispatchEvent(new CustomEvent('v360:perspective-changed', { detail: { brand: newLens } })); } catch(_) {}
+        _closeLensMenu();
+        renderPerspBar();
+      };
+    });
+
+    // Fechar ao clicar fora
+    setTimeout(() => {
+      document.addEventListener('click', _onDocClickCloseLensMenu, { once: true });
+    }, 0);
+  }
+
+  function _closeLensMenu() {
+    const m = document.getElementById('persp-lens-menu');
+    if (m && m.parentNode) {
+      m.parentNode.setAttribute('aria-expanded', 'false');
+      m.parentNode.removeChild(m);
     }
+    document.removeEventListener('click', _onDocClickCloseLensMenu);
+  }
+
+  function _onDocClickCloseLensMenu() {
+    _closeLensMenu();
+  }
+
+  // Escape básico pra evitar quebra em nomes com aspas/HTML
+  function _esc(s) {
+    return String(s == null ? '' : s)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
   }
 
   async function deleteCompetitor(id) {
@@ -895,12 +983,12 @@
     _fallbackIdx = 0;
     // Limpa também o base_brand global pra não vazar entre mapas
     window._currentMapBaseBrand = null;
-    // limpa UI
-    const ids = ['btn-add-competitor','v360-perspective-wrap','v360-comp-chips'];
-    for (const id of ids) {
-      const el = document.getElementById(id);
-      if (el) el.style.display = 'none';
-    }
+    // limpa UI: esconde perspective bar + remove qualquer dropdown da lente aberto
+    const bar = document.getElementById('perspBar');
+    if (bar) { bar.style.display = 'none'; bar.innerHTML = ''; }
+    _closeLensMenu();
+    // limpa elementos legados (caso ainda existam de versões antigas)
+    _removeLegacyHeaderEls();
   }
 
   // ─── API pública ────────────────────────────────────────────────────────

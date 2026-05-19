@@ -251,16 +251,30 @@ html.theme-switching, html.theme-switching *, html.theme-switching *::before, ht
   border: 1px solid var(--glass-border);
   border-radius: var(--r-xl);
   box-shadow: var(--glass-shadow), var(--glass-edge);
-  display: flex;
+  /* Grid 3-zonas: esquerda/centro/direita podem encolher; centro ocupa só o necessário */
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
   align-items: center;
   padding: 0 14px 0 16px;
   gap: var(--sp-3);
   z-index: 100;
-  overflow: hidden;
+  overflow: hidden; /* hard clip — nada estoura */
 }
+
+/* Zonas do header (grid children) */
+.h-zone {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  min-width: 0; /* permite grid children encolherem */
+}
+.h-zone-right { justify-content: flex-end; }
+.h-zone-center { justify-content: center; }
+/* Quando perspBar está hidden (display:none), zona central some — grid recompõe */
 
 #header .logo {
   display: flex; align-items: center; gap: 10px;
+  flex-shrink: 0;
 }
 
 #header .logo-mark {
@@ -322,7 +336,175 @@ html.theme-switching, html.theme-switching *, html.theme-switching *::before, ht
 .hstat-val { font-size: 16px; font-weight: 600; font-family: var(--mono); color: var(--text); line-height: 1.1; }
 .hstat-label { font-size: 10px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; margin-top: 4px; }
 
-#header .spacer { flex: 1; }
+/* ─── Perspective Bar (V360) ─────────────────────────────────────────────
+   Cápsula central no header com chips por marca selecionada.
+   Primeira marca = LENTE (perspectiva ativa, dropdown pra trocar).
+   Demais = concorrentes (com × pra remover).
+   Botão + tracejado pra adicionar concorrente (abre modal de upload).
+   ──────────────────────────────────────────────────────────────────────── */
+.perspective-bar {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 38px;
+  padding: 3px;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: var(--r-pill);
+  max-width: 100%;
+  /* sem flex-wrap — fica em linha única; overflow:hidden no header garante clip */
+}
+.persp-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 30px;
+  padding: 0 12px;
+  background: transparent;
+  border: none;
+  border-radius: var(--r-pill);
+  font-family: var(--font);
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-dim);
+  cursor: pointer;
+  transition: all var(--transition);
+  white-space: nowrap;
+  flex-shrink: 0;
+  position: relative;
+}
+.persp-chip:hover { background: var(--border); color: var(--text); }
+.persp-chip.lens {
+  background: var(--surface3);
+  color: var(--text);
+  font-weight: 600;
+  cursor: pointer;
+}
+.persp-chip.lens:hover { background: var(--surface3); }
+.persp-chip .lens-tag {
+  font-size: 9px;
+  font-family: var(--mono);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--accent-hi);
+  background: var(--accent-bg);
+  padding: 2px 5px;
+  border-radius: 3px;
+  margin-right: -2px;
+}
+.persp-dot {
+  width: 7px; height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+  box-shadow: 0 0 6px currentColor, inset 0 0 0 1.5px rgba(255,255,255,0.2);
+  flex-shrink: 0;
+}
+.persp-name {
+  /* o nome herda cor neutra — só o dot fica colorido por marca */
+  color: inherit;
+}
+.persp-count {
+  font-family: var(--mono);
+  font-size: 10.5px;
+  color: var(--text-muted);
+  font-weight: 500;
+  background: var(--border);
+  padding: 1px 6px;
+  border-radius: 4px;
+}
+.persp-chip.lens .persp-count {
+  background: var(--accent-bg);
+  color: var(--accent-hi);
+}
+.persp-chip .x {
+  display: inline-grid; place-items: center;
+  width: 16px; height: 16px;
+  margin-right: -4px;
+  margin-left: 2px;
+  border-radius: 50%;
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  font-size: 11px;
+  cursor: pointer;
+  transition: all var(--transition);
+  padding: 0;
+}
+.persp-chip .x:hover { background: var(--lose-bg); color: var(--lose-hi); }
+.persp-chip.lens .lens-caret {
+  display: inline-grid; place-items: center;
+  width: 14px; height: 14px;
+  margin-right: -4px;
+  margin-left: 2px;
+  color: var(--text-muted);
+  transition: transform var(--transition);
+}
+.persp-chip.lens[aria-expanded="true"] .lens-caret { transform: rotate(180deg); }
+
+.persp-add {
+  width: 30px; height: 30px;
+  border-radius: 50%;
+  background: transparent;
+  border: 1px dashed var(--border-medium);
+  color: var(--text-muted);
+  display: grid; place-items: center;
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+  transition: all var(--transition);
+  flex-shrink: 0;
+  margin: 0 2px;
+  padding: 0;
+}
+.persp-add:hover {
+  color: var(--accent-hi);
+  border-color: var(--accent-edge);
+  border-style: solid;
+  background: var(--accent-bg);
+}
+
+/* Dropdown da lente (trocar perspectiva) */
+.persp-lens-menu {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
+  min-width: 200px;
+  padding: 6px;
+  background: var(--surface-modal);
+  backdrop-filter: blur(24px) saturate(1.6);
+  -webkit-backdrop-filter: blur(24px) saturate(1.6);
+  border: 1px solid var(--border-medium);
+  border-radius: var(--r-md);
+  box-shadow: var(--glass-shadow);
+  z-index: 1000;
+  display: flex; flex-direction: column; gap: 2px;
+}
+.persp-lens-menu-item {
+  display: flex; align-items: center; gap: 8px;
+  padding: 7px 10px;
+  background: transparent;
+  border: none;
+  border-radius: var(--r-sm);
+  font-family: var(--font);
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text);
+  cursor: pointer;
+  text-align: left;
+  transition: background var(--transition);
+}
+.persp-lens-menu-item:hover { background: var(--border); }
+.persp-lens-menu-item.current {
+  background: var(--accent-bg);
+  color: var(--accent-hi);
+}
+.persp-lens-menu-item .pdot {
+  width: 7px; height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  box-shadow: 0 0 6px currentColor, inset 0 0 0 1.5px rgba(255,255,255,0.2);
+}
 
 /* Icon-only header buttons */
 .hdr-btn-icon {
@@ -1073,7 +1255,12 @@ input[type="range"]::-webkit-slider-thumb {
 @media (max-width: 768px) {
   :root { --header-h: 48px; }
   #app { flex-direction: column; }
-  #header { padding: 0 var(--sp-3); gap: var(--sp-2); flex-wrap: nowrap; overflow: hidden; }
+  #header {
+    padding: 0 var(--sp-3); gap: var(--sp-2); overflow: hidden;
+    /* Mobile: só esquerda/direita; perspective bar fica escondida */
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+  .h-zone-center { display: none; }
   #header .logo { gap: 8px; min-width: 0; flex-shrink: 1; }
   #header .logo-mark { height: 22px; flex-shrink: 0; }
   .header-map-type { font-size: 10px; white-space: nowrap; }

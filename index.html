@@ -466,25 +466,35 @@
 <div id="app" style="display:none;">
   <!-- Header -->
   <div id="header">
-    <div class="logo">
-      <svg class="logo-mark" aria-label="HYPR Geocodify"><use href="#logo-geocodify"/></svg>
-      <span class="header-map-type" id="logo-map-type">Varejo 360</span>
-    </div>
+    <!-- ZONA ESQUERDA: logo + nome do mapa + stats -->
+    <div class="h-zone h-zone-left">
+      <div class="logo">
+        <svg class="logo-mark" aria-label="HYPR Geocodify"><use href="#logo-geocodify"/></svg>
+        <span class="header-map-type" id="logo-map-type">Varejo 360</span>
+      </div>
 
-    <!-- Nome do mapa salvo (preenchido via JS) -->
-    <div class="header-map-name-wrap" id="header-map-name-wrap" hidden>
-      <span class="header-map-name-sep">·</span>
-      <span class="header-map-name" id="header-map-name"></span>
-    </div>
+      <!-- Nome do mapa salvo (preenchido via JS) -->
+      <div class="header-map-name-wrap" id="header-map-name-wrap" hidden>
+        <span class="header-map-name-sep">·</span>
+        <span class="header-map-name" id="header-map-name"></span>
+      </div>
 
-    <div class="divider"></div>
-    <div class="header-stats">
-      <div class="hstat">
-        <span class="hstat-val" id="h-pdvs">—</span>
-        <span class="hstat-label">PDVs ativos</span>
+      <div class="divider"></div>
+      <div class="header-stats">
+        <div class="hstat">
+          <span class="hstat-val" id="h-pdvs">—</span>
+          <span class="hstat-label">PDVs ativos</span>
+        </div>
       </div>
     </div>
-    <div class="spacer"></div>
+
+    <!-- ZONA CENTRAL: perspective bar (só V360, renderizada via JS) -->
+    <div class="h-zone h-zone-center">
+      <div class="perspective-bar" id="perspBar" style="display:none;"></div>
+    </div>
+
+    <!-- ZONA DIREITA: ações -->
+    <div class="h-zone h-zone-right">
 
     <!-- Mapa/Lista — só para geocoder/reverse -->
     <div id="view-toggle-btns" class="hdr-group" style="display:none;">
@@ -542,6 +552,7 @@
       <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg>
       Mapas
     </button>
+    </div><!-- /.h-zone-right -->
   </div>
 
   <!-- Main -->
