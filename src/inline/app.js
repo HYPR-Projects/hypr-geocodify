@@ -322,6 +322,48 @@ function initMap() {
   });
 }
 
+// Modo competitivo atual usado pelos clusterProperties.
+// Quando muda (Solo→Duelo, Duelo→Categoria, Categoria com N marcas ≠ N anterior),
+// _setupMapSources precisa ser re-executado para reconstruir os agregadores.
+var _currentClusterAggMode = null; // 'solo' | 'duelo' | 'categoria:N'
+
+function _computeClusterAggMode() {
+  try {
+    if (window.V360CompRender && typeof window.V360CompRender.getMode === 'function') {
+      var mode = window.V360CompRender.getMode();
+      if (mode === 'duelo') return 'duelo';
+      if (mode === 'categoria') {
+        var brands = window.V360CompRender.brandsList();
+        var n = 1 + (brands.others || []).length;
+        return 'categoria:' + n;
+      }
+    }
+  } catch(_) {}
+  return 'solo';
+}
+
+function _buildClusterPropertiesForMode(mode) {
+  // Modo Solo e Duelo usam o mesmo schema (cat: 1-4) — 4 agregadores fixos
+  if (mode === 'solo' || mode === 'duelo') {
+    return {
+      'c_win':     ['+', ['case', ['==', ['get','cat'], 1], 1, 0]],
+      'c_lose':    ['+', ['case', ['==', ['get','cat'], 2], 1, 0]],
+      'c_neutral': ['+', ['case', ['==', ['get','cat'], 3], 1, 0]],
+      'c_absent':  ['+', ['case', ['==', ['get','cat'], 4], 1, 0]],
+    };
+  }
+  // Modo Categoria: 1 agregador por marca (até N marcas)
+  if (mode && mode.indexOf('categoria:') === 0) {
+    var n = parseInt(mode.split(':')[1], 10) || 0;
+    var props = {};
+    for (var i = 0; i < n; i++) {
+      props['c_b' + i] = ['+', ['case', ['==', ['get','brand_idx'], i], 1, 0]];
+    }
+    return props;
+  }
+  return {};
+}
+
 function _setupMapSources() {
   // Limpar layers e source anteriores se existirem (ex: após trocar de layer)
   ['clusters','cluster-count','pdv-points'].forEach(id => {
@@ -332,19 +374,16 @@ function _setupMapSources() {
   // Limpar donut markers de render anterior (troca de layer/tema)
   _clearClusterDonuts();
 
+  _currentClusterAggMode = _computeClusterAggMode();
+
   map.addSource('pdvs', {
     type: 'geojson',
     data: { type: 'FeatureCollection', features: [] },
     cluster: true,
     clusterMaxZoom: 11,       // transição mais cedo para dots individuais
     clusterRadius: 44,        // raio em pixels para agrupar
-    // Agregar contagem por categoria de performance — usado pelos donut markers
-    clusterProperties: {
-      'c_win':     ['+', ['case', ['==', ['get','cat'], 1], 1, 0]],
-      'c_lose':    ['+', ['case', ['==', ['get','cat'], 2], 1, 0]],
-      'c_neutral': ['+', ['case', ['==', ['get','cat'], 3], 1, 0]],
-      'c_absent':  ['+', ['case', ['==', ['get','cat'], 4], 1, 0]],
-    }
+    // Agregadores por categoria — montados conforme o modo competitivo
+    clusterProperties: _buildClusterPropertiesForMode(_currentClusterAggMode),
   });
 
   // Layer de clusters — INVISÍVEL (opacity 0) mas preservada para
@@ -433,6 +472,18 @@ function _renderClusterDonuts() {
     return;
   }
 
+  // Detectar modo: Solo/Duelo usam contadores fixos; Categoria usa contadores por marca
+  var aggMode = _currentClusterAggMode || 'solo';
+  var isCategoria = aggMode.indexOf('categoria:') === 0;
+  var brandCount = isCategoria ? parseInt(aggMode.split(':')[1], 10) || 0 : 0;
+  // Cache de cores ordenadas em modo Categoria (uma vez por render pass)
+  var brandColors = null;
+  if (isCategoria && _categoryBrandIdxCache) {
+    brandColors = _categoryBrandIdxCache.ordered.map(function(b) {
+      return _categoryBrandIdxCache.colorMap[b] || '#94a3b8';
+    });
+  }
+
   var seen = new Set();
   for (var i = 0; i < feats.length; i++) {
     var f = feats[i];
@@ -442,10 +493,26 @@ function _renderClusterDonuts() {
     seen.add(cid);
 
     var total = p.point_count || 0;
-    var win = p.c_win || 0, lose = p.c_lose || 0, neu = p.c_neutral || 0, abs = p.c_absent || 0;
+    var sig, svgHtml;
 
-    // Signature para evitar re-render desnecessário (mesmo cluster com mesma composição)
-    var sig = total + '|' + win + '|' + lose + '|' + neu + '|' + abs;
+    if (isCategoria && brandColors) {
+      // Modo Categoria: 1 segmento por marca
+      var brandSegs = [];
+      var sigParts = [String(total)];
+      for (var b = 0; b < brandCount; b++) {
+        var count = p['c_b' + b] || 0;
+        brandSegs.push({ color: brandColors[b], count: count });
+        sigParts.push(String(count));
+      }
+      sig = sigParts.join('|');
+      svgHtml = _buildDonutSVGFromSegments(total, brandSegs);
+    } else {
+      // Solo/Duelo: schema fixo win/lose/neutral/absent
+      var win = p.c_win || 0, lose = p.c_lose || 0, neu = p.c_neutral || 0, abs = p.c_absent || 0;
+      sig = total + '|' + win + '|' + lose + '|' + neu + '|' + abs;
+      svgHtml = _buildDonutSVG(total, win, lose, neu, abs);
+    }
+
     var entry = _clusterMarkerPool.get(cid);
     var coords = f.geometry && f.geometry.coordinates;
     if (!coords) continue;
@@ -454,7 +521,7 @@ function _renderClusterDonuts() {
       var el = document.createElement('div');
       el.className = 'cluster-donut';
       el.style.cssText = 'position:absolute;transform:translate(-50%,-50%);cursor:pointer;pointer-events:auto;';
-      el.innerHTML = _buildDonutSVG(total, win, lose, neu, abs);
+      el.innerHTML = svgHtml;
       _attachDonutInteractions(el, cid, coords);
       var marker = new maplibregl.Marker({ element: el, anchor: 'center' })
         .setLngLat(coords)
@@ -462,7 +529,7 @@ function _renderClusterDonuts() {
       _clusterMarkerPool.set(cid, { marker: marker, el: el, sig: sig });
     } else {
       if (entry.sig !== sig) {
-        entry.el.innerHTML = _buildDonutSVG(total, win, lose, neu, abs);
+        entry.el.innerHTML = svgHtml;
         entry.sig = sig;
       }
       try { entry.marker.setLngLat(coords); } catch(_) {}
@@ -478,8 +545,9 @@ function _renderClusterDonuts() {
   });
 }
 
-// SVG do donut — tamanho proporcional à contagem (curva mais suave que a antiga)
-function _buildDonutSVG(total, win, lose, neu, abs) {
+// SVG do donut — recebe array genérico de segmentos [{color, count}, ...]
+// Compatível com Solo/Duelo (4 segmentos) e Categoria (N marcas).
+function _buildDonutSVGFromSegments(total, segments) {
   // Raio externo: escala log-suavizada
   var R; // raio do círculo externo
   if (total <= 5)         R = 16;
@@ -495,33 +563,17 @@ function _buildDonutSVG(total, win, lose, neu, abs) {
   var ringR = R - sw / 2; // raio do centro do stroke
   var circ = 2 * Math.PI * ringR;
 
-  // Cores: lidas do CSS via getComputedStyle uma vez (cache em _pinColors)
-  if (!_pinColors) _refreshPinColors();
-  var colors = {
-    win: _pinColors.win,
-    lose: _pinColors.lose,
-    neutral: _pinColors.neutral,
-    absent: _pinColors.absent,
-  };
-
-  // Frações (somam 1)
   var safeTotal = Math.max(1, total);
-  var fracs = [
-    { c: colors.win,     n: win },
-    { c: colors.neutral, n: neu },
-    { c: colors.lose,    n: lose },
-    { c: colors.absent,  n: abs },
-  ];
 
   // Construir segmentos como stroke-dasharray rotativos
   var segs = '';
   var offset = 0;
-  for (var i = 0; i < fracs.length; i++) {
-    var seg = fracs[i];
-    if (seg.n <= 0) continue;
-    var len = (seg.n / safeTotal) * circ;
+  for (var i = 0; i < segments.length; i++) {
+    var seg = segments[i];
+    if (!seg || !seg.count || seg.count <= 0) continue;
+    var len = (seg.count / safeTotal) * circ;
     segs += '<circle cx="' + cx + '" cy="' + cy + '" r="' + ringR +
-      '" fill="none" stroke="' + seg.c + '" stroke-width="' + sw +
+      '" fill="none" stroke="' + seg.color + '" stroke-width="' + sw +
       '" stroke-dasharray="' + len.toFixed(2) + ' ' + (circ - len).toFixed(2) +
       '" stroke-dashoffset="' + (-offset).toFixed(2) + '"/>';
     offset += len;
@@ -531,7 +583,7 @@ function _buildDonutSVG(total, win, lose, neu, abs) {
   var label = total >= 1000 ? (Math.floor(total / 100) / 10).toFixed(1).replace(/\.0$/, '') + 'k' : String(total);
   var fontSize = R >= 28 ? 12 : R >= 22 ? 11 : 10;
 
-  // Fundo central preenchido (assenta o número e cobre o "buraco" no light theme)
+  // Fundo central preenchido (assenta o número e cobre o "miolo" do donut)
   var bgFill = _cssVar('--map-bg') || (document.documentElement.getAttribute('data-theme') === 'light' ? '#ffffff' : '#0d1117');
 
   return '<svg width="' + size + '" height="' + size + '" viewBox="0 0 ' + size + ' ' + size + '" style="display:block;overflow:visible">' +
@@ -544,6 +596,18 @@ function _buildDonutSVG(total, win, lose, neu, abs) {
     // Número central
     '<text x="' + cx + '" y="' + cy + '" text-anchor="middle" dominant-baseline="central" font-size="' + fontSize + '" font-weight="600" font-family="Urbanist, sans-serif" fill="' + (_cssVar('--text-canvas') || '#ffffff') + '">' + label + '</text>' +
     '</svg>';
+}
+
+// Wrapper retrocompatível para Solo/Duelo (4 categorias fixas).
+function _buildDonutSVG(total, win, lose, neu, abs) {
+  if (!_pinColors) _refreshPinColors();
+  // Ordem visual: vence → disputa → perde → ausência (sentido horário)
+  return _buildDonutSVGFromSegments(total, [
+    { color: _pinColors.win,     count: win },
+    { color: _pinColors.neutral, count: neu },
+    { color: _pinColors.lose,    count: lose },
+    { color: _pinColors.absent,  count: abs },
+  ]);
 }
 
 // Tooltip + click handlers para cada donut
@@ -562,9 +626,23 @@ function _attachDonutInteractions(el, clusterId, coords) {
     if (!feat) return;
     var p = feat.properties || {};
     var total = p.point_count || 0;
-    var win = p.c_win || 0, lose = p.c_lose || 0, neu = p.c_neutral || 0, abs = p.c_absent || 0;
     if (tooltipEl) { try { tooltipEl.remove(); } catch(_) {} }
-    tooltipEl = _buildClusterTooltip(total, win, lose, neu, abs);
+    // Modo Categoria: tooltip por marca; outros: schema Vence/Disputa/Perde/Sem presença
+    var aggMode = _currentClusterAggMode || 'solo';
+    if (aggMode.indexOf('categoria:') === 0 && _categoryBrandIdxCache) {
+      var brandCount = parseInt(aggMode.split(':')[1], 10) || 0;
+      var brandRows = [];
+      for (var b = 0; b < brandCount; b++) {
+        var brandName = _categoryBrandIdxCache.ordered[b];
+        var color = _categoryBrandIdxCache.colorMap[brandName] || '#94a3b8';
+        var count = p['c_b' + b] || 0;
+        if (count > 0) brandRows.push({ label: brandName, n: count, c: color });
+      }
+      tooltipEl = _buildClusterTooltipRows(total, brandRows);
+    } else {
+      var win = p.c_win || 0, lose = p.c_lose || 0, neu = p.c_neutral || 0, abs = p.c_absent || 0;
+      tooltipEl = _buildClusterTooltip(total, win, lose, neu, abs);
+    }
     document.body.appendChild(tooltipEl);
     _positionTooltipNearEl(tooltipEl, el);
   });
@@ -614,31 +692,42 @@ function _attachDonutInteractions(el, clusterId, coords) {
   });
 }
 
-function _buildClusterTooltip(total, win, lose, neu, abs) {
+// Tooltip genérico — recebe linhas arbitrárias [{label, n, c}, ...].
+// Linhas com n<=0 são filtradas e ordenadas por contagem decrescente.
+function _buildClusterTooltipRows(total, rows) {
   var el = document.createElement('div');
   el.className = 'cluster-tooltip';
-  if (!_pinColors) _refreshPinColors();
-  var rows = [
-    { label: 'Vence',        n: win,  c: _pinColors.win },
-    { label: 'Disputa',      n: neu,  c: _pinColors.neutral },
-    { label: 'Perde',        n: lose, c: _pinColors.lose },
-    { label: 'Sem presença', n: abs,  c: _pinColors.absent },
-  ].filter(function(r) { return r.n > 0; });
+  rows = (rows || []).filter(function(r) { return r && r.n > 0; })
+                     .sort(function(a, b) { return b.n - a.n; });
 
   var totalFmt = total.toLocaleString('pt-BR');
   var html = '<div class="cluster-tt-header">' + totalFmt + ' PDV' + (total !== 1 ? 's' : '') + '</div>';
   html += '<div class="cluster-tt-body">';
   rows.forEach(function(r) {
     var pct = total > 0 ? Math.round((r.n / total) * 100) : 0;
+    var labelSafe = String(r.label).replace(/[<>&"]/g, function(m){
+      return { '<':'&lt;', '>':'&gt;', '&':'&amp;', '"':'&quot;' }[m];
+    });
     html += '<div class="cluster-tt-row">' +
       '<span class="cluster-tt-dot" style="background:' + r.c + '"></span>' +
-      '<span class="cluster-tt-label">' + r.label + '</span>' +
+      '<span class="cluster-tt-label">' + labelSafe + '</span>' +
       '<span class="cluster-tt-val">' + r.n.toLocaleString('pt-BR') + ' <span class="cluster-tt-pct">· ' + pct + '%</span></span>' +
       '</div>';
   });
   html += '</div>';
   el.innerHTML = html;
   return el;
+}
+
+// Tooltip para Solo/Duelo — 4 grupos sinônimos
+function _buildClusterTooltip(total, win, lose, neu, abs) {
+  if (!_pinColors) _refreshPinColors();
+  return _buildClusterTooltipRows(total, [
+    { label: 'Vence',        n: win,  c: _pinColors.win },
+    { label: 'Disputa',      n: neu,  c: _pinColors.neutral },
+    { label: 'Perde',        n: lose, c: _pinColors.lose },
+    { label: 'Sem presença', n: abs,  c: _pinColors.absent },
+  ]);
 }
 
 function _positionTooltipNearEl(tooltipEl, anchorEl) {
@@ -968,21 +1057,81 @@ function pinColor(row) {
 
 // Categoria numérica (1=win, 2=lose, 3=neutral, 4=absent, 0=outros)
 // Usada pelo clusterProperties para agregação eficiente no donut.
+//
+// Modo Solo:      diff vs média (±2pp) + share=0 → 4 categorias
+// Modo Duelo:     mapeia 8 estados competitivos em 4 grupos sinônimos:
+//                 Vence  = Dominância + Liderança + Exclusividade
+//                 Disputa = Disputa
+//                 Perde   = Atrás + Vulnerável
+//                 Ausência = Oportunidade aberta + Whitespace
+// Modo Categoria: retorna 0 (não usa schema 1-4; donut é montado via brand_idx)
 function pinCategory(row) {
   if (currentMapType === 'places_discovery') return 0;
-  // V360 Competitors: se há módulo customizado de cor, retorna 0 (não agregamos)
+  // V360 Competitors: mapeia conforme o modo
   try {
-    if (window.V360CompRender && typeof window.V360CompRender.pinColor === 'function') {
-      // Quando módulo de concorrentes está ativo, donut perde sentido — agregamos como neutral
-      return 3;
+    if (window.V360CompRender && typeof window.V360CompRender.getMode === 'function') {
+      var mode = window.V360CompRender.getMode();
+      if (mode === 'duelo' || mode === 'categoria') {
+        // Categoria usa brand_idx, não schema 1-4 → retorna 0
+        if (mode === 'categoria') return 0;
+        // Duelo: classifica e mapeia em 4 grupos
+        var cls = window.V360CompRender.classifyRow(row);
+        if (!cls) return 0;
+        var STATE = window.V360CompRender.STATE;
+        switch (cls.state) {
+          case STATE.DOMINANCE:
+          case STATE.LEADERSHIP:
+          case STATE.EXCLUSIVE:
+            return 1; // Vence
+          case STATE.DISPUTE:
+            return 3; // Disputa (mapeia para "neutral" cor amarela)
+          case STATE.BEHIND:
+          case STATE.VULNERABLE:
+            return 2; // Perde
+          case STATE.OPPORTUNITY:
+          case STATE.WHITESPACE:
+            return 4; // Ausência
+          default:
+            return 0;
+        }
+      }
     }
   } catch(_) {}
+  // Solo (sem competitors): faixa de diff vs média
   const diff = parseFloat(row.percentual_diff_media_dimensao || 0);
   if (diff > 2) return 1;   // win
   if (diff < -2) return 2;  // lose
   const share = parseFloat(row.share_reais_sku_dimensao || 0);
   if (share <= 0) return 4; // absent
   return 3;                  // neutral
+}
+
+// Índice da marca líder (modo Categoria). Retorna -1 se não aplicável.
+// Cacheado por sessão de render para evitar lookups repetidos no brandsList.
+var _categoryBrandIdxCache = null;
+function _refreshCategoryBrandIdxCache() {
+  _categoryBrandIdxCache = null;
+  try {
+    if (window.V360CompRender && window.V360CompRender.getMode() === 'categoria') {
+      var brands = window.V360CompRender.brandsList();
+      // Ordem: perspective primeiro, depois others (estável)
+      var ordered = [brands.perspective].concat(brands.others.filter(function(b){ return b && b !== brands.perspective; }));
+      _categoryBrandIdxCache = {
+        ordered: ordered,
+        colorMap: brands.colorMap || {},
+        idxByBrand: Object.fromEntries(ordered.map(function(b, i){ return [b, i]; })),
+      };
+    }
+  } catch(_) {}
+}
+function pinCategoryBrandIdx(row) {
+  if (!_categoryBrandIdxCache) return -1;
+  try {
+    var cls = window.V360CompRender.classifyRow(row);
+    if (!cls || !cls.leaderBrand) return -1;
+    var idx = _categoryBrandIdxCache.idxByBrand[cls.leaderBrand];
+    return (idx === undefined) ? -1 : idx;
+  } catch(_) { return -1; }
 }
 
 // ─── Render Markers (GeoJSON source update) ──────────────────────────────────
@@ -996,7 +1145,18 @@ function renderMarkers() {
     if (!map.getSource('pdvs')) {
       _setupMapSources();
       _setupMapInteractions();
+    } else {
+      // Detectar mudança de modo competitivo: se o agregador atual não bate
+      // com o modo presente, recriar source (clusterProperties é imutável após addSource).
+      var modeNow = _computeClusterAggMode();
+      if (modeNow !== _currentClusterAggMode) {
+        _setupMapSources();
+        // _setupMapInteractions já foi feito; só re-binda events de donut
+      }
     }
+
+    // Refresh do cache de índice de marca (modo Categoria) — feito uma vez por render
+    _refreshCategoryBrandIdxCache();
 
     const features = filteredData
       .filter(r => parseFloat(r.lat) && parseFloat(r.lon))
@@ -1007,7 +1167,14 @@ function renderMarkers() {
         return {
           type: 'Feature',
           geometry: { type: 'Point', coordinates: [parseFloat(r.lon), parseFloat(r.lat)] },
-          properties: { color: pinColor(r), cat: pinCategory(r), _mapId: r._mapId, _selected: isSel ? 1 : 0, _dim: isDim ? 1 : 0 },
+          properties: {
+            color: pinColor(r),
+            cat: pinCategory(r),
+            brand_idx: pinCategoryBrandIdx(r), // -1 quando não está em modo Categoria
+            _mapId: r._mapId,
+            _selected: isSel ? 1 : 0,
+            _dim: isDim ? 1 : 0,
+          },
         };
       });
 
