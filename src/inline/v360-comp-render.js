@@ -409,6 +409,9 @@
   }
 
   function renderDueloOverview(panel, data, baseBrand, otherBrand) {
+    // Defesa: se baseBrand vier vazio (ex: mapa antigo sem base_brand setado)
+    baseBrand = baseBrand || 'Marca base';
+    otherBrand = otherBrand || 'Concorrente';
     // Conta por estado
     const counts = {};
     for (const k of Object.values(STATE)) counts[k] = 0;
@@ -689,6 +692,7 @@
     }
     installRenderHook();
     renderCompOverview();
+    swapSidePanelLegend(true);
     rerenderMap();
   }
 
@@ -696,7 +700,48 @@
     _hookActive = false;
     _activeStateFilter = null;
     renderCompOverview(); // restaura mini-stats originais
+    swapSidePanelLegend(false);
     rerenderMap();
+  }
+
+  // Substitui a legenda original (Acima/Abaixo/Na média/Sem presença) por uma
+  // dinâmica de estados competitivos em modo Duelo/Categoria.
+  function swapSidePanelLegend(active) {
+    const orig = document.querySelector('.filter-group .color-legend');
+    if (!orig) return;
+    const origGroup = orig.closest('.filter-group');
+    if (!origGroup) return;
+
+    let compLegend = document.getElementById('v360-comp-side-legend');
+
+    if (!active) {
+      // Restaura original
+      orig.style.display = '';
+      if (compLegend) compLegend.style.display = 'none';
+      return;
+    }
+
+    // Esconde original
+    orig.style.display = 'none';
+
+    // Cria/atualiza legenda comparativa
+    if (!compLegend) {
+      compLegend = document.createElement('div');
+      compLegend.id = 'v360-comp-side-legend';
+      compLegend.className = 'color-legend';
+      orig.parentNode.appendChild(compLegend);
+    }
+    compLegend.style.display = '';
+
+    const mode = getMode();
+    const states = mode === 'duelo'
+      ? [STATE.DOMINANCE, STATE.LEADERSHIP, STATE.DISPUTE, STATE.BEHIND, STATE.VULNERABLE, STATE.OPPORTUNITY, STATE.EXCLUSIVE, STATE.WHITESPACE]
+      : [STATE.DOMINANCE, STATE.LEADERSHIP, STATE.DISPUTE, STATE.OPPORTUNITY, STATE.EXCLUSIVE, STATE.WHITESPACE];
+    compLegend.innerHTML = states.map(s => `
+      <div class="legend-item" title="${STATE_DESCRIPTIONS[s]}">
+        <div class="legend-dot" style="background:${STATE_COLORS[s]}"></div>${STATE_LABELS[s]}
+      </div>
+    `).join('');
   }
 
   // ─── Event wiring ───────────────────────────────────────────────────────
