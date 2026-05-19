@@ -466,31 +466,23 @@
 <div id="app" style="display:none;">
   <!-- Header -->
   <div id="header">
-    <!-- ZONA ESQUERDA: logo + nome do mapa + stats -->
+    <!-- ZONA ESQUERDA: brand minimal + nome do mapa inline editável -->
     <div class="h-zone h-zone-left">
-      <div class="logo">
-        <svg class="logo-mark" aria-label="HYPR Geocodify"><use href="#logo-geocodify"/></svg>
-        <span class="header-map-type" id="logo-map-type">Varejo 360</span>
+      <div class="brand">
+        <div class="brand-mark" aria-label="HYPR Geocodify">H</div>
+        <div class="brand-name">Geocodify<span class="brand-sub" id="brand-sub"> · Varejo 360</span></div>
       </div>
 
-      <!-- Nome do mapa salvo (preenchido via JS) -->
-      <div class="header-map-name-wrap" id="header-map-name-wrap" hidden>
-        <span class="header-map-name-sep">·</span>
-        <span class="header-map-name" id="header-map-name"></span>
-      </div>
-
-      <div class="divider"></div>
-      <div class="header-stats">
-        <div class="hstat">
-          <span class="hstat-val" id="h-pdvs">—</span>
-          <span class="hstat-label">PDVs ativos</span>
-        </div>
-        <!-- Fase 5: share médio da lente — visível só em V360 com mapa aberto -->
-        <div class="hstat" id="hstat-lens" style="display:none;">
-          <span class="hstat-val" id="h-lens-share">—</span>
-          <span class="hstat-label" id="h-lens-label">Share médio</span>
-        </div>
-      </div>
+      <!-- Nome do mapa salvo: contenteditable, sem breadcrumb -->
+      <div class="h-divider" id="map-title-divider" hidden></div>
+      <span
+        class="map-title"
+        id="header-map-name"
+        contenteditable="false"
+        spellcheck="false"
+        title="Clique para renomear o mapa"
+        hidden
+      ></span>
     </div>
 
     <!-- ZONA CENTRAL: perspective bar (só V360, renderizada via JS) -->
@@ -498,8 +490,20 @@
       <div class="perspective-bar" id="perspBar" style="display:none;"></div>
     </div>
 
-    <!-- ZONA DIREITA: ações -->
+    <!-- ZONA DIREITA: stats minimal + ações -->
     <div class="h-zone h-zone-right">
+
+    <!-- Stats compactas à direita (V360: PDVs + Share méd.) -->
+    <div class="h-stats" id="h-stats" style="display:none;">
+      <div class="h-stat">
+        <span class="v" id="h-pdvs">—</span>
+        <span class="l">PDVs</span>
+      </div>
+      <div class="h-stat" id="h-stat-share">
+        <span class="v" id="h-lens-share">—</span>
+        <span class="l" id="h-lens-label">Share méd.</span>
+      </div>
+    </div>
 
     <!-- Mapa/Lista — só para geocoder/reverse -->
     <div id="view-toggle-btns" class="hdr-group" style="display:none;">
@@ -514,22 +518,24 @@
     </div>
 
     <!-- Atualizar nomes (re-enrich) — ícone com badge de contagem -->
-    <button id="btn-reenrich-map" class="hdr-btn hdr-btn-icon" onclick="startReenrich()" title="Atualizar nomes dos PDVs não identificados" style="display:none;">
+    <button id="btn-reenrich-map" class="icon-btn" onclick="startReenrich()" title="Atualizar nomes dos PDVs não identificados" style="display:none;">
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 4v6h6"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg>
-      <span class="hdr-btn-badge" id="reenrich-badge">0</span>
+      <span class="icon-btn-badge" id="reenrich-badge">0</span>
     </button>
 
     <!-- Expandir mapa (ícone) -->
-    <button id="btn-fullmap" class="hdr-btn hdr-btn-icon" onclick="toggleFullMap()" title="Tela cheia (F)">
+    <button id="btn-fullmap" class="icon-btn" onclick="toggleFullMap()" title="Tela cheia (F)">
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/></svg>
     </button>
 
     <!-- Theme toggle (ícone) -->
-    <button onclick="toggleTheme()" class="hdr-btn hdr-btn-icon" title="Alternar tema claro/escuro"><span id="theme-toggle-icon" style="font-size:14px;line-height:1;">☀️</span></button>
+    <button onclick="toggleTheme()" class="icon-btn" title="Alternar tema claro/escuro">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" id="theme-toggle-icon"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></svg>
+    </button>
 
     <!-- Mais ações (kebab) -->
     <div class="hdr-more-wrap">
-      <button id="btn-more-actions" class="hdr-btn hdr-btn-icon" onclick="toggleMoreMenu(event)" title="Mais ações" aria-haspopup="true" aria-expanded="false">
+      <button id="btn-more-actions" class="icon-btn" onclick="toggleMoreMenu(event)" title="Mais ações" aria-haspopup="true" aria-expanded="false">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="5" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="12" cy="19" r="1"/></svg>
       </button>
       <div id="more-menu-dropdown" class="hdr-dropdown" style="display:none;" role="menu">
@@ -552,10 +558,9 @@
       </div>
     </div>
 
-    <!-- Voltar para galeria -->
-    <button onclick="showGallery()" class="hdr-btn" id="btn-back-gallery">
-      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg>
-      Mapas
+    <!-- Voltar para galeria — botão primary (quadradinho) com ícone de grid -->
+    <button onclick="showGallery()" class="icon-btn primary" id="btn-back-gallery" title="Voltar para mapas">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect width="7" height="7" x="3" y="3" rx="1.2"/><rect width="7" height="7" x="14" y="3" rx="1.2"/><rect width="7" height="7" x="14" y="14" rx="1.2"/><rect width="7" height="7" x="3" y="14" rx="1.2"/></svg>
     </button>
     </div><!-- /.h-zone-right -->
   </div>

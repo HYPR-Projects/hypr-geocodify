@@ -272,6 +272,149 @@ html.theme-switching, html.theme-switching *, html.theme-switching *::before, ht
 .h-zone-center { justify-content: center; }
 /* Quando perspBar está hidden (display:none), zona central some — grid recompõe */
 
+/* ─── Brand minimal (Fase 6 — protótipo) ──────────────────────────────────
+   Substitui o block-letter "HYPR" gigante por monograma 26x26 + texto leve.
+   ───────────────────────────────────────────────────────────────────────── */
+.brand {
+  display: flex; align-items: center; gap: 10px; flex-shrink: 0;
+}
+.brand-mark {
+  width: 26px; height: 26px;
+  border-radius: 7px;
+  background: linear-gradient(135deg, #FCFEFE 0%, #C5EAF6 100%);
+  color: #1C262F;
+  display: grid; place-items: center;
+  font-weight: 700;
+  font-size: 13px;
+  letter-spacing: -0.04em;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.6), 0 1px 2px rgba(0,0,0,0.3);
+  flex-shrink: 0;
+}
+.brand-name {
+  font-weight: 600;
+  font-size: 14px;
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+  color: var(--text);
+}
+.brand-sub {
+  color: var(--text-muted);
+  font-weight: 500;
+  margin-left: 2px;
+}
+
+.h-divider {
+  width: 1px;
+  height: 20px;
+  background: var(--border);
+  flex-shrink: 0;
+  margin: 0 4px;
+}
+.h-divider[hidden] { display: none; }
+
+.map-title {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text);
+  padding: 5px 10px;
+  border-radius: var(--radius-sm);
+  transition: background 0.15s, border-color 0.15s;
+  border: 1px solid transparent;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 240px;
+  outline: none;
+  cursor: text;
+}
+.map-title:hover { background: var(--surface2); border-color: var(--border); }
+.map-title:focus { background: var(--surface2); border-color: var(--accent); }
+.map-title[hidden] { display: none; }
+
+/* ─── h-stats: stats minimal à direita do header ──────────────────────────
+   PDVs + Share méd. em pequeno; aparece em V360 só com mapa aberto.
+   Estilo: número grande + label muted, lado a lado.
+   ───────────────────────────────────────────────────────────────────────── */
+.h-stats {
+  display: inline-flex;
+  align-items: center;
+  gap: 14px;
+  padding: 0 6px 0 4px;
+  margin-right: 4px;
+  border-right: 1px solid var(--border);
+  height: 20px;
+}
+.h-stat {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-start;
+  line-height: 1;
+  gap: 2px;
+}
+.h-stat .v {
+  font-family: var(--mono);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
+}
+.h-stat .l {
+  font-size: 9px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-weight: 600;
+}
+
+/* ─── icon-btn: botões de ícone do header (protótipo) ─────────────────────
+   28x28 com hover sutil, sem peso visual excessivo. Coerente com .hdr-btn
+   legado, mas mais discreto.
+   ───────────────────────────────────────────────────────────────────────── */
+.h-zone-right .icon-btn {
+  width: 28px; height: 28px;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  color: var(--text-dim);
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+  padding: 0;
+  position: relative;
+  font-family: inherit;
+}
+.h-zone-right .icon-btn:hover {
+  background: var(--surface2);
+  border-color: var(--border);
+  color: var(--text);
+}
+.h-zone-right .icon-btn.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+.h-zone-right .icon-btn.primary:hover {
+  background: var(--accent-hi, var(--accent));
+  border-color: var(--accent-hi, var(--accent));
+}
+.h-zone-right .icon-btn-badge {
+  position: absolute;
+  top: -3px; right: -3px;
+  min-width: 14px; height: 14px;
+  padding: 0 3px;
+  background: var(--accent);
+  color: #fff;
+  border-radius: 7px;
+  font-size: 9px;
+  font-weight: 700;
+  font-family: var(--mono);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+}
+
 #header .logo {
   display: flex; align-items: center; gap: 10px;
   flex-shrink: 0;
