@@ -258,7 +258,9 @@ html.theme-switching, html.theme-switching *, html.theme-switching *::before, ht
   padding: 0 14px 0 16px;
   gap: var(--sp-3);
   z-index: 100;
-  overflow: hidden; /* hard clip — nada estoura */
+  /* Fase 6 fix: overflow VISIBLE pra não clipar dropdown "Mais ações".
+     O clip do perspBar (que estava aqui antes) foi movido pra .h-zone-center. */
+  overflow: visible;
 }
 
 /* Zonas do header (grid children) */
@@ -269,7 +271,15 @@ html.theme-switching, html.theme-switching *, html.theme-switching *::before, ht
   min-width: 0; /* permite grid children encolherem */
 }
 .h-zone-right { justify-content: flex-end; }
-.h-zone-center { justify-content: center; }
+.h-zone-center {
+  justify-content: center;
+  /* Fix Fase 6: clip do perspBar agora vive aqui, não no #header inteiro */
+  overflow: hidden;
+}
+.h-zone-left {
+  /* permite que map-title encolha mas mantém brand visível */
+  overflow: hidden;
+}
 /* Quando perspBar está hidden (display:none), zona central some — grid recompõe */
 
 /* ─── Brand minimal (Fase 6 — protótipo) ──────────────────────────────────
@@ -414,6 +424,15 @@ html.theme-switching, html.theme-switching *, html.theme-switching *::before, ht
   justify-content: center;
   line-height: 1;
 }
+
+/* ─── Theme toggle SVG (Fase 6 fix) ───────────────────────────────────────
+   Alterna entre lua (tema dark) e sol (tema light) sem touch no DOM —
+   só toggle via CSS [data-theme]. Evita o bug de textContent apagar SVG.
+   ───────────────────────────────────────────────────────────────────────── */
+.theme-toggle-svg .icon-sun { display: none; }
+.theme-toggle-svg .icon-moon { display: inline; }
+[data-theme="light"] .theme-toggle-svg .icon-sun { display: inline; }
+[data-theme="light"] .theme-toggle-svg .icon-moon { display: none; }
 
 #header .logo {
   display: flex; align-items: center; gap: 10px;

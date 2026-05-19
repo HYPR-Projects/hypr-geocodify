@@ -39,9 +39,10 @@ function toggleTheme() {
   html.setAttribute('data-theme', next);
   localStorage.setItem('geocodify-theme', next);
   setTimeout(function(){ html.classList.remove('theme-switching'); }, 300);
-  // Update toggle icon
-  var icon = document.getElementById('theme-toggle-icon');
-  if (icon) icon.textContent = next === 'dark' ? '☀️' : '🌙';
+  // Fase 6 fix: SVG do header (#theme-toggle-btn) é controlado por CSS
+  // [data-theme] — não tocar no DOM dele. Apenas o span da gallery usa emoji.
+  var galleryIcon = document.getElementById('theme-toggle-icon-gallery');
+  if (galleryIcon) galleryIcon.textContent = next === 'dark' ? '☀️' : '🌙';
   // Rebuild map style if map is loaded
   if (typeof _onThemeChange === 'function') _onThemeChange(next);
   // Re-render charts with new colors
