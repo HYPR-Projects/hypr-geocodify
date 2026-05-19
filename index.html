@@ -71,9 +71,11 @@
 (function(){
   var t = localStorage.getItem('geocodify-theme') || 'dark';
   document.documentElement.setAttribute('data-theme', t);
+  // Fase 6 fix: o SVG do header (#theme-toggle-btn) é controlado por CSS
+  // [data-theme]; só atualizamos o span da gallery (emoji nativo).
   document.addEventListener('DOMContentLoaded', function() {
-    var icons = document.querySelectorAll('#theme-toggle-icon, #theme-toggle-icon-gallery');
-    icons.forEach(function(el) { el.textContent = t === 'dark' ? '☀️' : '🌙'; });
+    var galleryIcon = document.getElementById('theme-toggle-icon-gallery');
+    if (galleryIcon) galleryIcon.textContent = t === 'dark' ? '☀️' : '🌙';
   });
 })();
 </script>
@@ -528,9 +530,20 @@
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/></svg>
     </button>
 
-    <!-- Theme toggle (ícone) -->
-    <button onclick="toggleTheme()" class="icon-btn" title="Alternar tema claro/escuro">
-      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" id="theme-toggle-icon"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></svg>
+    <!-- Theme toggle (ícone) — Fase 6 fix: SVG com 2 paths controlados por CSS [data-theme] -->
+    <button onclick="toggleTheme()" class="icon-btn" title="Alternar tema claro/escuro" id="theme-toggle-btn">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="theme-toggle-svg">
+        <!-- Lua (visível em tema dark — sugere clicar pra trocar pra light) -->
+        <path class="icon-moon" d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/>
+        <!-- Sol (visível em tema light) -->
+        <g class="icon-sun">
+          <circle cx="12" cy="12" r="4"/>
+          <path d="M12 2v2"/><path d="M12 20v2"/>
+          <path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/>
+          <path d="M2 12h2"/><path d="M20 12h2"/>
+          <path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/>
+        </g>
+      </svg>
     </button>
 
     <!-- Mais ações (kebab) -->
