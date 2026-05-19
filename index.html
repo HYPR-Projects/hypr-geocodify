@@ -466,25 +466,40 @@
 <div id="app" style="display:none;">
   <!-- Header -->
   <div id="header">
-    <div class="logo">
-      <svg class="logo-mark" aria-label="HYPR Geocodify"><use href="#logo-geocodify"/></svg>
-      <span class="header-map-type" id="logo-map-type">Varejo 360</span>
-    </div>
+    <!-- ZONA ESQUERDA: logo + nome do mapa + stats -->
+    <div class="h-zone h-zone-left">
+      <div class="logo">
+        <svg class="logo-mark" aria-label="HYPR Geocodify"><use href="#logo-geocodify"/></svg>
+        <span class="header-map-type" id="logo-map-type">Varejo 360</span>
+      </div>
 
-    <!-- Nome do mapa salvo (preenchido via JS) -->
-    <div class="header-map-name-wrap" id="header-map-name-wrap" hidden>
-      <span class="header-map-name-sep">·</span>
-      <span class="header-map-name" id="header-map-name"></span>
-    </div>
+      <!-- Nome do mapa salvo (preenchido via JS) -->
+      <div class="header-map-name-wrap" id="header-map-name-wrap" hidden>
+        <span class="header-map-name-sep">·</span>
+        <span class="header-map-name" id="header-map-name"></span>
+      </div>
 
-    <div class="divider"></div>
-    <div class="header-stats">
-      <div class="hstat">
-        <span class="hstat-val" id="h-pdvs">—</span>
-        <span class="hstat-label">PDVs ativos</span>
+      <div class="divider"></div>
+      <div class="header-stats">
+        <div class="hstat">
+          <span class="hstat-val" id="h-pdvs">—</span>
+          <span class="hstat-label">PDVs ativos</span>
+        </div>
+        <!-- Fase 5: share médio da lente — visível só em V360 com mapa aberto -->
+        <div class="hstat" id="hstat-lens" style="display:none;">
+          <span class="hstat-val" id="h-lens-share">—</span>
+          <span class="hstat-label" id="h-lens-label">Share médio</span>
+        </div>
       </div>
     </div>
-    <div class="spacer"></div>
+
+    <!-- ZONA CENTRAL: perspective bar (só V360, renderizada via JS) -->
+    <div class="h-zone h-zone-center">
+      <div class="perspective-bar" id="perspBar" style="display:none;"></div>
+    </div>
+
+    <!-- ZONA DIREITA: ações -->
+    <div class="h-zone h-zone-right">
 
     <!-- Mapa/Lista — só para geocoder/reverse -->
     <div id="view-toggle-btns" class="hdr-group" style="display:none;">
@@ -542,6 +557,7 @@
       <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg>
       Mapas
     </button>
+    </div><!-- /.h-zone-right -->
   </div>
 
   <!-- Main -->
@@ -822,6 +838,12 @@
           <span class="map-pill-text">Share médio:</span>
           <span class="map-pill-val" id="overlay-share">0%</span>
         </div>
+        <!-- Fase 5: lens wins — só visível em modo Duelo/Categoria -->
+        <div class="map-pill" id="overlay-lens-wins" style="display:none;">
+          <div class="map-pill-dot" id="overlay-lens-wins-dot" style="background:var(--win)"></div>
+          <span class="map-pill-text" id="overlay-lens-wins-text">Lente vence:</span>
+          <span class="map-pill-val" id="overlay-lens-wins-val">0 (0%)</span>
+        </div>
       </div>
     </div>
 
@@ -838,7 +860,20 @@
 
         <!-- OVERVIEW TAB -->
         <div class="panel-tab-content active" id="tc-overview">
-          <div class="overview-mini-stats">
+          <!-- HERO (Fase 3): card principal do Overview, ativo no V360.
+               renderizado via src/inline/v360-hero.js — varia por # de marcas. -->
+          <div class="panel-section panel-section--hero" id="hero-section" style="display:none;">
+            <div class="hero" id="hero"></div>
+          </div>
+
+          <!-- H2H CARD (Fase 3): "Comparativo entre marcas" — visível só com 2+ marcas.
+               2 marcas = bars side-by-side; 3+ marcas = matriz NxN. -->
+          <div class="panel-section" id="h2hCard" style="display:none;">
+            <div class="panel-section-title" id="h2hTitle">Comparativo entre marcas</div>
+            <div id="h2hContent"></div>
+          </div>
+
+          <div class="overview-mini-stats" id="overview-mini-stats">
             <div class="overview-mini-stat clickable" data-perf="acima" title="Filtrar PDVs ganhando share">
               <div class="overview-mini-stat-val overview-mini-stat-val--win" id="ov-win">—</div>
               <div class="overview-mini-stat-label">Ganhando</div>
@@ -861,7 +896,7 @@
             </div>
           </div>
 
-          <div class="panel-section">
+          <div class="panel-section" id="ov-share-section">
             <div class="panel-section-title">Share Geral</div>
             <div class="share-overview">
               <div class="share-overview-main">
@@ -889,7 +924,7 @@
             </div>
           </div>
 
-          <div class="panel-section">
+          <div class="panel-section" id="ov-dist-section">
             <div class="panel-section-title">Distribuição de Share</div>
             <div class="chart-active-chip" id="chip-share-bucket" style="display:none;"></div>
             <div class="chart-wrap" style="height:120px">

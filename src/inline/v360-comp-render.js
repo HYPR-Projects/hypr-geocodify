@@ -27,14 +27,17 @@
   };
 
   const STATE_COLORS = {
-    dominance:   '#15803d',
-    leadership:  '#22c55e',
-    dispute:     '#eab308',
-    behind:      '#f97316',
-    vulnerable:  '#dc2626',
-    opportunity: '#3b82f6',
-    exclusive:   '#a855f7',
-    whitespace:  '#94a3b8',
+    // Paleta HYPR semântica (Fase 5).
+    // Hex direto porque MapLibre paint properties não resolvem CSS vars.
+    // Mapeia 1:1 com tokens em src/styles/app.css :root.
+    dominance:   '#018376', // --win (verde HYPR escuro)
+    leadership:  '#4CB050', // --win-hi (verde HYPR brilhante, distingue de dominância)
+    dispute:     '#EDD900', // --neutral (amarelo HYPR)
+    behind:      '#FF5528', // --lose-hi (laranja-vermelho HYPR, distingue de vulnerável)
+    vulnerable:  '#F5272B', // --lose (vermelho HYPR puro)
+    opportunity: '#3397B9', // --accent (teal HYPR)
+    exclusive:   '#5F25FF', // --purple (índigo HYPR)
+    whitespace:  '#78909C', // --absent (cinza HYPR)
   };
 
   const STATE_LABELS = {
@@ -300,7 +303,8 @@
     return null;
   }
 
-  // ─── Hook: popup extension (mini-barras de todas as marcas) ─────────────
+  // ─── Hook: popup extension (Fase 4 — bloco completo com state badge,
+  //     share por marca, gap em pp e share-of-shelf da lente) ────────────
   function buildPopupExtension(row) {
     if (!_hookActive) return '';
     const mode = getMode();
@@ -310,57 +314,129 @@
     const colorMap = brands.colorMap;
     const baseBrand = getBaseBrand();
     const persp = brands.perspective;
+    const others = (brands.others || []).filter(b => b && b !== persp);
+    const allBrands = [persp].concat(others); // ordem visual: lente primeiro
 
-    // Coleta share de todas as marcas
-    const data = [];
-    for (const b of brands.all) {
+    // Coleta share de cada marca (ordem: lente, depois concorrentes)
+    const floor = getTicketsFloor();
+    const rows = [];
+    for (const b of allBrands) {
       const bd = getShareForBrand(row, b);
-      data.push({
+      rows.push({
         brand: b,
         share: bd?.share != null ? bd.share : null,
         tickets: bd?.tickets || 0,
         isBase: b === baseBrand,
-        isPerspective: b === persp,
-        color: colorMap[b] || '#6b7280',
+        isLens: b === persp,
+        lowConf: bd?.tickets != null && bd.tickets > 0 && bd.tickets < floor,
+        color: colorMap[b] || '#94a3b8',
       });
     }
-    data.sort((a,b) => (b.share || 0) - (a.share || 0));
 
-    const maxShare = Math.max(...data.map(d => d.share || 0), 0.01);
+    const maxShare = Math.max.apply(null, rows.map(r => r.share || 0).concat(0.01));
 
-    // Classificação atual (chip de estado)
-    const cls = classifyRow(row, mode, persp, brands.others, getTicketsFloor());
-    const stateLabel = cls ? STATE_LABELS[cls.state] : '';
-    const stateColor = cls ? STATE_COLORS[cls.state] : '#94a3b8';
+    // Gap da lente vs média dos concorrentes (em pp). Se não há concorrentes,
+    // gap é vs zero — usamos só share absoluto da lente.
+    const lensShare = (rows.find(r => r.isLens)?.share) || 0;
+    const concShares = rows.filter(r => !r.isLens).map(r => r.share || 0);
+    const avgConc = concShares.length ? concShares.reduce((s, v) => s + v, 0) / concShares.length : 0;
+    const gap = lensShare - avgConc;
+    const gapPP = gap * 100;
 
-    let rowsHtml = '';
-    for (const d of data) {
-      const lowConf = d.tickets > 0 && d.tickets < getTicketsFloor();
-      const sharePct = d.share != null ? d.share * 100 : null;
-      const wPct = sharePct != null ? Math.min(sharePct / (maxShare * 100) * 100, 100) : 0;
-      const valLabel = sharePct == null ? '—' : sharePct.toFixed(1) + '%';
-      rowsHtml += `
-        <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;font-size:11px;">
-          <span style="width:7px;height:7px;border-radius:50%;background:${d.color};flex-shrink:0;"></span>
-          <span style="flex:0 0 70px;${d.isPerspective ? 'font-weight:700;' : 'font-weight:500;'}color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${d.brand}${d.isBase ? ' <span style="font-size:9px;opacity:0.55;">·base</span>' : ''}</span>
-          <div style="flex:1;height:6px;background:rgba(0,0,0,0.06);border-radius:3px;overflow:hidden;">
-            <div style="width:${wPct}%;height:100%;background:${d.color};border-radius:3px;"></div>
-          </div>
-          <span style="flex:0 0 48px;text-align:right;font-variant-numeric:tabular-nums;color:var(--text);">${valLabel}</span>
-          ${lowConf ? `<span title="Amostra baixa (${d.tickets} tickets)" style="font-size:9px;color:#f59e0b;">⚠</span>` : ''}
-        </div>
-      `;
+    // Share-of-shelf da lente dentro do mix selecionado:
+    //   shareOfShelf = lensShare / sum(allShares)
+    const sumShares = rows.reduce((s, r) => s + (r.share || 0), 0);
+    const sos = sumShares > 0 ? (lensShare / sumShares) * 100 : 0;
+
+    // Classificação atual (estado competitivo)
+    const cls = classifyRow(row, mode, persp, brands.others, floor);
+    const stateKey = cls ? cls.state : null;
+    const stateLabel = stateKey ? STATE_LABELS[stateKey] : '';
+    // Mapear state key → class name no CSS (sem acentos, lowercase)
+    const stateCssClass = stateKey || '';
+
+    // Meta da state row
+    const concCount = concShares.length;
+    let metaText = '';
+    if (concCount > 0) {
+      const refBrand = concCount === 1 ? others[0] : 'média';
+      const sign = gapPP > 0 ? '+' : '';
+      metaText = `${sign}${gapPP.toFixed(1)}pp vs. ${refBrand}`;
     }
 
-    return `
-      <div style="margin-top:12px;padding-top:10px;border-top:1px solid var(--border,#e5e7eb);">
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
-          <div style="font-size:10px;text-transform:uppercase;letter-spacing:0.06em;color:var(--text-muted);font-weight:600;">Comparativo · ${brands.all.length} marcas</div>
-          ${stateLabel ? `<span style="display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:10px;background:${stateColor}22;color:${stateColor};font-size:10px;font-weight:600;">${stateLabel}</span>` : ''}
+    // Brand rows do bloco
+    const brandRowsHtml = rows.map(r => {
+      const sharePct = r.share != null ? r.share * 100 : null;
+      const wPct = sharePct != null ? Math.min(sharePct / (maxShare * 100) * 100, 100) : 0;
+      const valLabel = sharePct == null ? '—' : sharePct.toFixed(1) + '%';
+      const nameClass = r.isLens ? 'name lens' : 'name';
+      const lowConfBadge = r.lowConf
+        ? `<span class="lowconf" title="Amostra baixa (${r.tickets} tickets)">⚠</span>`
+        : '';
+      return `
+        <div class="popup-brand-row" style="color:${r.color}">
+          <span class="pdot"></span>
+          <span class="${nameClass}">${_esc(r.brand)}${r.isBase ? '<span class="base-tag">base</span>' : ''}</span>
+          <div class="bar-wrap"><div class="bar-fill" style="width:${wPct}%"></div></div>
+          <span class="val">${valLabel}${lowConfBadge}</span>
         </div>
-        <div>${rowsHtml}</div>
+      `;
+    }).join('');
+
+    // Metric cards (gap + share-of-shelf)
+    const gapClass = gapPP > 0.05 ? 'pos' : gapPP < -0.05 ? 'neg' : '';
+    const gapVal = concCount > 0
+      ? `${gapPP > 0 ? '+' : ''}${gapPP.toFixed(1)}pp`
+      : `${(lensShare * 100).toFixed(1)}%`;
+    const gapLabel = concCount > 0 ? 'Gap vs. concorrentes' : 'Share absoluto';
+    const sosLabel = concCount > 0
+      ? `${_esc(persp)} no mix de ${rows.length} marcas`
+      : `${_esc(persp)} no mix`;
+
+    // Tickets na amostra — pega da lente (Fase 4: métrica permanente, destacada)
+    const lensRow = rows.find(r => r.isLens);
+    const lensTickets = lensRow?.tickets || 0;
+    const ticketsLowConf = lensRow?.lowConf;
+    const ticketsHtml = `
+      <div class="popup-ext-tickets ${ticketsLowConf ? 'lowconf' : ''}">
+        <span class="v">${lensTickets.toLocaleString('pt-BR')}</span>
+        <span class="l">Tickets na amostra${ticketsLowConf ? ` <span class="warn" title="Abaixo do piso de ${floor} tickets">⚠ baixa</span>` : ''}</span>
       </div>
     `;
+
+    return `
+      <div class="v360-popup-ext">
+        <div class="popup-state-row">
+          ${stateLabel ? `<span class="state-badge ${stateCssClass}">${_esc(stateLabel)}</span>` : ''}
+          ${metaText ? `<span class="meta">${metaText}</span>` : ''}
+        </div>
+        <div class="popup-brands">
+          <div class="popup-brands-head">
+            <span>Share por marca (R$)</span>
+            <span class="hint">${rows.length} marca${rows.length !== 1 ? 's' : ''}</span>
+          </div>
+          ${brandRowsHtml}
+        </div>
+        <div class="popup-ext-metrics">
+          <div class="popup-ext-metric">
+            <div class="v ${gapClass}">${gapVal}</div>
+            <div class="l">${gapLabel}</div>
+          </div>
+          <div class="popup-ext-metric">
+            <div class="v">${sos.toFixed(0)}%</div>
+            <div class="l">${sosLabel}</div>
+          </div>
+        </div>
+        ${ticketsHtml}
+      </div>
+    `;
+  }
+
+  // Escape HTML básico
+  function _esc(s) {
+    return String(s == null ? '' : s)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
   }
 
   // ─── Painel comparativo: substitui mini-stats da Overview quando há comp ─
@@ -822,6 +898,10 @@
     },
     // Lista de marcas + colorMap (consumido pelos donut clusters em modo Categoria)
     brandsList,
+    // Lê share/tickets/diffMedia de uma marca específica num row de allData (Fase 3 - hero)
+    getShareForBrand,
+    // Floor de tickets atual (Fase 3 - hero usa pra filtrar shares válidos)
+    getTicketsFloor,
     STATE,
     STATE_COLORS,
     STATE_LABELS,

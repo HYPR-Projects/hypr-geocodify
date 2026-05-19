@@ -1298,18 +1298,20 @@ function buildPopup(row) {
 
   // Varejo 360: full popup with metrics
   // V360 Competitors PR2: enriquece popup com mini-barras das marcas concorrentes
+  // Fase 4: quando há extension (modo Duelo/Categoria), marca popup-inner com
+  // .has-v360-ext pra esconder métricas legadas redundantes via CSS.
   try {
     if (window.V360CompRender && typeof window.V360CompRender.buildPopupExtension === 'function') {
       const ext = window.V360CompRender.buildPopupExtension(row);
       if (ext) {
-        return _v360BuildPopupOriginal(row, ext);
+        return _v360BuildPopupOriginal(row, ext, /*hasExt=*/true);
       }
     }
   } catch(_) {}
-  return _v360BuildPopupOriginal(row, '');
+  return _v360BuildPopupOriginal(row, '', /*hasExt=*/false);
 }
 
-function _v360BuildPopupOriginal(row, compExtension) {
+function _v360BuildPopupOriginal(row, compExtension, hasExt) {
   const diff = parseFloat(row.percentual_diff_media_dimensao || 0);
   const diffClass = diff > 2 ? 'positive' : diff < -2 ? 'negative' : '';
   const diffLabel = diff > 0 ? `+${diff.toFixed(1)}%` : `${diff.toFixed(1)}%`;
@@ -1323,14 +1325,14 @@ function _v360BuildPopupOriginal(row, compExtension) {
   const v360CnpjDisplay = row.cnpj_completo || (row.cnpj || '').split(' - ')[0];
   const addrDisplay = (row.cnpj || '').split(' - ').slice(1).join(' - ');
 
-  return `<div class="popup-inner">
+  return `<div class="popup-inner${hasExt ? ' has-v360-ext' : ''}">
     <div class="popup-header">
       <div class="popup-bandeira">${row.bandeira || 'Bandeira desconhecida'}</div>
       ${row.razao_social && row.razao_social !== row.bandeira ? `<div class="popup-fantasia">${row.razao_social}</div>` : ''}
       <div class="popup-address">${row.geo_address || addrDisplay}</div>
       <div class="popup-cnpj">CNPJ ${v360CnpjDisplay}${row.situacao && row.situacao !== 'ATIVA' ? ` · <span style="color:var(--lose)">${row.situacao}</span>` : ''}${row.atividade ? `<div style="font-size:9px;color:var(--text-muted);margin-top:2px">${row.atividade.slice(0,60)}${row.atividade.length>60?'…':''}</div>` : ''}</div>
     </div>
-    <div class="popup-metrics">
+    <div class="popup-metrics popup-metrics--legacy">
       <div class="popup-metric">
         <div class="popup-metric-val ${diffClass}">${diffLabel}</div>
         <div class="popup-metric-label">Diff vs. média dimensão</div>
@@ -1348,8 +1350,8 @@ function _v360BuildPopupOriginal(row, compExtension) {
         <div class="popup-metric-label">% marca/dimensão</div>
       </div>
     </div>
-    <div class="popup-section-title">Share da marca neste PDV</div>
-    <div class="popup-share-bars">
+    <div class="popup-section-title popup-section-title--legacy-share">Share da marca neste PDV</div>
+    <div class="popup-share-bars popup-share-bars--legacy">
       <div class="share-bar-row">
         <span class="share-bar-label">Reais</span>
         <div class="share-bar-track"><div class="share-bar-fill ${shareReis >= 10 ? 'win' : shareReis < 5 ? 'lose' : ''}" style="width:${Math.min(shareReis / maxShare * 100, 100)}%"></div></div>
@@ -1366,7 +1368,7 @@ function _v360BuildPopupOriginal(row, compExtension) {
         <span class="share-bar-val">${shareUn.toFixed(1)}%</span>
       </div>
     </div>
-    <div class="popup-tickets">
+    <div class="popup-tickets popup-tickets--legacy">
       <span class="popup-tickets-label">Tickets na amostra</span>
       <span class="popup-tickets-val">${parseInt(row.tickets_amostra || 0).toLocaleString('pt-BR')}</span>
     </div>
@@ -3069,21 +3071,21 @@ async function reverseGeocodeHERE(lat, lon) {
 
 // ─── Resize e Colapso dos Painéis ────────────────────────────────────────────
 function initResizablePanels() {
-  // Restaurar larguras salvas
+  // Restaurar larguras salvas em CSS vars (handles e map chrome reagem juntos)
   try {
     const sw = localStorage.getItem('hypr_sidebar_w');
     const pw = localStorage.getItem('hypr_panel_w');
-    if (sw) document.getElementById('sidebar').style.width = sw;
-    if (pw) document.getElementById('right-panel').style.width = pw;
+    if (sw) document.documentElement.style.setProperty('--sidebar-w', sw);
+    if (pw) document.documentElement.style.setProperty('--right-w', pw);
   } catch(e) {}
 
   // Resize sidebar (handle esquerdo)
-  setupResizer('sidebar-resizer', 'sidebar', 'right', 160, 420, 'hypr_sidebar_w');
+  setupResizer('sidebar-resizer', 'sidebar', '--sidebar-w', 'right', 240, 480, 'hypr_sidebar_w');
   // Resize painel direito (handle direito)
-  setupResizer('panel-resizer', 'right-panel', 'left', 200, 520, 'hypr_panel_w');
+  setupResizer('panel-resizer', 'right-panel', '--right-w', 'left', 240, 520, 'hypr_panel_w');
 }
 
-function setupResizer(handleId, panelId, direction, minW, maxW, storageKey) {
+function setupResizer(handleId, panelId, cssVar, direction, minW, maxW, storageKey) {
   const handle = document.getElementById(handleId);
   const panel  = document.getElementById(panelId);
   if (!handle || !panel) return;
@@ -3100,6 +3102,9 @@ function setupResizer(handleId, panelId, direction, minW, maxW, storageKey) {
     const onMove = e => {
       const delta = direction === 'right' ? e.clientX - startX : startX - e.clientX;
       const newW = Math.min(maxW, Math.max(minW, startW + delta));
+      // Update CSS var so handle position, map chrome anchors, and panel width
+      // all stay in sync. We also keep inline width as a fallback override.
+      document.documentElement.style.setProperty(cssVar, newW + 'px');
       panel.style.width = newW + 'px';
       if (map) map.resize();
     };
@@ -3126,6 +3131,7 @@ function setupResizer(handleId, panelId, direction, minW, maxW, storageKey) {
     const onMove = e => {
       const delta = direction === 'right' ? e.touches[0].clientX - startX : startX - e.touches[0].clientX;
       const newW = Math.min(maxW, Math.max(minW, startW + delta));
+      document.documentElement.style.setProperty(cssVar, newW + 'px');
       panel.style.width = newW + 'px';
     };
     const onEnd = () => {
