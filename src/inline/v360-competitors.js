@@ -725,6 +725,15 @@
       return;
     }
     if (state.loadedForMapId === mapId) {
+      // Mesmo mapa já carregado, mas refetcha meta pra pegar base_brand
+      // que pode ter sido persistido por upload/auto-detect anterior.
+      try {
+        const meta = await window.sbFetch('saved_maps?id=eq.' + mapId + '&select=base_brand,tickets_floor');
+        if (Array.isArray(meta) && meta[0]) {
+          if (meta[0].base_brand) window._currentMapBaseBrand = meta[0].base_brand;
+          state.ticketsFloor = meta[0].tickets_floor || state.ticketsFloor;
+        }
+      } catch(_) {}
       renderHeaderUI();
       try { window.dispatchEvent(new CustomEvent('v360:competitors-loaded', { detail: { count: state.competitors.length } })); } catch(_) {}
       return;
@@ -861,6 +870,8 @@
     state.loadedForMapId = null;
     state.ticketsFloor = 5;
     _fallbackIdx = 0;
+    // Limpa também o base_brand global pra não vazar entre mapas
+    window._currentMapBaseBrand = null;
     // limpa UI
     const ids = ['btn-add-competitor','v360-perspective-wrap','v360-comp-chips'];
     for (const id of ids) {
