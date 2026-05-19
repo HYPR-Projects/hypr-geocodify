@@ -781,6 +781,12 @@
       const c = state.competitors.find(x => x.brand_name === brandName);
       return c ? c.pdvs.get(cnpj14) : null;
     },
+    setTicketsFloor: (v) => {
+      state.ticketsFloor = parseInt(v, 10) || 5;
+    },
+    setPerspective: (brand) => {
+      state.perspectiveBrand = brand;
+    },
   };
 
   // ─── Auto-hook em entry points ──────────────────────────────────────────
