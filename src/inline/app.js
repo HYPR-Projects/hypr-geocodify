@@ -2703,13 +2703,16 @@ function applyMapMode(type) {
   if (map && map.getSource('pdvs') && !isPlaces) {
     // Don't clear if loading saved map data (allData may be populated by openSavedMap)
   }
-  // Tipo do mapa (texto sutil ao lado do logo)
+  // Tipo do mapa (texto sutil ao lado do brand)
   const labels = { geocoder:'Lat/Lon Generator', reverse_geocoder:'Address Generator', varejo360:'Varejo 360', places_discovery:'Places Discovery' };
-  const sub = document.getElementById('logo-map-type');
-  if (sub) sub.textContent = labels[currentMapType] || 'Geocodify';
+  const sub = document.getElementById('brand-sub');
+  if (sub) sub.textContent = ' · ' + (labels[currentMapType] || 'Geocodify');
   // View toggle buttons
   const vt = document.getElementById('view-toggle-btns');
   if (vt) vt.style.display = (isGeo || isPlaces) ? 'flex' : 'none';
+  // Fase 6: h-stats minimal (PDVs + Share méd.) só em V360
+  const hStats = document.getElementById('h-stats');
+  if (hStats) hStats.style.display = (currentMapType === 'varejo360') ? 'inline-flex' : 'none';
 }
 
 // ─── Modal de seleção de tipo ─────────────────────────────────────────────────
@@ -4919,8 +4922,8 @@ function showGallery() {
   if (_ppGal) _ppGal.style.display = 'none';
   var _badgeGal = document.getElementById('places-map-badge');
   if (_badgeGal) _badgeGal.style.display = 'none';
-  const _lsGal = document.getElementById('logo-map-type');
-  if (_lsGal) _lsGal.textContent = 'Geocodify';
+  const _lsGal = document.getElementById('brand-sub');
+  if (_lsGal) _lsGal.textContent = ' · Geocodify';
   try { setHeaderMapName(''); } catch(e) {}
   try { closeMoreMenu(); } catch(e) {}
   // V360 Competitors PR1: reseta estado ao voltar pra galeria
@@ -6211,83 +6214,83 @@ async function initSharedMode() {
 window._currentOpenMapId = null;
 
 // ─── Header helpers: nome do mapa e menu de ações ─────────────────────────
+// Fase 6: .map-title é contenteditable native — divider e título mostram juntos.
 function setHeaderMapName(name) {
-  var wrap = document.getElementById('header-map-name-wrap');
   var el = document.getElementById('header-map-name');
-  if (!wrap || !el) return;
+  var divider = document.getElementById('map-title-divider');
+  if (!el) return;
   if (name && String(name).trim()) {
     el.textContent = name;
-    el.setAttribute('title', _isSharedMode ? name : 'Clique para renomear');
-    // Sinaliza editabilidade conforme o modo
-    if (_isSharedMode) {
-      el.classList.remove('editable');
-    } else {
-      el.classList.add('editable');
-    }
-    wrap.removeAttribute('hidden');
+    el.setAttribute('title', _isSharedMode ? name : 'Clique para renomear o mapa');
+    // contenteditable só quando não é share mode
+    el.setAttribute('contenteditable', _isSharedMode ? 'false' : 'true');
+    el.removeAttribute('hidden');
+    if (divider) divider.removeAttribute('hidden');
   } else {
     el.textContent = '';
     el.removeAttribute('title');
-    el.classList.remove('editable');
-    wrap.setAttribute('hidden', '');
+    el.setAttribute('contenteditable', 'false');
+    el.setAttribute('hidden', '');
+    if (divider) divider.setAttribute('hidden', '');
   }
 }
 
 // ── Edição inline do nome do mapa ────────────────────────────────────────────
-// Clique no nome substitui o <span> por um <input>; Enter ou blur salva, Escape cancela.
+// Fase 6: usa contenteditable nativo. Enter ou blur salva; Escape cancela.
 // Bloqueado em modo share (read-only).
 function startEditMapName() {
   if (_isSharedMode) return;
   if (!window._currentOpenMapId) return;
-  if (document.getElementById('header-map-name-input')) return; // já em edição
 
   var span = document.getElementById('header-map-name');
   if (!span) return;
+  // Já em edição? (foco ativo)
+  if (document.activeElement === span) return;
+
   var currentName = (span.textContent || '').trim();
+  span.dataset.originalName = currentName;
+  span.setAttribute('contenteditable', 'true');
+  span.focus();
 
-  var input = document.createElement('input');
-  input.type = 'text';
-  input.id = 'header-map-name-input';
-  input.className = 'header-map-name header-map-name-input';
-  input.value = currentName;
-  input.maxLength = 100;
-  input.setAttribute('aria-label', 'Renomear mapa');
-
-  span.replaceWith(input);
-  input.focus();
-  input.select();
+  // Seleciona todo o texto
+  var range = document.createRange();
+  range.selectNodeContents(span);
+  var sel = window.getSelection();
+  sel.removeAllRanges();
+  sel.addRange(range);
 
   var done = false;
   function finish(save) {
     if (done) return;
     done = true;
-    var trimmed = (input.value || '').trim();
-    var newName = (save && trimmed) ? trimmed : currentName;
+    span.removeEventListener('keydown', onKey);
+    span.removeEventListener('blur', onBlur);
 
-    // Recria o span no mesmo lugar
-    var newSpan = document.createElement('span');
-    newSpan.className = 'header-map-name editable';
-    newSpan.id = 'header-map-name';
-    newSpan.textContent = newName;
-    newSpan.setAttribute('title', 'Clique para renomear');
-    input.replaceWith(newSpan);
+    var newName = (span.textContent || '').trim();
+    var oldName = span.dataset.originalName || '';
+    delete span.dataset.originalName;
 
-    if (save && newName !== currentName) {
-      saveMapName(newName).catch(function(err) {
-        console.error('Erro ao renomear mapa:', err);
-        // Rollback visual
-        var rb = document.getElementById('header-map-name');
-        if (rb) rb.textContent = currentName;
-        alert('Não foi possível renomear o mapa. Tente novamente.');
-      });
+    if (!save || !newName) {
+      span.textContent = oldName;
+      return;
     }
+    if (newName === oldName) return;
+
+    saveMapName(newName).catch(function(err) {
+      console.error('Erro ao renomear mapa:', err);
+      span.textContent = oldName;
+      alert('Não foi possível renomear o mapa. Tente novamente.');
+    });
   }
 
-  input.addEventListener('keydown', function(e) {
-    if (e.key === 'Enter') { e.preventDefault(); finish(true); }
-    else if (e.key === 'Escape') { e.preventDefault(); finish(false); }
-  });
-  input.addEventListener('blur', function() { finish(true); });
+  function onKey(e) {
+    if (e.key === 'Enter') { e.preventDefault(); span.blur(); }
+    else if (e.key === 'Escape') { e.preventDefault(); finish(false); span.blur(); }
+  }
+  function onBlur() { finish(true); }
+
+  span.addEventListener('keydown', onKey);
+  span.addEventListener('blur', onBlur);
 }
 
 async function saveMapName(newName) {
@@ -8181,14 +8184,17 @@ function resetPlacesForNewSearch() {
   }
 
   // Clique no nome do mapa no header → edição inline (read-only em modo share)
-  var nameWrap = document.getElementById('header-map-name-wrap');
-  if (nameWrap) {
-    nameWrap.addEventListener('click', function(e) {
-      var span = e.target.closest('#header-map-name');
-      if (!span) return;
-      if (span.classList.contains('editable')) {
-        try { startEditMapName(); } catch(err) { console.error(err); }
-      }
+  // Fase 6: .map-title contenteditable nativo; clique foca pra editar.
+  var nameSpan = document.getElementById('header-map-name');
+  if (nameSpan) {
+    nameSpan.addEventListener('click', function() {
+      if (_isSharedMode) return;
+      try { startEditMapName(); } catch(err) { console.error(err); }
+    });
+    // Suporte a foco via teclado (Tab + Enter)
+    nameSpan.addEventListener('focus', function() {
+      if (_isSharedMode) return;
+      try { startEditMapName(); } catch(err) { console.error(err); }
     });
   }
 })();
