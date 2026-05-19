@@ -64,10 +64,35 @@
 
   // ─── Util ───────────────────────────────────────────────────────────────
   function extractCnpj14(value) {
-    // Aceita "44480747000160 - PARADA PINTO..." ou só os 14 dígitos
+    // Aceita "44480747000160 - PARADA PINTO...", "44.480.747/0001-60",
+    // "44480747000160" puro, ou objetos com chaves cnpj/CNPJ/cnpj_14
     if (value == null) return null;
-    const m = String(value).match(/\b(\d{14})\b/);
-    return m ? m[1] : null;
+    if (typeof value === 'object') {
+      return extractCnpj14(value.cnpj_14 || value.cnpj || value.CNPJ);
+    }
+    const s = String(value);
+    // Tenta primeiro \b\d{14}\b (CNPJ "limpo" delimitado)
+    let m = s.match(/\b(\d{14})\b/);
+    if (m) return m[1];
+    // Fallback: strip de tudo que não for dígito e pega primeiros 14
+    const digits = s.replace(/\D/g, '');
+    if (digits.length >= 14) return digits.slice(0, 14);
+    return null;
+  }
+
+  // Garante que allData tenha cnpj_14 populado em todos os rows.
+  // Idempotente: hidrata o campo em memória se faltar. Retorna nº de rows válidos.
+  function ensureAllDataCnpj14() {
+    const allData = window.allData || [];
+    let valid = 0;
+    for (const r of allData) {
+      if (!r.cnpj_14) {
+        const c = extractCnpj14(r);
+        if (c) r.cnpj_14 = c;
+      }
+      if (r.cnpj_14 && /^\d{14}$/.test(r.cnpj_14)) valid++;
+    }
+    return valid;
   }
 
   function safeNum(v) {
@@ -228,11 +253,17 @@
       }
 
       // Match contra allData (universo do mapa atual)
+      // Primeiro hidrata cnpj_14 em allData (mapas antigos podem não ter o campo)
+      ensureAllDataCnpj14();
       const universeSet = new Set();
       const allData = window.allData || [];
       for (const r of allData) {
-        const c = r.cnpj_14 || extractCnpj14(r.cnpj);
+        const c = r.cnpj_14 || extractCnpj14(r);
         if (c) universeSet.add(c);
+      }
+      if (universeSet.size === 0) {
+        showError('Não foi possível extrair CNPJs do mapa atual. Verifique se o mapa foi carregado completamente.');
+        return;
       }
 
       let matched = 0;
@@ -720,6 +751,14 @@
         try { window.dispatchEvent(new CustomEvent('v360:competitors-loaded', { detail: { count: 0 } })); } catch(_) {}
         return;
       }
+      // Garante cnpj_14 em allData antes de qualquer cálculo de match
+      ensureAllDataCnpj14();
+      const _universeSet = new Set();
+      for (const r of (window.allData || [])) {
+        const c = r.cnpj_14 || extractCnpj14(r);
+        if (c) _universeSet.add(c);
+      }
+
       for (const c of comps) {
         const compState = {
           id: c.id,
@@ -733,13 +772,52 @@
         // Paginar pdvs
         let page = 0;
         const PAGE = 1000;
+        let actualMatched = 0;
+        const pdvIdsToFix = [];
         while (true) {
           const pdvs = await window.sbFetch(`map_competitor_pdvs?competitor_id=eq.${c.id}&select=*&offset=${page*PAGE}&limit=${PAGE}`);
           if (!pdvs || !pdvs.length) break;
-          for (const p of pdvs) compState.pdvs.set(p.cnpj_14, p);
+          for (const p of pdvs) {
+            // Recalcula matched contra o universo atual
+            const shouldMatch = _universeSet.has(p.cnpj_14);
+            if (shouldMatch && !p.matched) {
+              pdvIdsToFix.push(p.id);
+              p.matched = true;
+            }
+            if (shouldMatch) actualMatched++;
+            compState.pdvs.set(p.cnpj_14, p);
+          }
           if (pdvs.length < PAGE) break;
           page++;
         }
+
+        // Backfill: se matched_count salvo está errado, corrige no banco (silent)
+        if (pdvIdsToFix.length > 0 && _universeSet.size > 0 && !sharedMode) {
+          compState.matched_count = actualMatched;
+          compState.unmatched_count = compState.row_count - actualMatched;
+          try {
+            window.sbFetch('map_competitors?id=eq.' + c.id, {
+              method: 'PATCH',
+              headers: { 'Prefer': 'return=minimal' },
+              body: JSON.stringify({
+                matched_count: actualMatched,
+                unmatched_count: compState.row_count - actualMatched,
+              })
+            }).catch(() => {});
+            // Update matched=true em chunks (IN clause)
+            const CHUNK = 200;
+            for (let i = 0; i < pdvIdsToFix.length; i += CHUNK) {
+              const chunk = pdvIdsToFix.slice(i, i+CHUNK);
+              window.sbFetch('map_competitor_pdvs?id=in.(' + chunk.join(',') + ')', {
+                method: 'PATCH',
+                headers: { 'Prefer': 'return=minimal' },
+                body: JSON.stringify({ matched: true })
+              }).catch(() => {});
+            }
+            console.log(`[v360-comp] Backfilled matched em ${pdvIdsToFix.length} PDVs de "${c.brand_name}" (matched_count: ${c.matched_count} → ${actualMatched})`);
+          } catch(_) {}
+        }
+
         state.competitors.push(compState);
       }
       if (!state.perspectiveBrand && window._currentMapBaseBrand) {
