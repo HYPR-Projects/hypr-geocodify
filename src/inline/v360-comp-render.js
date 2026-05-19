@@ -822,6 +822,10 @@
     },
     // Lista de marcas + colorMap (consumido pelos donut clusters em modo Categoria)
     brandsList,
+    // Lê share/tickets/diffMedia de uma marca específica num row de allData (Fase 3 - hero)
+    getShareForBrand,
+    // Floor de tickets atual (Fase 3 - hero usa pra filtrar shares válidos)
+    getTicketsFloor,
     STATE,
     STATE_COLORS,
     STATE_LABELS,

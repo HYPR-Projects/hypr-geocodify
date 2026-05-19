@@ -1130,6 +1130,393 @@ input[type="range"]::-webkit-slider-thumb {
 .share-delta.pos { background: var(--win-bg); color: var(--win); }
 .share-delta.neg { background: var(--lose-bg); color: var(--lose); }
 
+/* ─── HERO (Fase 3): card principal do Overview V360 ──────────────────────
+   Estrutura:
+     [hero-top]            título da lente + contexto (X PDVs · cobertura Y%)
+     [brand-primary]       big number + delta (vs concorrente médio)
+     [brand-secondary]     barras dos concorrentes com gap em pp (apareçe se >=1 concorrente)
+     [spark]               histograma de distribuição da lente
+   Varia por # de marcas: 1 = só big number + spark (sem delta/secondary)
+                          2 = big number + 1 linha secundária + delta
+                          3+ = big number + N linhas secundárias + matriz h2h em outro card
+   ───────────────────────────────────────────────────────────────────────── */
+.panel-section--hero { padding: 0; background: transparent; border: none; }
+.hero {
+  background: var(--surface3);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  padding: 16px;
+}
+.hero-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+  gap: 12px;
+}
+.hero-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.hero-title .dot {
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  box-shadow: 0 0 6px currentColor, inset 0 0 0 1.5px rgba(255,255,255,0.2);
+  flex-shrink: 0;
+}
+.hero-context {
+  font-size: 10px;
+  color: var(--text-faint);
+  font-family: var(--mono);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.brand-primary {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: flex-end;
+  gap: 16px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 12px;
+}
+.brand-primary.no-delta { grid-template-columns: 1fr; }
+.bp-left { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.bp-brand-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-dim);
+}
+.bp-brand-row .pdot {
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  box-shadow: 0 0 8px currentColor, inset 0 0 0 1.5px rgba(255,255,255,0.2);
+}
+.bp-value-row {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+.bp-value {
+  font-family: var(--font);
+  font-size: 48px;
+  font-weight: 300;
+  line-height: 0.95;
+  color: var(--text);
+  letter-spacing: -0.04em;
+  font-variant-numeric: tabular-nums;
+}
+.bp-value .dec {
+  font-size: 0.5em;
+  opacity: 0.55;
+  font-weight: 400;
+}
+.bp-unit {
+  font-size: 17px;
+  color: var(--text-muted);
+  font-weight: 400;
+}
+.bp-right {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+}
+.bp-delta {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  font-family: var(--mono);
+  font-weight: 600;
+  padding: 3px 9px;
+  border-radius: var(--r-pill);
+  white-space: nowrap;
+}
+.bp-delta.pos { background: var(--win-bg); color: var(--win-hi); border: 1px solid var(--win-edge); }
+.bp-delta.neg { background: var(--lose-bg); color: var(--lose-hi); border: 1px solid var(--lose-edge); }
+.bp-delta.neutral { background: var(--border); color: var(--text-muted); border: 1px solid var(--border-medium); }
+.bp-delta-label {
+  font-size: 10px;
+  color: var(--text-faint);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  text-align: right;
+}
+
+.brand-secondary { display: flex; flex-direction: column; gap: 8px; }
+.bs-row {
+  display: grid;
+  grid-template-columns: 14px 1fr 1fr 72px;
+  align-items: center;
+  gap: 10px;
+}
+.bs-dot {
+  width: 7px; height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+  box-shadow: 0 0 6px currentColor;
+}
+.bs-name {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.bs-bar-wrap {
+  height: 14px;
+  background: var(--border);
+  border-radius: 3px;
+  overflow: hidden;
+}
+.bs-bar {
+  height: 100%;
+  border-radius: 3px;
+  background: currentColor;
+  opacity: 0.85;
+  transition: width 0.4s ease;
+}
+.bs-val {
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text);
+  text-align: right;
+  line-height: 1;
+}
+.bs-val .gap {
+  display: block;
+  font-size: 10px;
+  font-weight: 500;
+  margin-top: 2px;
+}
+.bs-val .gap.pos { color: var(--win-hi); }
+.bs-val .gap.neg { color: var(--lose-hi); }
+
+/* Sparkline histograma do hero */
+.spark {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+.spark-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  font-size: 10px;
+  color: var(--text-muted);
+  margin-bottom: 8px;
+  gap: 8px;
+}
+.spark-head .meta {
+  font-family: var(--mono);
+  color: var(--text-faint);
+  text-align: right;
+  white-space: nowrap;
+}
+.spark-bars {
+  display: grid;
+  grid-template-columns: repeat(8, 1fr);
+  gap: 2px;
+  height: 32px;
+  align-items: end;
+  margin-bottom: 4px;
+}
+.spark-bar {
+  background: var(--border-medium);
+  border-radius: 2px 2px 0 0;
+  position: relative;
+  transition: all var(--transition);
+  min-height: 2px;
+}
+.spark-bar.accent { background: var(--accent); }
+.spark-bar:hover { background: var(--accent-hi); }
+.spark-labels {
+  display: grid;
+  grid-template-columns: repeat(8, 1fr);
+  gap: 2px;
+  font-family: var(--mono);
+  font-size: 9px;
+  color: var(--text-faint);
+  text-align: center;
+}
+
+/* ─── H2H CARD (Fase 3): "Comparativo entre marcas" ───────────────────────
+   2 marcas = layout horizontal de barras (.h2h-pair)
+   3+ marcas = matriz NxN cabeça-a-cabeça (.h2h-grid)
+   ───────────────────────────────────────────────────────────────────────── */
+.h2h-pair {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.h2h-bar-row {
+  display: grid;
+  grid-template-columns: 64px 1fr 80px;
+  gap: 12px;
+  align-items: center;
+}
+.h2h-bar-label {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.h2h-bar-label .h2h-brand {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: inherit;
+}
+.h2h-bar-label .h2h-brand .dot {
+  width: 7px; height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+  box-shadow: 0 0 6px currentColor;
+}
+.h2h-bar-track {
+  height: 18px;
+  background: var(--border);
+  border-radius: 4px;
+  overflow: hidden;
+}
+.h2h-bar-fill {
+  height: 100%;
+  border-radius: 4px;
+  background: currentColor;
+  opacity: 0.92;
+  transition: width 0.4s ease;
+}
+.h2h-bar-val {
+  font-family: var(--mono);
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text);
+  text-align: right;
+  line-height: 1;
+}
+.h2h-bar-val .pct {
+  display: block;
+  font-size: 10px;
+  font-weight: 500;
+  color: var(--text-faint);
+  margin-top: 2px;
+}
+.h2h-footer {
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 10px;
+  color: var(--text-faint);
+  font-family: var(--mono);
+}
+
+/* Matriz N×N */
+.h2h-grid {
+  display: grid;
+  font-size: 11px;
+  border-top: 1px solid var(--border-medium);
+  border-left: 1px solid var(--border-medium);
+  overflow: hidden;
+  border-radius: var(--r-sm);
+}
+.h2h-cell {
+  padding: 9px 6px;
+  text-align: center;
+  border-right: 1px solid var(--border-medium);
+  border-bottom: 1px solid var(--border-medium);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  background: var(--surface3);
+  min-width: 0;
+}
+.h2h-corner {
+  font-size: 9px;
+  color: var(--text-faint);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-weight: 600;
+  line-height: 1.2;
+}
+.h2h-head {
+  background: var(--border);
+  font-size: 9px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  flex-direction: row;
+  gap: 5px;
+}
+.h2h-head .dot {
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  box-shadow: 0 0 6px currentColor;
+  flex-shrink: 0;
+}
+.h2h-rowhead {
+  background: var(--border);
+  text-align: left;
+  justify-content: flex-start;
+  padding-left: 10px;
+  flex-direction: row;
+  gap: 5px;
+  font-size: 9px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.h2h-rowhead .dot {
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  box-shadow: 0 0 6px currentColor;
+  flex-shrink: 0;
+}
+.h2h-data {
+  font-family: var(--mono);
+  font-weight: 600;
+}
+.h2h-data .num { font-size: 12px; color: var(--text); }
+.h2h-data .pct { font-size: 9px; color: var(--text-muted); font-weight: 500; }
+.h2h-data.win .num { color: var(--win-hi); }
+.h2h-data.lose .num { color: var(--lose-hi); }
+.h2h-data.same { color: var(--text-faint); font-weight: 400; }
+
+/* Estado "modo comparativo" — quando hero está ativo, esconde os blocos legados.
+   Toggle aplicado via JS no body: data-v360-hero="active". */
+body[data-v360-hero="active"] #overview-mini-stats,
+body[data-v360-hero="active"] #ov-share-section,
+body[data-v360-hero="active"] #ov-dist-section { display: none; }
+
 /* Charts */
 .chart-wrap { position: relative; }
 .chart-wrap canvas { border-radius: var(--radius-sm); }

@@ -849,7 +849,20 @@
 
         <!-- OVERVIEW TAB -->
         <div class="panel-tab-content active" id="tc-overview">
-          <div class="overview-mini-stats">
+          <!-- HERO (Fase 3): card principal do Overview, ativo no V360.
+               renderizado via src/inline/v360-hero.js — varia por # de marcas. -->
+          <div class="panel-section panel-section--hero" id="hero-section" style="display:none;">
+            <div class="hero" id="hero"></div>
+          </div>
+
+          <!-- H2H CARD (Fase 3): "Comparativo entre marcas" — visível só com 2+ marcas.
+               2 marcas = bars side-by-side; 3+ marcas = matriz NxN. -->
+          <div class="panel-section" id="h2hCard" style="display:none;">
+            <div class="panel-section-title" id="h2hTitle">Comparativo entre marcas</div>
+            <div id="h2hContent"></div>
+          </div>
+
+          <div class="overview-mini-stats" id="overview-mini-stats">
             <div class="overview-mini-stat clickable" data-perf="acima" title="Filtrar PDVs ganhando share">
               <div class="overview-mini-stat-val overview-mini-stat-val--win" id="ov-win">—</div>
               <div class="overview-mini-stat-label">Ganhando</div>
@@ -872,7 +885,7 @@
             </div>
           </div>
 
-          <div class="panel-section">
+          <div class="panel-section" id="ov-share-section">
             <div class="panel-section-title">Share Geral</div>
             <div class="share-overview">
               <div class="share-overview-main">
@@ -900,7 +913,7 @@
             </div>
           </div>
 
-          <div class="panel-section">
+          <div class="panel-section" id="ov-dist-section">
             <div class="panel-section-title">Distribuição de Share</div>
             <div class="chart-active-chip" id="chip-share-bucket" style="display:none;"></div>
             <div class="chart-wrap" style="height:120px">
