@@ -210,17 +210,53 @@ html, body { height: 100%; overflow: hidden; background: var(--bg); color: var(-
 html.theme-switching, html.theme-switching *, html.theme-switching *::before, html.theme-switching *::after { transition: background-color 0.25s ease, color 0.15s ease, border-color 0.2s ease, box-shadow 0.2s ease !important; }
 
 /* ─── Layout ────────────────────────────────────────────────────────────── */
-#app { display: flex; flex-direction: column; height: 100vh; }
+/* ─── Spatial Layout (V360) ────────────────────────────────────────────
+   #app is the viewport canvas. #map-container is full-bleed at z-1.
+   #header / #sidebar / #right-panel float on top with gap + radius.
+   --gap-edge defines the breathing room from screen edges (default 14px).
+   Other modes (.mode-geo, .mode-places) override below.
+   ────────────────────────────────────────────────────────────────────── */
+:root { --gap-edge: 14px; }
 
+#app {
+  position: relative;
+  height: 100vh;
+  width: 100vw;
+  overflow: hidden;
+  background: var(--bg);
+}
+
+/* Map fills the entire viewport */
+#main {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+}
+#map-container {
+  position: absolute !important;
+  inset: 0 !important;
+  z-index: 1;
+}
+
+/* ─── Floating Header ─── */
 #header {
+  position: absolute;
+  top: var(--gap-edge);
+  left: var(--gap-edge);
+  right: var(--gap-edge);
   height: var(--header-h);
   background: var(--glass-bg);
-  border-bottom: 1px solid var(--glass-border);
-  display: flex; align-items: center;
-  padding: 0 var(--sp-6); gap: var(--sp-3);
-  z-index: 1000; flex-shrink: 0;
   backdrop-filter: var(--glass-blur);
   -webkit-backdrop-filter: var(--glass-blur);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--r-xl);
+  box-shadow: var(--glass-shadow), var(--glass-edge);
+  display: flex;
+  align-items: center;
+  padding: 0 14px 0 16px;
+  gap: var(--sp-3);
+  z-index: 100;
+  overflow: hidden;
 }
 
 #header .logo {
@@ -403,20 +439,24 @@ html.theme-switching, html.theme-switching *, html.theme-switching *::before, ht
   font-size: 11px; line-height: 1; opacity: 0.7;
 }
 
-#main { display: flex; flex: 1; overflow: hidden; }
-
-/* ─── Sidebar & Resize handles ─────────────────────────────────────────── */
+/* ─── Resize handles — absolute strips on the inner edge of each panel ─── */
 .resize-handle {
-  width: 4px; flex-shrink: 0; cursor: col-resize;
-  background: transparent; transition: background 0.15s; z-index: 200;
-  position: relative;
+  position: absolute;
+  top: calc(var(--gap-edge) + var(--header-h) + var(--gap-edge));
+  bottom: var(--gap-edge);
+  width: 8px;
+  cursor: col-resize;
+  background: transparent;
+  transition: background 0.15s;
+  z-index: 101;
 }
-.resize-handle:hover, .resize-handle.dragging { background: var(--accent); }
+#sidebar-resizer  { left:  calc(var(--gap-edge) + var(--sidebar-w) - 2px); }
+#panel-resizer    { right: calc(var(--gap-edge) + var(--right-w)   - 2px); }
 .resize-handle::after {
   content: ''; position: absolute; top: 50%; left: 50%;
   transform: translate(-50%, -50%);
   width: 2px; height: 32px; border-radius: 2px;
-  background: var(--border-active); transition: background 0.15s;
+  background: transparent; transition: background 0.15s;
 }
 .resize-handle:hover::after, .resize-handle.dragging::after { background: var(--accent); }
 
@@ -438,12 +478,24 @@ html.theme-switching, html.theme-switching *, html.theme-switching *::before, ht
 #right-panel.collapsed #panel-collapse { border-radius: 4px 0 0 4px; }
 
 #sidebar {
-  width: var(--sidebar-w); flex-shrink: 0; min-width: 160px; max-width: 420px;
-  background: var(--glass-bg); border-right: 1px solid var(--glass-border);
-  display: flex; flex-direction: column; overflow: hidden; z-index: 100;
-  position: relative; transition: width 0.2s ease;
+  position: absolute;
+  top: calc(var(--gap-edge) + var(--header-h) + var(--gap-edge));
+  left: var(--gap-edge);
+  bottom: var(--gap-edge);
+  width: var(--sidebar-w);
+  min-width: 240px;
+  max-width: 480px;
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--r-xl);
+  box-shadow: var(--glass-shadow), var(--glass-edge);
   backdrop-filter: var(--glass-blur);
   -webkit-backdrop-filter: var(--glass-blur);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  z-index: 100;
+  transition: width 0.2s ease, opacity 0.2s ease;
 }
 
 .sidebar-header {
@@ -613,21 +665,19 @@ input[type="range"]::-webkit-slider-thumb {
 .reset-btn:hover { border-color: var(--border-active); color: var(--text); }
 
 /* ─── Map ───────────────────────────────────────────────────────────────── */
-#map-container { flex: 1; position: relative; }
+/* #map-container is set as absolute inset:0 at the top spatial block */
 #map { height: 100%; width: 100%; will-change: transform; contain: strict; }
 
 /* Modo mapa em tela cheia */
 #app.map-only #sidebar,
 #app.map-only .resize-handle,
-#app.map-only #right-panel { width: 0 !important; min-width: 0; overflow: hidden; opacity: 0; }
-#app.map-only #map-container { flex: 1; }
+#app.map-only #right-panel { display: none !important; }
 
 /* Modo geocoder/reverse/places: esconder sidebar, painel analytics, header stats */
 #app.mode-geo #right-panel,  #app.mode-places #right-panel,
 #app.mode-geo #sidebar,      #app.mode-places #sidebar,
 #app.mode-geo #sidebar-resizer, #app.mode-places #sidebar-resizer,
-#app.mode-geo #panel-resizer,   #app.mode-places #panel-resizer { width: 0 !important; min-width: 0; overflow: hidden; opacity: 0; pointer-events: none; }
-#app.mode-geo #map-container, #app.mode-places #map-container { flex: 1; }
+#app.mode-geo #panel-resizer,   #app.mode-places #panel-resizer { display: none !important; }
 #app.mode-geo .header-stats,  #app.mode-places .header-stats { display: none !important; }
 #app.mode-geo #map-overlay,   #app.mode-places #map-overlay { display: none !important; }
 #app.mode-geo .filter-group-share,  #app.mode-places .filter-group-share,
@@ -842,12 +892,24 @@ input[type="range"]::-webkit-slider-thumb {
 
 /* ─── Right Panel ───────────────────────────────────────────────────────── */
 #right-panel {
-  width: var(--right-w); flex-shrink: 0; min-width: 200px; max-width: 520px;
-  background: var(--glass-bg); border-left: 1px solid var(--glass-border);
-  display: flex; flex-direction: column; overflow: hidden; z-index: 100;
-  position: relative; transition: width 0.2s ease;
+  position: absolute;
+  top: calc(var(--gap-edge) + var(--header-h) + var(--gap-edge));
+  right: var(--gap-edge);
+  bottom: var(--gap-edge);
+  width: var(--right-w);
+  min-width: 240px;
+  max-width: 520px;
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--r-xl);
+  box-shadow: var(--glass-shadow), var(--glass-edge);
   backdrop-filter: var(--glass-blur);
   -webkit-backdrop-filter: var(--glass-blur);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  z-index: 100;
+  transition: width 0.2s ease, opacity 0.2s ease;
 }
 
 .panel-tabs {

@@ -3069,21 +3069,21 @@ async function reverseGeocodeHERE(lat, lon) {
 
 // ─── Resize e Colapso dos Painéis ────────────────────────────────────────────
 function initResizablePanels() {
-  // Restaurar larguras salvas
+  // Restaurar larguras salvas em CSS vars (handles e map chrome reagem juntos)
   try {
     const sw = localStorage.getItem('hypr_sidebar_w');
     const pw = localStorage.getItem('hypr_panel_w');
-    if (sw) document.getElementById('sidebar').style.width = sw;
-    if (pw) document.getElementById('right-panel').style.width = pw;
+    if (sw) document.documentElement.style.setProperty('--sidebar-w', sw);
+    if (pw) document.documentElement.style.setProperty('--right-w', pw);
   } catch(e) {}
 
   // Resize sidebar (handle esquerdo)
-  setupResizer('sidebar-resizer', 'sidebar', 'right', 160, 420, 'hypr_sidebar_w');
+  setupResizer('sidebar-resizer', 'sidebar', '--sidebar-w', 'right', 240, 480, 'hypr_sidebar_w');
   // Resize painel direito (handle direito)
-  setupResizer('panel-resizer', 'right-panel', 'left', 200, 520, 'hypr_panel_w');
+  setupResizer('panel-resizer', 'right-panel', '--right-w', 'left', 240, 520, 'hypr_panel_w');
 }
 
-function setupResizer(handleId, panelId, direction, minW, maxW, storageKey) {
+function setupResizer(handleId, panelId, cssVar, direction, minW, maxW, storageKey) {
   const handle = document.getElementById(handleId);
   const panel  = document.getElementById(panelId);
   if (!handle || !panel) return;
@@ -3100,6 +3100,9 @@ function setupResizer(handleId, panelId, direction, minW, maxW, storageKey) {
     const onMove = e => {
       const delta = direction === 'right' ? e.clientX - startX : startX - e.clientX;
       const newW = Math.min(maxW, Math.max(minW, startW + delta));
+      // Update CSS var so handle position, map chrome anchors, and panel width
+      // all stay in sync. We also keep inline width as a fallback override.
+      document.documentElement.style.setProperty(cssVar, newW + 'px');
       panel.style.width = newW + 'px';
       if (map) map.resize();
     };
@@ -3126,6 +3129,7 @@ function setupResizer(handleId, panelId, direction, minW, maxW, storageKey) {
     const onMove = e => {
       const delta = direction === 'right' ? e.touches[0].clientX - startX : startX - e.touches[0].clientX;
       const newW = Math.min(maxW, Math.max(minW, startW + delta));
+      document.documentElement.style.setProperty(cssVar, newW + 'px');
       panel.style.width = newW + 'px';
     };
     const onEnd = () => {
