@@ -570,104 +570,192 @@
     <!-- Left Sidebar -->
     <div id="sidebar">
       <button id="sidebar-collapse" class="collapse-btn" onclick="toggleSidebar()" title="Colapsar filtros">‹</button>
-      <div class="sidebar-header" onclick="if(window.innerWidth<=768)toggleSidebar()">
-        <div class="sidebar-title">Filtros</div>
-        <span class="sidebar-count" id="filter-active-count" style="display:none">0</span>
+
+      <!-- Busca global (Fase 6) -->
+      <div class="sb-search">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="14" height="14"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+        <input type="text" placeholder="Buscar bandeira, CNPJ, cidade…" id="globalSearch" oninput="window._sbGlobalSearch && window._sbGlobalSearch(this.value)">
+        <kbd>⌘K</kbd>
       </div>
+
       <div class="sidebar-body">
 
-        <!-- Bandeira (multi-select custom) -->
-        <div class="filter-group filter-group-bandeira">
-          <div class="filter-label">Bandeira</div>
-          <div class="ms-wrap" id="ms-bandeira">
-            <div class="ms-trigger" onclick="toggleMultiSelect('ms-bandeira')">
-              <span class="ms-display">Todas as bandeiras</span>
-              <svg width="12" height="12" viewBox="0 0 12 12"><path fill="currentColor" d="M6 8L1 3h10z"/></svg>
+        <!-- LENTES RÁPIDAS (Fase 6) — só V360 -->
+        <div class="sb-section sb-section-lenses" id="sb-lenses" style="display:none;">
+          <div class="sb-section-head">
+            <div class="sb-section-title"><span class="sb-dot" style="background:var(--accent)"></span>Lentes rápidas</div>
+            <span class="sb-section-meta">4</span>
+          </div>
+          <div class="preset-grid">
+            <button class="preset active" data-preset="all" onclick="applyLensPreset('all')">
+              <span class="preset-icon" style="color:var(--text-muted)">●</span>
+              <span class="preset-label">Tudo</span>
+              <span class="preset-count" id="preset-count-all">— PDVs</span>
+            </button>
+            <button class="preset" data-preset="oport" onclick="applyLensPreset('oport')">
+              <span class="preset-icon" style="color:var(--accent)">◆</span>
+              <span class="preset-label">Oportunidades</span>
+              <span class="preset-count" id="preset-count-oport">— vence</span>
+            </button>
+            <button class="preset" data-preset="white" onclick="applyLensPreset('white')">
+              <span class="preset-icon" style="color:var(--text-muted)">○</span>
+              <span class="preset-label">Whitespace</span>
+              <span class="preset-count" id="preset-count-white">— sem amostra</span>
+            </button>
+            <button class="preset" data-preset="domain" onclick="applyLensPreset('domain')">
+              <span class="preset-icon" style="color:var(--win)">▲</span>
+              <span class="preset-label">Domínio</span>
+              <span class="preset-count" id="preset-count-domain">— lideram</span>
+            </button>
+            <button class="preset wide" data-preset="risk" onclick="applyLensPreset('risk')">
+              <span class="preset-icon" style="color:var(--lose)">▼</span>
+              <div class="preset-text">
+                <span class="preset-label">Em risco — vulneráveis</span>
+                <span class="preset-count" id="preset-count-risk">— perdem para todos concorrentes</span>
+              </div>
+            </button>
+          </div>
+        </div>
+
+        <!-- ONDE: bandeira + UF -->
+        <div class="fg-section open" data-section="where">
+          <div class="fg-head" onclick="this.parentElement.classList.toggle('open')">
+            <div class="fg-head-l">
+              <svg class="fg-caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg>
+              Onde
             </div>
-            <div class="ms-dropdown">
-              <div class="ms-search-wrap">
-                <svg class="ms-search-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
-                <input type="text" class="ms-search" placeholder="Buscar bandeira..." oninput="filterMultiSelect('ms-bandeira', this.value)">
+            <span class="sb-section-meta">geo · rede</span>
+          </div>
+          <div class="fg-body">
+            <!-- Bandeira (multi-select custom) -->
+            <div class="filter-group filter-group-bandeira">
+              <div class="filter-label">Bandeira</div>
+              <div class="ms-wrap" id="ms-bandeira">
+                <div class="ms-trigger" onclick="toggleMultiSelect('ms-bandeira')">
+                  <span class="ms-display">Todas as bandeiras</span>
+                  <svg width="12" height="12" viewBox="0 0 12 12"><path fill="currentColor" d="M6 8L1 3h10z"/></svg>
+                </div>
+                <div class="ms-dropdown">
+                  <div class="ms-search-wrap">
+                    <svg class="ms-search-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+                    <input type="text" class="ms-search" placeholder="Buscar bandeira..." oninput="filterMultiSelect('ms-bandeira', this.value)">
+                  </div>
+                  <div class="ms-selection-bar" id="ms-bandeira-bar" style="display:none">
+                    <span class="ms-sel-count" id="ms-bandeira-count">0 selecionadas</span>
+                    <button class="ms-sel-clear" onclick="msClearAll('ms-bandeira')">Limpar</button>
+                  </div>
+                  <div class="ms-options"></div>
+                  <div class="ms-footer">
+                    <button class="ms-btn" onclick="msSelectAll('ms-bandeira')">Todas</button>
+                    <button class="ms-btn" onclick="msClearAll('ms-bandeira')">Limpar</button>
+                  </div>
+                </div>
               </div>
-              <div class="ms-selection-bar" id="ms-bandeira-bar" style="display:none">
-                <span class="ms-sel-count" id="ms-bandeira-count">0 selecionadas</span>
-                <button class="ms-sel-clear" onclick="msClearAll('ms-bandeira')">Limpar</button>
+            </div>
+
+            <!-- UF -->
+            <div class="filter-group">
+              <div class="filter-label">Estado (UF)</div>
+              <select class="filter-select" id="f-uf" onchange="applyFilters()">
+                <option value="">Todos os estados</option>
+              </select>
+            </div>
+          </div>
+        </div>
+
+        <!-- QUANTO: share + tickets + min PDVs/rede -->
+        <div class="fg-section" data-section="qty">
+          <div class="fg-head" onclick="this.parentElement.classList.toggle('open')">
+            <div class="fg-head-l">
+              <svg class="fg-caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg>
+              Quanto
+            </div>
+            <span class="sb-section-meta">share · tickets</span>
+          </div>
+          <div class="fg-body">
+            <!-- Share mínimo -->
+            <div class="filter-group filter-group-share">
+              <div class="filter-label">Share mínimo</div>
+              <div class="range-row">
+                <input type="range" id="f-share-min" aria-label="Share mínimo" min="0" max="100" value="0" step="1" oninput="updateRangeLabel('f-share-min','lbl-share-min'); _debouncedFilter()">
+                <span class="range-label" id="lbl-share-min">0%</span>
               </div>
-              <div class="ms-options"></div>
-              <div class="ms-footer">
-                <button class="ms-btn" onclick="msSelectAll('ms-bandeira')">Todas</button>
-                <button class="ms-btn" onclick="msClearAll('ms-bandeira')">Limpar</button>
+            </div>
+
+            <!-- Tickets mínimos -->
+            <div class="filter-group filter-group-tickets">
+              <div class="filter-label">Tickets mínimos</div>
+              <div class="range-row">
+                <input type="range" id="f-tickets-min" aria-label="Tickets mínimos" min="0" max="5000" value="0" step="1" oninput="syncTicketRange(); _debouncedFilter()">
+                <span class="range-label" id="lbl-tickets-min">0</span>
+              </div>
+            </div>
+
+            <!-- Mínimo de PDVs por rede -->
+            <div class="filter-group filter-group-minrede">
+              <div class="filter-label" title="Mínimo de PDVs com presença da marca para uma rede aparecer no Ranking e na Análise">Mínimo PDVs/rede</div>
+              <div class="range-row">
+                <input type="range" id="f-min-pdvs-rede" aria-label="Mínimo PDVs por rede" min="1" max="20" value="3" step="1" oninput="updateRangeLabel('f-min-pdvs-rede','lbl-min-pdvs-rede',''); _debouncedAnalytics()">
+                <span class="range-label" id="lbl-min-pdvs-rede">3</span>
               </div>
             </div>
           </div>
         </div>
 
-        <!-- UF -->
-        <div class="filter-group">
-          <div class="filter-label">Estado (UF)</div>
-          <select class="filter-select" id="f-uf" onchange="applyFilters()">
-            <option value="">Todos os estados</option>
-          </select>
-        </div>
+        <!-- COMO PERFORMA: performance + oportunidade -->
+        <div class="fg-section" data-section="perf">
+          <div class="fg-head" onclick="this.parentElement.classList.toggle('open')">
+            <div class="fg-head-l">
+              <svg class="fg-caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg>
+              Como performa
+            </div>
+            <span class="sb-section-meta">vs. média</span>
+          </div>
+          <div class="fg-body">
+            <!-- Performance -->
+            <div class="filter-group filter-group-perf">
+              <div class="filter-label">Performance</div>
+              <div class="badge-list" id="f-perf">
+                <button class="badge active" data-v="">Todos</button>
+                <button class="badge" data-v="acima"><span class="badge-dot" style="background:var(--win)"></span>Acima</button>
+                <button class="badge" data-v="competindo"><span class="badge-dot" style="background:var(--neutral)"></span>Competindo</button>
+                <button class="badge" data-v="abaixo"><span class="badge-dot" style="background:var(--lose)"></span>Abaixo</button>
+                <button class="badge" data-v="sem_presenca"><span class="badge-dot" style="background:var(--absent, #94a3b8)"></span>Sem presença</button>
+              </div>
+            </div>
 
-        <!-- Share -->
-        <div class="filter-group filter-group-share">
-          <div class="filter-label">Share mínimo</div>
-          <div class="range-row">
-            <input type="range" id="f-share-min" aria-label="Share mínimo" min="0" max="100" value="0" step="1" oninput="updateRangeLabel('f-share-min','lbl-share-min'); _debouncedFilter()">
-            <span class="range-label" id="lbl-share-min">0%</span>
+            <!-- Oportunidade -->
+            <div class="filter-group filter-group-oport">
+              <div class="filter-label">Oportunidade</div>
+              <div class="badge-list" id="f-oport">
+                <button class="badge active" data-v="">Todas</button>
+                <button class="badge" data-v="alta">Alta</button>
+                <button class="badge" data-v="media">Média</button>
+                <button class="badge" data-v="baixa">Baixa</button>
+              </div>
+            </div>
           </div>
         </div>
 
-        <!-- Tickets (só Varejo 360) -->
-        <div class="filter-group filter-group-tickets">
-          <div class="filter-label">Tickets mínimos</div>
-          <div class="range-row">
-            <input type="range" id="f-tickets-min" aria-label="Tickets mínimos" min="0" max="5000" value="0" step="1" oninput="syncTicketRange(); _debouncedFilter()">
-            <span class="range-label" id="lbl-tickets-min">0</span>
+        <!-- LEGENDA — colapsável, com contadores -->
+        <div class="fg-section" data-section="legend">
+          <div class="fg-head" onclick="this.parentElement.classList.toggle('open')">
+            <div class="fg-head-l">
+              <svg class="fg-caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg>
+              Legenda · Estados
+            </div>
+            <span class="sb-section-meta" id="legend-meta-count"></span>
           </div>
-        </div>
-
-        <!-- Mínimo de PDVs por rede — afeta Ranking e Análise -->
-        <div class="filter-group filter-group-minrede">
-          <div class="filter-label" title="Mínimo de PDVs com presença da marca para uma rede aparecer no Ranking e na Análise">Mínimo PDVs/rede</div>
-          <div class="range-row">
-            <input type="range" id="f-min-pdvs-rede" aria-label="Mínimo PDVs por rede" min="1" max="20" value="3" step="1" oninput="updateRangeLabel('f-min-pdvs-rede','lbl-min-pdvs-rede',''); _debouncedAnalytics()">
-            <span class="range-label" id="lbl-min-pdvs-rede">3</span>
-          </div>
-        </div>
-
-        <!-- Oportunidade (só Varejo 360) -->
-        <div class="filter-group filter-group-oport">
-          <div class="filter-label">Oportunidade</div>
-          <div class="badge-list" id="f-oport">
-            <button class="badge active" data-v="">Todas</button>
-            <button class="badge" data-v="alta">Alta</button>
-            <button class="badge" data-v="media">Média</button>
-            <button class="badge" data-v="baixa">Baixa</button>
-          </div>
-        </div>
-
-        <!-- Performance -->
-        <div class="filter-group filter-group-perf">
-          <div class="filter-label">Performance vs. média</div>
-          <div class="badge-list" id="f-perf">
-            <button class="badge active" data-v="">Todos</button>
-            <button class="badge" data-v="acima">Acima</button>
-            <button class="badge" data-v="competindo">Competindo</button>
-            <button class="badge" data-v="abaixo">Abaixo</button>
-            <button class="badge" data-v="sem_presenca">Sem presença</button>
-          </div>
-        </div>
-
-        <!-- Legend -->
-        <div class="filter-group">
-          <div class="filter-label">Legenda</div>
-          <div class="color-legend">
-            <div class="legend-item"><div class="legend-dot" style="background:var(--win)"></div>Acima da média</div>
-            <div class="legend-item"><div class="legend-dot" style="background:var(--lose)"></div>Abaixo da média</div>
-            <div class="legend-item"><div class="legend-dot" style="background:var(--neutral)"></div>Na média (±2pp)</div>
-            <div class="legend-item"><div class="legend-dot" style="background:#94a3b8"></div>Sem presença</div>
+          <div class="fg-body">
+            <div class="filter-group">
+              <div class="color-legend" id="color-legend-list">
+                <!-- Solo (sem concorrentes): legenda simples -->
+                <div class="legend-item"><div class="legend-dot" style="background:var(--win)"></div>Acima da média<span class="legend-count" id="legend-count-acima"></span></div>
+                <div class="legend-item"><div class="legend-dot" style="background:var(--lose)"></div>Abaixo da média<span class="legend-count" id="legend-count-abaixo"></span></div>
+                <div class="legend-item"><div class="legend-dot" style="background:var(--neutral)"></div>Na média (±2pp)<span class="legend-count" id="legend-count-media"></span></div>
+                <div class="legend-item"><div class="legend-dot" style="background:#94a3b8"></div>Sem presença<span class="legend-count" id="legend-count-absent"></span></div>
+              </div>
+            </div>
           </div>
         </div>
 

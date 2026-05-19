@@ -837,10 +837,211 @@ html.theme-switching, html.theme-switching *, html.theme-switching *::before, ht
   padding: 2px 8px; border-radius: 10px; font-family: var(--mono);
 }
 
-.sidebar-body { flex: 1; overflow-y: auto; padding: var(--sp-4); display: flex; flex-direction: column; gap: 18px; }
+.sidebar-body { flex: 1; overflow-y: auto; padding: var(--sp-4); display: flex; flex-direction: column; gap: 14px; }
 .sidebar-body::-webkit-scrollbar { width: 4px; }
 .sidebar-body::-webkit-scrollbar-track { background: transparent; }
 .sidebar-body::-webkit-scrollbar-thumb { background: var(--border-active); border-radius: 2px; }
+
+/* ─── Sidebar — Busca global (Fase 6) ─────────────────────────────────────
+   Input pill no topo da sidebar, abaixo do header da página.
+   ───────────────────────────────────────────────────────────────────────── */
+.sb-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 12px;
+  height: 36px;
+  margin: var(--sp-4) var(--sp-4) 0;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  transition: border-color 0.15s, background 0.15s;
+  flex-shrink: 0;
+}
+.sb-search:focus-within {
+  border-color: var(--accent);
+  background: var(--surface);
+}
+.sb-search > svg { color: var(--text-muted); flex-shrink: 0; }
+.sb-search input {
+  flex: 1;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: var(--text);
+  font-family: inherit;
+  font-size: 13px;
+  min-width: 0;
+}
+.sb-search input::placeholder { color: var(--text-muted); }
+.sb-search kbd {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--text-muted);
+  background: var(--surface3);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 2px 5px;
+  flex-shrink: 0;
+}
+
+/* ─── Sidebar — Section header genérico ────────────────────────────────── */
+.sb-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+  padding: 0 2px;
+}
+.sb-section-title {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  color: var(--text);
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+.sb-dot {
+  width: 7px; height: 7px; border-radius: 50%; display: inline-block;
+}
+.sb-section-meta {
+  font-size: 10px;
+  color: var(--text-muted);
+  font-family: var(--mono);
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+/* ─── Sidebar — Lentes Rápidas (preset grid) ──────────────────────────── */
+.preset-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+}
+.preset {
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 10px 12px;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, transform 0.1s;
+  font-family: inherit;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  min-height: 64px;
+  position: relative;
+}
+.preset:hover {
+  background: var(--surface3);
+  border-color: var(--border-active);
+}
+.preset.active {
+  border-color: var(--accent);
+  background: var(--accent-bg);
+}
+.preset.wide {
+  grid-column: span 2;
+  flex-direction: row;
+  align-items: center;
+  gap: 10px;
+  min-height: 52px;
+}
+.preset.wide .preset-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+}
+.preset-icon {
+  font-size: 11px;
+  line-height: 1;
+}
+.preset-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text);
+  letter-spacing: -0.01em;
+}
+.preset-count {
+  font-size: 10px;
+  color: var(--text-muted);
+  font-family: var(--mono);
+  letter-spacing: 0;
+  font-variant-numeric: tabular-nums;
+}
+.preset.active .preset-count { color: var(--accent-hi, var(--accent)); }
+
+/* ─── Sidebar — Filter group accordion (Onde/Quanto/Como Performa) ───── */
+.fg-section {
+  background: transparent;
+  border-radius: var(--radius-md);
+  display: flex;
+  flex-direction: column;
+}
+.fg-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 4px;
+  cursor: pointer;
+  user-select: none;
+  transition: background 0.15s;
+  border-radius: var(--radius-sm);
+}
+.fg-head:hover { background: var(--surface2); }
+.fg-head-l {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  color: var(--text);
+}
+.fg-caret {
+  width: 12px; height: 12px;
+  transition: transform 0.2s;
+  color: var(--text-muted);
+}
+.fg-section.open .fg-caret { transform: rotate(90deg); }
+.fg-body {
+  display: none;
+  flex-direction: column;
+  gap: 12px;
+  padding: 6px 2px 0;
+}
+.fg-section.open .fg-body { display: flex; }
+
+/* ─── Sidebar — Legenda com contadores ────────────────────────────────── */
+.legend-count {
+  margin-left: auto;
+  font-size: 10px;
+  font-family: var(--mono);
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+.legend-item {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+/* Badge dot interno (pra performance/oport badges) */
+.badge-dot {
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  display: inline-block;
+  margin-right: 4px;
+  flex-shrink: 0;
+}
 
 /* ─── Filter Groups ─────────────────────────────────────────────────────── */
 .filter-group { display: flex; flex-direction: column; gap: 8px; }
