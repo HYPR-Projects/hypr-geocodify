@@ -739,6 +739,31 @@
         window._currentMapBaseBrand = meta[0].base_brand || null;
         state.ticketsFloor = meta[0].tickets_floor || 5;
       }
+      // Auto-detect: se base_brand está vazio mas temos allData carregado com marca,
+      // detecta marca dominante e persiste (fix retroativo pra mapas antigos)
+      if (!window._currentMapBaseBrand && !sharedMode) {
+        const allData = window.allData || [];
+        if (allData.length > 0) {
+          const counts = {};
+          for (const r of allData) {
+            const m = String(r.marca || '').toUpperCase().trim();
+            if (m) counts[m] = (counts[m] || 0) + 1;
+          }
+          const sorted = Object.entries(counts).sort((a,b) => b[1] - a[1]);
+          if (sorted.length && sorted[0][1] > allData.length * 0.5) {
+            const detected = sorted[0][0];
+            window._currentMapBaseBrand = detected;
+            try {
+              await window.sbFetch('saved_maps?id=eq.' + mapId, {
+                method: 'PATCH',
+                headers: { 'Prefer': 'return=minimal' },
+                body: JSON.stringify({ base_brand: detected })
+              });
+              console.log(`[v360-comp] Auto-detected base_brand="${detected}" for map ${mapId}`);
+            } catch(_) {}
+          }
+        }
+      }
     } catch(e) {
       console.warn('[v360-comp] load meta failed:', e.message);
     }
