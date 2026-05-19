@@ -485,6 +485,11 @@
           <span class="hstat-val" id="h-pdvs">—</span>
           <span class="hstat-label">PDVs ativos</span>
         </div>
+        <!-- Fase 5: share médio da lente — visível só em V360 com mapa aberto -->
+        <div class="hstat" id="hstat-lens" style="display:none;">
+          <span class="hstat-val" id="h-lens-share">—</span>
+          <span class="hstat-label" id="h-lens-label">Share médio</span>
+        </div>
       </div>
     </div>
 
@@ -832,6 +837,12 @@
           <div class="map-pill-dot" style="background:var(--accent)"></div>
           <span class="map-pill-text">Share médio:</span>
           <span class="map-pill-val" id="overlay-share">0%</span>
+        </div>
+        <!-- Fase 5: lens wins — só visível em modo Duelo/Categoria -->
+        <div class="map-pill" id="overlay-lens-wins" style="display:none;">
+          <div class="map-pill-dot" id="overlay-lens-wins-dot" style="background:var(--win)"></div>
+          <span class="map-pill-text" id="overlay-lens-wins-text">Lente vence:</span>
+          <span class="map-pill-val" id="overlay-lens-wins-val">0 (0%)</span>
         </div>
       </div>
     </div>

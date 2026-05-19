@@ -319,10 +319,86 @@
     }
   }
 
+  // ─── Header hstat — Share médio (lente) (Fase 5) ────────────────────────
+  // Só visível em modo Duelo/Categoria (lente = ponto de vista relevante).
+  // Em Solo, a métrica de share médio já está na 2ª map pill — evita redundância.
+  function renderHeaderLensStat() {
+    const stat = document.getElementById('hstat-lens');
+    const valEl = document.getElementById('h-lens-share');
+    const labelEl = document.getElementById('h-lens-label');
+    if (!stat || !valEl || !labelEl) return;
+
+    const brands = _selectedBrands();
+    const filtered = (window.filteredData || []);
+
+    // Esconde em: não-V360, sem brands, Solo (1 marca), ou sem dados visíveis
+    if (!_isV360() || !brands || brands.length < 2 || !filtered.length) {
+      stat.style.display = 'none';
+      return;
+    }
+
+    const lens = brands[0];
+    const stats = _avgShareForBrand(filtered, lens);
+    const pct = (stats.avg * 100).toFixed(1);
+    valEl.textContent = pct + '%';
+    labelEl.textContent = `Share médio (${lens.length > 10 ? lens.slice(0, 9) + '…' : lens})`;
+    stat.style.display = '';
+  }
+
+  // ─── Map pill "Lente vence em X (Y%)" (Fase 5) ──────────────────────────
+  // Só visível em modo Duelo/Categoria (precisa de 2+ marcas).
+  function renderMapPillWins() {
+    const pill = document.getElementById('overlay-lens-wins');
+    const valEl = document.getElementById('overlay-lens-wins-val');
+    const textEl = document.getElementById('overlay-lens-wins-text');
+    const dotEl = document.getElementById('overlay-lens-wins-dot');
+    if (!pill || !valEl || !textEl) return;
+
+    const brands = _selectedBrands();
+    const filtered = (window.filteredData || []);
+
+    if (!_isV360() || !brands || brands.length < 2 || !filtered.length) {
+      pill.style.display = 'none';
+      return;
+    }
+
+    const lens = brands[0];
+    const concs = brands.slice(1);
+    const lensColor = _getBrandColor(lens);
+    const getShare = window.V360CompRender.getShareForBrand;
+
+    // Conta PDVs onde a lente vence pelo menos 1 concorrente (gap > 0)
+    // OBS: usa filteredData (não allData) pra refletir filtros ativos
+    let wins = 0, compared = 0;
+    for (const row of filtered) {
+      const ls = (getShare(row, lens)?.share) || 0;
+      let anyConcShare = false;
+      let lensWinsAll = true;
+      for (const c of concs) {
+        const cs = (getShare(row, c)?.share) || 0;
+        if (ls < 0.005 && cs < 0.005) continue;
+        anyConcShare = true;
+        if (ls <= cs) { lensWinsAll = false; break; }
+      }
+      if (!anyConcShare && ls < 0.005) continue;
+      compared++;
+      if (lensWinsAll && ls > 0.005) wins++;
+    }
+    const pct = compared > 0 ? Math.round(wins / compared * 100) : 0;
+
+    if (dotEl) dotEl.style.background = lensColor;
+    const lensShort = lens.length > 12 ? lens.slice(0, 11) + '…' : lens;
+    textEl.textContent = `${lensShort} vence:`;
+    valEl.textContent = `${wins.toLocaleString('pt-BR')} (${pct}%)`;
+    pill.style.display = '';
+  }
+
   // ─── Orquestrador: chamado em todo updatePanels + eventos do módulo ─────
   function refreshAll() {
     try { renderHero(); } catch(e) { console.error('[v360-hero] renderHero:', e); }
     try { renderH2H(); } catch(e) { console.error('[v360-hero] renderH2H:', e); }
+    try { renderHeaderLensStat(); } catch(e) { console.error('[v360-hero] headerLensStat:', e); }
+    try { renderMapPillWins(); } catch(e) { console.error('[v360-hero] mapPillWins:', e); }
   }
 
   // Esconde tudo (chamado em map-closed/mode-switch pra sair de V360)
@@ -334,6 +410,11 @@
     const heroEl = document.getElementById('hero');
     if (heroEl) heroEl.innerHTML = '';
     document.body.removeAttribute('data-v360-hero');
+    // Fase 5: esconder hstat lens + map pill wins
+    const lensStat = document.getElementById('hstat-lens');
+    if (lensStat) lensStat.style.display = 'none';
+    const pillWins = document.getElementById('overlay-lens-wins');
+    if (pillWins) pillWins.style.display = 'none';
   }
 
   // ─── Init: hooks + listeners ────────────────────────────────────────────
@@ -374,6 +455,8 @@
   window.V360Hero = {
     renderHero,
     renderH2H,
+    renderHeaderLensStat,
+    renderMapPillWins,
     refreshAll,
     hideAll,
   };
