@@ -5688,6 +5688,35 @@ async function bulkDeleteSelected() {
   }
 }
 
+// Dispara `v360:map-opened` para o V360Comp carregar dados competitivos e
+// retorna uma Promise que resolve quando o evento `v360:competitors-loaded`
+// dispara (ou após timeout). Usar antes do primeiro render evita o flash
+// onde o mapa aparece em modo Solo (cor "Na média" amarela em todos os pins)
+// por 0.5-3s até os concorrentes carregarem e reclassificarem tudo.
+function _loadCompetitorsAndWait(mapId, sharedMode) {
+  return new Promise(function(resolve) {
+    var done = false;
+    var finish = function() {
+      if (done) return;
+      done = true;
+      window.removeEventListener('v360:competitors-loaded', finish);
+      resolve();
+    };
+    window.addEventListener('v360:competitors-loaded', finish);
+    // Timeout de segurança: nunca trava o boot por mais de 8s mesmo se algo
+    // der errado no fetch de concorrentes. 8s cobre paginação de ~10k PDVs
+    // de concorrente com folga.
+    setTimeout(finish, 8000);
+    try {
+      window.dispatchEvent(new CustomEvent('v360:map-opened', {
+        detail: { mapId: mapId, sharedMode: !!sharedMode }
+      }));
+    } catch(_) {
+      finish(); // se dispatch falhar, libera o boot
+    }
+  });
+}
+
 async function openSavedMap(mapId, name, mapType) {
   // Limpar pendências de geocoding anterior — evita save acidental
   window._pendingMapName = null;
@@ -5761,16 +5790,23 @@ async function openSavedMap(mapId, name, mapType) {
         new maplibregl.LngLatBounds([parseFloat(_pts[0].lon), parseFloat(_pts[0].lat)], [parseFloat(_pts[0].lon), parseFloat(_pts[0].lat)]));
       map.fitBounds(bounds, { padding:[40,40] });
     }
+    // V360: aguardar concorrentes carregarem ANTES do primeiro render dos
+    // painéis/mapa para evitar flash Solo → Duelo/Categoria. Se o mapa não
+    // tem concorrentes, _loadCompetitorsAndWait resolve rapidamente (~200ms).
+    if (currentMapType === 'varejo360') {
+      // mantém overlay visível com mensagem genérica enquanto sincronizamos
+      overlay.classList.add('active');
+      document.getElementById('geo-current').textContent = 'Preparando análise...';
+      document.getElementById('geo-fill').style.width = '99%';
+      try {
+        await _loadCompetitorsAndWait(mapId, false);
+      } catch(_) {}
+      overlay.classList.remove('active');
+    } else if (window.V360Comp) {
+      window.V360Comp.reset();
+    }
     populateFilters(); updatePanels(); updateOverlay();
     checkReenrichBar();
-    // V360 Competitors PR1: dispara load de concorrentes
-    try {
-      if (currentMapType === 'varejo360') {
-        window.dispatchEvent(new CustomEvent('v360:map-opened', { detail: { mapId: mapId, sharedMode: false } }));
-      } else if (window.V360Comp) {
-        window.V360Comp.reset();
-      }
-    } catch(_) {}
     if (currentMapType === 'places_discovery' && allData.length > 0) {
       document.getElementById('places-panel').style.display = 'block';
       document.getElementById('places-results-section').style.display = 'block';
@@ -6139,15 +6175,13 @@ async function initSharedMode() {
     }).filter(function(r) { return r.lat && r.lon; });
     filteredData = allData.slice();
 
-    populateFilters(); applyFilters(); updatePanels(); renderMarkers(); updateOverlay();
+    // V360 Competitors: carrega ANTES de renderizar pra evitar flash Solo→Duelo
+    window._currentOpenMapId = mapMeta.id;
+    if (mapMeta.map_type === 'varejo360') {
+      try { await _loadCompetitorsAndWait(mapMeta.id, true); } catch(_) {}
+    }
 
-    // V360 Competitors PR1: carrega concorrentes em shared mode
-    try {
-      window._currentOpenMapId = mapMeta.id; // necessário pra V360Comp.loadForMap
-      if (mapMeta.map_type === 'varejo360') {
-        window.dispatchEvent(new CustomEvent('v360:map-opened', { detail: { mapId: mapMeta.id, sharedMode: true } }));
-      }
-    } catch(_) {}
+    populateFilters(); applyFilters(); updatePanels(); renderMarkers(); updateOverlay();
 
     // Zoom to data
     if (allData.length > 0 && map) {
