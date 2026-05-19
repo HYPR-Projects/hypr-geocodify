@@ -688,6 +688,13 @@ function _refreshPinColors() {
 function pinColor(row) {
   if (!_pinColors) _refreshPinColors();
   if (currentMapType === 'places_discovery') return _pinColors.purple;
+  // V360 Competitors PR2: delega para o módulo de render quando há concorrentes carregados
+  try {
+    if (window.V360CompRender && typeof window.V360CompRender.pinColor === 'function') {
+      const c = window.V360CompRender.pinColor(row, _pinColors);
+      if (c) return c;
+    }
+  } catch(_) {}
   const diff = parseFloat(row.percentual_diff_media_dimensao || 0);
   if (diff > 2) return _pinColors.win;
   if (diff < -2) return _pinColors.lose;
@@ -785,6 +792,19 @@ function buildPopup(row) {
   }
 
   // Varejo 360: full popup with metrics
+  // V360 Competitors PR2: enriquece popup com mini-barras das marcas concorrentes
+  try {
+    if (window.V360CompRender && typeof window.V360CompRender.buildPopupExtension === 'function') {
+      const ext = window.V360CompRender.buildPopupExtension(row);
+      if (ext) {
+        return _v360BuildPopupOriginal(row, ext);
+      }
+    }
+  } catch(_) {}
+  return _v360BuildPopupOriginal(row, '');
+}
+
+function _v360BuildPopupOriginal(row, compExtension) {
   const diff = parseFloat(row.percentual_diff_media_dimensao || 0);
   const diffClass = diff > 2 ? 'positive' : diff < -2 ? 'negative' : '';
   const diffLabel = diff > 0 ? `+${diff.toFixed(1)}%` : `${diff.toFixed(1)}%`;
@@ -845,6 +865,7 @@ function buildPopup(row) {
       <span class="popup-tickets-label">Tickets na amostra</span>
       <span class="popup-tickets-val">${parseInt(row.tickets_amostra || 0).toLocaleString('pt-BR')}</span>
     </div>
+    ${compExtension || ''}
     ${(!_isSharedMode && currentUser && row.id) ? `
     <div class="popup-actions">
       <button class="popup-delete-btn" onclick="deletePdvFromMap('${row.id}')" title="Remover este PDV do mapa">

@@ -1,0 +1,765 @@
+// ────────────────────────────────────────────────────────────────────────────
+// V360 Competitors — PR2: Modos automáticos de render + Overview comparativa
+// ────────────────────────────────────────────────────────────────────────────
+// Detecta modo (Solo / Duelo / Categoria) baseado em quantos competitors estão
+// carregados. Modo Solo: comportamento original do app (não interfere).
+// Modo Duelo (1 competitor): pinos coloridos por gap base vs competitor.
+// Modo Categoria (2+ competitors): pinos coloridos pela marca líder no PDV.
+//
+// Não modifica HTML do index.html nem CSS. Tudo via DOM dinâmico + injeção
+// de painel comparativo no topo da Overview e enriquecimento do popup.
+// ────────────────────────────────────────────────────────────────────────────
+
+(function() {
+  'use strict';
+
+  // ─── Constantes de classificação ────────────────────────────────────────
+  // Estados competitivos (Duelo: base vs único competitor)
+  const STATE = {
+    DOMINANCE:    'dominance',     // base ≥ 1.5x competitor
+    LEADERSHIP:   'leadership',    // base > competitor, gap < 1.5x
+    DISPUTE:      'dispute',       // |gap| < 2pp, ambos > 0
+    BEHIND:       'behind',        // competitor > base, gap < 1.5x
+    VULNERABLE:   'vulnerable',    // competitor ≥ 1.5x base
+    OPPORTUNITY:  'opportunity',   // base share=0 (ou tickets < piso) E competitor > 0
+    EXCLUSIVE:    'exclusive',     // só base vende (competitor = 0)
+    WHITESPACE:   'whitespace',    // ambos = 0 ou tickets insuficientes
+  };
+
+  const STATE_COLORS = {
+    dominance:   '#15803d',
+    leadership:  '#22c55e',
+    dispute:     '#eab308',
+    behind:      '#f97316',
+    vulnerable:  '#dc2626',
+    opportunity: '#3b82f6',
+    exclusive:   '#a855f7',
+    whitespace:  '#94a3b8',
+  };
+
+  const STATE_LABELS = {
+    dominance:   'Dominância',
+    leadership:  'Liderança',
+    dispute:     'Disputa',
+    behind:      'Atrás',
+    vulnerable:  'Vulnerável',
+    opportunity: 'Oportunidade aberta',
+    exclusive:   'Exclusividade',
+    whitespace:  'Whitespace',
+  };
+
+  const STATE_DESCRIPTIONS = {
+    dominance:   'Marca base com 1.5× ou mais o share do principal concorrente',
+    leadership:  'Marca base à frente, mas com margem menor que 1.5×',
+    dispute:     'Diferença menor que 2pp entre marca base e concorrente',
+    behind:      'Concorrente à frente da marca base, gap < 1.5×',
+    vulnerable:  'Concorrente com 1.5× ou mais o share da marca base',
+    opportunity: 'Marca base ausente ou com amostra insuficiente, concorrente vendendo',
+    exclusive:   'Somente marca base vende neste PDV',
+    whitespace:  'Categoria não desenvolvida (ambos sem amostra significativa)',
+  };
+
+  // ─── Estado interno ─────────────────────────────────────────────────────
+  let _hookActive = false;
+  let _ticketsFloor = 5; // sobrescrito pelo state de V360Comp
+  let _classifyCache = new Map(); // cnpj_14 -> { state, leaderBrand, gap }
+  let _classifyCacheKey = '';
+
+  function getMode() {
+    if (!window.V360Comp) return 'solo';
+    const st = window.V360Comp.getState();
+    if (!st || !st.competitors || st.competitors.length === 0) return 'solo';
+    if (st.competitors.length === 1) return 'duelo';
+    return 'categoria';
+  }
+
+  function getBaseBrand() {
+    return (window._currentMapBaseBrand || '').toUpperCase().trim();
+  }
+
+  function getPerspectiveBrand() {
+    const st = window.V360Comp?.getState();
+    return st?.perspectiveBrand || getBaseBrand();
+  }
+
+  // Retorna a "marca da perspectiva" + lista das outras (ordenadas)
+  function brandsList() {
+    const st = window.V360Comp?.getState();
+    if (!st) return { perspective: getBaseBrand(), others: [] };
+    const persp = st.perspectiveBrand || getBaseBrand();
+    const all = [getBaseBrand(), ...st.competitors.map(c => c.brand_name)];
+    return {
+      perspective: persp,
+      others: all.filter(b => b && b !== persp),
+      all,
+      colorMap: buildColorMap(),
+    };
+  }
+
+  function buildColorMap() {
+    // Mapa marca -> cor (base + competitors)
+    const map = {};
+    const baseBrand = getBaseBrand();
+    if (baseBrand) map[baseBrand] = '#111827'; // base sempre preta/cinza escuro
+    const st = window.V360Comp?.getState();
+    if (st) {
+      for (const c of st.competitors) {
+        map[c.brand_name] = c.brand_color || '#6b7280';
+      }
+    }
+    return map;
+  }
+
+  // Pega share da marca X num CNPJ. Marca = base usa row do allData;
+  // marca != base usa competitor pdvs.
+  function getShareForBrand(row, brandName) {
+    if (!row) return null;
+    if (brandName === getBaseBrand()) {
+      const s = row.share_reais_sku_dimensao;
+      const t = row.tickets_amostra;
+      return {
+        share: s != null ? parseFloat(s) : null,
+        tickets: t != null ? parseInt(t) : null,
+        diffMedia: parseFloat(row.share_reais_sku_diff_media_dimensao || 0),
+      };
+    }
+    // Competitor
+    const cnpj14 = row.cnpj_14;
+    if (!cnpj14 || !window.V360Comp) return null;
+    const pdv = window.V360Comp.getCompetitorPdv(brandName, cnpj14);
+    if (!pdv) return null;
+    return {
+      share: pdv.share_reais_sku_dimensao != null ? parseFloat(pdv.share_reais_sku_dimensao) : null,
+      tickets: pdv.tickets_amostra,
+      diffMedia: parseFloat(pdv.share_reais_sku_diff_media_dimensao || 0),
+    };
+  }
+
+  // Share "válido" = tickets >= floor (sem isso = "sem dado")
+  function validShare(brandData, floor) {
+    if (!brandData) return null;
+    if (brandData.tickets != null && brandData.tickets < floor) return null;
+    return brandData.share;
+  }
+
+  // ─── Classificação por modo ──────────────────────────────────────────────
+  function classifyRow(row, mode, persp, others, floor) {
+    const cacheKey = mode + '|' + persp + '|' + floor + '|' + others.join(',');
+    if (cacheKey !== _classifyCacheKey) {
+      _classifyCache.clear();
+      _classifyCacheKey = cacheKey;
+    }
+    const cnpj14 = row.cnpj_14;
+    if (cnpj14 && _classifyCache.has(cnpj14)) return _classifyCache.get(cnpj14);
+
+    let result;
+    if (mode === 'duelo') {
+      result = classifyDuelo(row, persp, others[0], floor);
+    } else if (mode === 'categoria') {
+      result = classifyCategoria(row, persp, others, floor);
+    } else {
+      result = null;
+    }
+    if (cnpj14) _classifyCache.set(cnpj14, result);
+    return result;
+  }
+
+  function classifyDuelo(row, baseBrand, otherBrand, floor) {
+    const baseData = getShareForBrand(row, baseBrand);
+    const otherData = getShareForBrand(row, otherBrand);
+    const baseShare = validShare(baseData, floor);
+    const otherShare = validShare(otherData, floor);
+
+    if (baseShare == null && otherShare == null) {
+      return { state: STATE.WHITESPACE, leaderBrand: null, gap: 0, baseShare: 0, otherShare: 0 };
+    }
+    if (baseShare == null || baseShare === 0) {
+      if (otherShare == null || otherShare === 0) {
+        return { state: STATE.WHITESPACE, leaderBrand: null, gap: 0, baseShare: 0, otherShare: 0 };
+      }
+      return { state: STATE.OPPORTUNITY, leaderBrand: otherBrand, gap: -otherShare, baseShare: 0, otherShare };
+    }
+    if (otherShare == null || otherShare === 0) {
+      return { state: STATE.EXCLUSIVE, leaderBrand: baseBrand, gap: baseShare, baseShare, otherShare: 0 };
+    }
+
+    const gap = baseShare - otherShare;
+    const gapAbs = Math.abs(gap);
+
+    // Disputa: gap < 2pp
+    if (gapAbs < 0.02) {
+      return { state: STATE.DISPUTE, leaderBrand: baseShare >= otherShare ? baseBrand : otherBrand, gap, baseShare, otherShare };
+    }
+
+    if (baseShare > otherShare) {
+      const ratio = otherShare > 0 ? baseShare / otherShare : 999;
+      return {
+        state: ratio >= 1.5 ? STATE.DOMINANCE : STATE.LEADERSHIP,
+        leaderBrand: baseBrand,
+        gap,
+        baseShare,
+        otherShare,
+      };
+    } else {
+      const ratio = baseShare > 0 ? otherShare / baseShare : 999;
+      return {
+        state: ratio >= 1.5 ? STATE.VULNERABLE : STATE.BEHIND,
+        leaderBrand: otherBrand,
+        gap,
+        baseShare,
+        otherShare,
+      };
+    }
+  }
+
+  function classifyCategoria(row, baseBrand, others, floor) {
+    // Em categoria, calcula share válido pra todas as marcas e identifica líder
+    const baseData = getShareForBrand(row, baseBrand);
+    const baseShare = validShare(baseData, floor) || 0;
+    const shares = [{ brand: baseBrand, share: baseShare }];
+    for (const o of others) {
+      const od = getShareForBrand(row, o);
+      const s = validShare(od, floor) || 0;
+      shares.push({ brand: o, share: s });
+    }
+    shares.sort((a,b) => b.share - a.share);
+    const top = shares[0];
+    const second = shares[1];
+
+    if (top.share === 0) {
+      return { state: STATE.WHITESPACE, leaderBrand: null, gap: 0, allShares: shares };
+    }
+    if (second && second.share === 0) {
+      // Só uma marca vende
+      return {
+        state: top.brand === baseBrand ? STATE.EXCLUSIVE : STATE.OPPORTUNITY,
+        leaderBrand: top.brand,
+        gap: top.share,
+        allShares: shares,
+      };
+    }
+    const gap = top.share - second.share;
+    const gapAbs = Math.abs(gap);
+    // Disputa: top vs 2º < 2pp
+    if (gapAbs < 0.02) {
+      return { state: STATE.DISPUTE, leaderBrand: top.brand, gap, allShares: shares };
+    }
+    // Top vs 2º: ratio determina força
+    const ratio = second.share > 0 ? top.share / second.share : 999;
+    let state;
+    if (top.brand === baseBrand) {
+      state = ratio >= 1.5 ? STATE.DOMINANCE : STATE.LEADERSHIP;
+    } else {
+      // Avalia gap entre líder e base (não 2º)
+      const baseEntry = shares.find(s => s.brand === baseBrand);
+      const baseToLeaderRatio = baseEntry && baseEntry.share > 0 ? top.share / baseEntry.share : 999;
+      state = baseToLeaderRatio >= 1.5 ? STATE.VULNERABLE : STATE.BEHIND;
+    }
+    return { state, leaderBrand: top.brand, gap, allShares: shares };
+  }
+
+  // ─── Hook: pinColor (PR2 sobrescreve Solo só quando há competitors) ─────
+  function pinColor(row, defaultColors) {
+    if (!_hookActive) return null;
+    const mode = getMode();
+    if (mode === 'solo') return null; // deixa pinColor original rodar
+
+    const persp = getPerspectiveBrand();
+    const brands = brandsList();
+    const others = brands.others;
+    const cls = classifyRow(row, mode, persp, others, _ticketsFloor);
+    if (!cls) return null;
+
+    if (mode === 'duelo') {
+      return STATE_COLORS[cls.state] || defaultColors.neutral;
+    }
+    // Categoria: cor da marca líder
+    if (mode === 'categoria') {
+      if (cls.state === STATE.WHITESPACE) return STATE_COLORS.whitespace;
+      const colorMap = brands.colorMap;
+      return colorMap[cls.leaderBrand] || defaultColors.neutral;
+    }
+    return null;
+  }
+
+  // ─── Hook: popup extension (mini-barras de todas as marcas) ─────────────
+  function buildPopupExtension(row) {
+    if (!_hookActive) return '';
+    const mode = getMode();
+    if (mode === 'solo') return '';
+
+    const brands = brandsList();
+    const colorMap = brands.colorMap;
+    const baseBrand = getBaseBrand();
+    const persp = brands.perspective;
+
+    // Coleta share de todas as marcas
+    const data = [];
+    for (const b of brands.all) {
+      const bd = getShareForBrand(row, b);
+      data.push({
+        brand: b,
+        share: bd?.share != null ? bd.share : null,
+        tickets: bd?.tickets || 0,
+        isBase: b === baseBrand,
+        isPerspective: b === persp,
+        color: colorMap[b] || '#6b7280',
+      });
+    }
+    data.sort((a,b) => (b.share || 0) - (a.share || 0));
+
+    const maxShare = Math.max(...data.map(d => d.share || 0), 0.01);
+
+    // Classificação atual (chip de estado)
+    const cls = classifyRow(row, mode, persp, brands.others, _ticketsFloor);
+    const stateLabel = cls ? STATE_LABELS[cls.state] : '';
+    const stateColor = cls ? STATE_COLORS[cls.state] : '#94a3b8';
+
+    let rowsHtml = '';
+    for (const d of data) {
+      const lowConf = d.tickets > 0 && d.tickets < _ticketsFloor;
+      const sharePct = d.share != null ? d.share * 100 : null;
+      const wPct = sharePct != null ? Math.min(sharePct / (maxShare * 100) * 100, 100) : 0;
+      const valLabel = sharePct == null ? '—' : sharePct.toFixed(1) + '%';
+      rowsHtml += `
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;font-size:11px;">
+          <span style="width:7px;height:7px;border-radius:50%;background:${d.color};flex-shrink:0;"></span>
+          <span style="flex:0 0 70px;${d.isPerspective ? 'font-weight:700;' : 'font-weight:500;'}color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${d.brand}${d.isBase ? ' <span style="font-size:9px;opacity:0.55;">·base</span>' : ''}</span>
+          <div style="flex:1;height:6px;background:rgba(0,0,0,0.06);border-radius:3px;overflow:hidden;">
+            <div style="width:${wPct}%;height:100%;background:${d.color};border-radius:3px;"></div>
+          </div>
+          <span style="flex:0 0 48px;text-align:right;font-variant-numeric:tabular-nums;color:var(--text);">${valLabel}</span>
+          ${lowConf ? `<span title="Amostra baixa (${d.tickets} tickets)" style="font-size:9px;color:#f59e0b;">⚠</span>` : ''}
+        </div>
+      `;
+    }
+
+    return `
+      <div style="margin-top:12px;padding-top:10px;border-top:1px solid var(--border,#e5e7eb);">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+          <div style="font-size:10px;text-transform:uppercase;letter-spacing:0.06em;color:var(--text-muted);font-weight:600;">Comparativo · ${brands.all.length} marcas</div>
+          ${stateLabel ? `<span style="display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:10px;background:${stateColor}22;color:${stateColor};font-size:10px;font-weight:600;">${stateLabel}</span>` : ''}
+        </div>
+        <div>${rowsHtml}</div>
+      </div>
+    `;
+  }
+
+  // ─── Painel comparativo: substitui mini-stats da Overview quando há comp ─
+  // Estratégia: insere um container ANTES de .overview-mini-stats e esconde
+  // o original. Restaura ao remover competitors.
+  const COMP_PANEL_ID = 'v360-comp-overview-panel';
+
+  function renderCompOverview() {
+    const tcOverview = document.getElementById('tc-overview');
+    if (!tcOverview) return;
+    const originalMiniStats = tcOverview.querySelector('.overview-mini-stats');
+    if (!originalMiniStats) return;
+
+    const mode = getMode();
+    let panel = document.getElementById(COMP_PANEL_ID);
+
+    if (mode === 'solo') {
+      // Restaura UI original
+      if (panel) panel.style.display = 'none';
+      originalMiniStats.style.display = '';
+      return;
+    }
+
+    // Esconde mini-stats originais
+    originalMiniStats.style.display = 'none';
+
+    if (!panel) {
+      panel = document.createElement('div');
+      panel.id = COMP_PANEL_ID;
+      panel.style.cssText = 'margin-bottom:16px;';
+      originalMiniStats.parentNode.insertBefore(panel, originalMiniStats);
+    }
+    panel.style.display = '';
+
+    const data = window.filteredData || window.allData || [];
+    // Mini-stats e cards usam dados SEM state filter (pra contagens sempre totais)
+    // O state filter atua só no mapa
+    const persp = getPerspectiveBrand();
+    const brands = brandsList();
+
+    if (mode === 'duelo') {
+      renderDueloOverview(panel, data, persp, brands.others[0]);
+    } else {
+      renderCategoriaOverview(panel, data, persp, brands.others, brands.colorMap);
+    }
+  }
+
+  function renderDueloOverview(panel, data, baseBrand, otherBrand) {
+    // Conta por estado
+    const counts = {};
+    for (const k of Object.values(STATE)) counts[k] = 0;
+    let totalBaseShare = 0, totalOtherShare = 0, pdvsCount = 0;
+    let baseWins = 0, otherWins = 0, ties = 0, baseTickets = 0;
+
+    for (const row of data) {
+      const cls = classifyRow(row, 'duelo', baseBrand, [otherBrand], _ticketsFloor);
+      if (!cls) continue;
+      counts[cls.state]++;
+      if (cls.baseShare > 0 || cls.otherShare > 0) {
+        totalBaseShare += cls.baseShare || 0;
+        totalOtherShare += cls.otherShare || 0;
+        pdvsCount++;
+        if (cls.baseShare > cls.otherShare + 0.005) baseWins++;
+        else if (cls.otherShare > cls.baseShare + 0.005) otherWins++;
+        else ties++;
+      }
+    }
+
+    const baseAvg = pdvsCount ? totalBaseShare / pdvsCount * 100 : 0;
+    const otherAvg = pdvsCount ? totalOtherShare / pdvsCount * 100 : 0;
+    const baseColor = brandsList().colorMap[baseBrand] || '#111';
+    const otherColor = brandsList().colorMap[otherBrand] || '#dc2626';
+
+    const headlineNum = baseWins + counts[STATE.DOMINANCE] + counts[STATE.LEADERSHIP] + counts[STATE.EXCLUSIVE];
+    const opportunityNum = counts[STATE.OPPORTUNITY];
+    const vulnerableNum = counts[STATE.VULNERABLE];
+
+    panel.innerHTML = `
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px;">
+        <div style="padding:10px 12px;border-radius:10px;background:linear-gradient(135deg,${baseColor}15,${baseColor}05);border:1px solid ${baseColor}30;">
+          <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px;">
+            <span style="width:8px;height:8px;border-radius:50%;background:${baseColor};"></span>
+            <span style="font-size:10px;text-transform:uppercase;letter-spacing:0.05em;font-weight:600;color:var(--text-muted);">${baseBrand}</span>
+          </div>
+          <div style="font-size:22px;font-weight:700;font-variant-numeric:tabular-nums;color:${baseColor};">${baseAvg.toFixed(1)}%</div>
+          <div style="font-size:10px;color:var(--text-muted);margin-top:2px;">Share médio onde compete</div>
+        </div>
+        <div style="padding:10px 12px;border-radius:10px;background:linear-gradient(135deg,${otherColor}15,${otherColor}05);border:1px solid ${otherColor}30;">
+          <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px;">
+            <span style="width:8px;height:8px;border-radius:50%;background:${otherColor};"></span>
+            <span style="font-size:10px;text-transform:uppercase;letter-spacing:0.05em;font-weight:600;color:var(--text-muted);">${otherBrand}</span>
+          </div>
+          <div style="font-size:22px;font-weight:700;font-variant-numeric:tabular-nums;color:${otherColor};">${otherAvg.toFixed(1)}%</div>
+          <div style="font-size:10px;color:var(--text-muted);margin-top:2px;">Share médio onde compete</div>
+        </div>
+      </div>
+
+      <div class="overview-mini-stats" style="grid-template-columns:repeat(4,1fr);">
+        ${miniStat('Vence', counts[STATE.DOMINANCE] + counts[STATE.LEADERSHIP] + counts[STATE.EXCLUSIVE], '#16a34a', 'state-win')}
+        ${miniStat('Disputa', counts[STATE.DISPUTE], '#eab308', 'state-dispute')}
+        ${miniStat('Perde', counts[STATE.BEHIND] + counts[STATE.VULNERABLE], '#dc2626', 'state-lose')}
+        ${miniStat('Oportunidade', counts[STATE.OPPORTUNITY], '#3b82f6', 'state-opportunity')}
+      </div>
+
+      ${renderStateLegend('duelo')}
+    `;
+    wireStateFilters(panel);
+  }
+
+  function renderCategoriaOverview(panel, data, baseBrand, others, colorMap) {
+    const brandWins = {};
+    const brandShares = {};
+    const brandCounts = {};
+    const allBrands = [baseBrand, ...others];
+    for (const b of allBrands) { brandWins[b] = 0; brandShares[b] = 0; brandCounts[b] = 0; }
+    let whitespaceCount = 0;
+
+    for (const row of data) {
+      const cls = classifyRow(row, 'categoria', baseBrand, others, _ticketsFloor);
+      if (!cls) continue;
+      if (cls.state === STATE.WHITESPACE) { whitespaceCount++; continue; }
+      if (cls.leaderBrand) brandWins[cls.leaderBrand] = (brandWins[cls.leaderBrand] || 0) + 1;
+      if (cls.allShares) {
+        for (const s of cls.allShares) {
+          if (s.share > 0) {
+            brandShares[s.brand] = (brandShares[s.brand] || 0) + s.share;
+            brandCounts[s.brand] = (brandCounts[s.brand] || 0) + 1;
+          }
+        }
+      }
+    }
+
+    // Cards por marca (ordenados pela perspectiva primeiro)
+    const persp = getPerspectiveBrand();
+    const sortedBrands = [persp, ...allBrands.filter(b => b !== persp)];
+    let cardsHtml = '';
+    for (const b of sortedBrands) {
+      const c = colorMap[b] || '#6b7280';
+      const wins = brandWins[b] || 0;
+      const avg = brandCounts[b] ? brandShares[b] / brandCounts[b] * 100 : 0;
+      const isPersp = b === persp;
+      cardsHtml += `
+        <div style="padding:8px 10px;border-radius:8px;background:${c}12;border:1px solid ${c}30;${isPersp ? `outline:2px solid ${c}60;outline-offset:-2px;` : ''}">
+          <div style="display:flex;align-items:center;gap:5px;margin-bottom:2px;">
+            <span style="width:7px;height:7px;border-radius:50%;background:${c};"></span>
+            <span style="font-size:10px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.04em;">${b}${b === baseBrand ? ' · base' : ''}</span>
+          </div>
+          <div style="font-size:18px;font-weight:700;font-variant-numeric:tabular-nums;color:${c};">${wins.toLocaleString('pt-BR')}</div>
+          <div style="font-size:9px;color:var(--text-muted);margin-top:1px;">PDVs liderados · ${avg.toFixed(1)}% share méd.</div>
+        </div>
+      `;
+    }
+    panel.innerHTML = `
+      <div style="display:grid;grid-template-columns:repeat(${Math.min(sortedBrands.length, 4)},1fr);gap:6px;margin-bottom:12px;">
+        ${cardsHtml}
+      </div>
+
+      <div style="padding:8px 10px;border-radius:8px;background:rgba(148,163,184,0.1);border:1px solid rgba(148,163,184,0.25);margin-bottom:12px;display:flex;align-items:center;gap:8px;">
+        <span style="width:7px;height:7px;border-radius:50%;background:#94a3b8;"></span>
+        <span style="font-size:11px;color:var(--text-muted);flex:1;">Whitespace (nenhuma marca com amostra)</span>
+        <span style="font-size:14px;font-weight:600;color:var(--text);">${whitespaceCount.toLocaleString('pt-BR')}</span>
+      </div>
+
+      <div id="v360-headtohead" style="margin-bottom:12px;"></div>
+      ${renderStateLegend('categoria')}
+    `;
+    renderHeadToHeadMatrix(panel.querySelector('#v360-headtohead'), data, allBrands, colorMap);
+    wireStateFilters(panel);
+  }
+
+  function renderHeadToHeadMatrix(container, data, brands, colorMap) {
+    if (!container) return;
+    const n = brands.length;
+    // matrix[i][j] = quantos PDVs marca i lidera sobre marca j (gap > 0)
+    const matrix = Array.from({length: n}, () => new Array(n).fill(0));
+    for (const row of data) {
+      const sharesByBrand = {};
+      for (const b of brands) {
+        const bd = getShareForBrand(row, b);
+        const s = validShare(bd, _ticketsFloor);
+        sharesByBrand[b] = s || 0;
+      }
+      for (let i = 0; i < n; i++) {
+        for (let j = 0; j < n; j++) {
+          if (i === j) continue;
+          if (sharesByBrand[brands[i]] > sharesByBrand[brands[j]] + 0.001 && sharesByBrand[brands[i]] > 0) {
+            matrix[i][j]++;
+          }
+        }
+      }
+    }
+
+    let html = `<div style="font-size:10px;text-transform:uppercase;letter-spacing:0.06em;color:var(--text-muted);font-weight:600;margin-bottom:8px;">Matriz cabeça a cabeça</div>`;
+    html += `<div style="overflow-x:auto;border-radius:8px;border:1px solid var(--border,#e5e7eb);">`;
+    html += `<table style="width:100%;border-collapse:collapse;font-size:11px;">`;
+    html += `<thead><tr><th style="text-align:left;padding:6px 8px;font-weight:500;color:var(--text-muted);font-size:10px;background:var(--bg-subtle,#f9fafb);">Vence ↓ / Perde →</th>`;
+    for (const b of brands) {
+      html += `<th style="text-align:center;padding:6px 8px;font-weight:600;color:${colorMap[b] || '#111'};background:var(--bg-subtle,#f9fafb);font-size:10px;">${b}</th>`;
+    }
+    html += `</tr></thead><tbody>`;
+    for (let i = 0; i < n; i++) {
+      html += `<tr><td style="padding:6px 8px;font-weight:600;color:${colorMap[brands[i]] || '#111'};background:var(--bg-subtle,#f9fafb);font-size:10px;">${brands[i]}</td>`;
+      for (let j = 0; j < n; j++) {
+        if (i === j) {
+          html += `<td style="padding:6px 8px;text-align:center;color:var(--text-muted);">—</td>`;
+        } else {
+          const v = matrix[i][j];
+          const total = matrix[i][j] + matrix[j][i];
+          const pct = total > 0 ? (v / total * 100).toFixed(0) : '0';
+          const bg = v > matrix[j][i] ? '#16a34a15' : v < matrix[j][i] ? '#dc262615' : '#eab30815';
+          const color = v > matrix[j][i] ? '#15803d' : v < matrix[j][i] ? '#991b1b' : '#854d0e';
+          html += `<td style="padding:6px 8px;text-align:center;background:${bg};color:${color};font-variant-numeric:tabular-nums;"><div style="font-weight:600;">${v.toLocaleString('pt-BR')}</div><div style="font-size:9px;opacity:0.7;">${pct}%</div></td>`;
+        }
+      }
+      html += `</tr>`;
+    }
+    html += `</tbody></table></div>`;
+    html += `<div style="font-size:10px;color:var(--text-muted);margin-top:6px;">Cada célula: nº de PDVs onde a marca da linha vence a marca da coluna (% do total entre ambas).</div>`;
+    container.innerHTML = html;
+  }
+
+  function miniStat(label, value, color, key) {
+    return `
+      <div class="overview-mini-stat clickable" data-state-filter="${key}" title="Filtrar PDVs nesse estado">
+        <div class="overview-mini-stat-val" style="color:${color};">${value.toLocaleString('pt-BR')}</div>
+        <div class="overview-mini-stat-label">${label}</div>
+      </div>
+    `;
+  }
+
+  function renderStateLegend(mode) {
+    const states = mode === 'duelo'
+      ? [STATE.DOMINANCE, STATE.LEADERSHIP, STATE.DISPUTE, STATE.BEHIND, STATE.VULNERABLE, STATE.OPPORTUNITY, STATE.EXCLUSIVE, STATE.WHITESPACE]
+      : [STATE.DOMINANCE, STATE.LEADERSHIP, STATE.DISPUTE, STATE.OPPORTUNITY, STATE.EXCLUSIVE, STATE.WHITESPACE];
+    let html = `<div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--border,#e5e7eb);"><div style="font-size:10px;text-transform:uppercase;letter-spacing:0.06em;color:var(--text-muted);font-weight:600;margin-bottom:6px;">Legenda de estados</div><div style="display:grid;grid-template-columns:1fr 1fr;gap:4px 12px;">`;
+    for (const s of states) {
+      html += `<div style="display:flex;align-items:center;gap:6px;font-size:10.5px;" title="${STATE_DESCRIPTIONS[s]}">
+        <span style="width:8px;height:8px;border-radius:50%;background:${STATE_COLORS[s]};flex-shrink:0;"></span>
+        <span style="color:var(--text);">${STATE_LABELS[s]}</span>
+      </div>`;
+    }
+    html += `</div></div>`;
+    return html;
+  }
+
+  // ─── State filter (clique nos mini-stats do PR2) ────────────────────────
+  let _activeStateFilter = null;
+
+  function wireStateFilters(panel) {
+    panel.querySelectorAll('[data-state-filter]').forEach(el => {
+      el.style.cursor = 'pointer';
+      if (el.dataset.stateFilter === _activeStateFilter) {
+        el.style.outline = '2px solid var(--accent,#2563eb)';
+        el.style.outlineOffset = '-1px';
+        el.style.borderRadius = '8px';
+      }
+      el.onclick = () => {
+        if (_activeStateFilter === el.dataset.stateFilter) {
+          _activeStateFilter = null;
+        } else {
+          _activeStateFilter = el.dataset.stateFilter;
+        }
+        rerenderMap();
+        renderCompOverview();
+      };
+    });
+  }
+
+  function passStateFilter(row) {
+    if (!_activeStateFilter) return true;
+    const mode = getMode();
+    if (mode === 'solo') return true;
+    const brands = brandsList();
+    const cls = classifyRow(row, mode, brands.perspective, brands.others, _ticketsFloor);
+    if (!cls) return true;
+    switch (_activeStateFilter) {
+      case 'state-win': return cls.state === STATE.DOMINANCE || cls.state === STATE.LEADERSHIP || cls.state === STATE.EXCLUSIVE;
+      case 'state-dispute': return cls.state === STATE.DISPUTE;
+      case 'state-lose': return cls.state === STATE.BEHIND || cls.state === STATE.VULNERABLE;
+      case 'state-opportunity': return cls.state === STATE.OPPORTUNITY;
+      default: return true;
+    }
+  }
+
+  // ─── Filter pipeline integration ────────────────────────────────────────
+  // Hook into filtered data: when state filter is active, slice further.
+  function getFilteredWithState() {
+    const data = window.filteredData || [];
+    if (!_activeStateFilter) return data;
+    return data.filter(passStateFilter);
+  }
+
+  // ─── Re-render map markers usando classificação PR2 ─────────────────────
+  function rerenderMap() {
+    // Limpa cache pra forçar reclassificação
+    _classifyCache.clear();
+    _classifyCacheKey = '';
+    try {
+      if (typeof window.renderMarkers === 'function') window.renderMarkers();
+    } catch(_) {}
+  }
+
+  // Hook em renderMarkers: substitui filteredData temporariamente se houver state filter
+  function installRenderHook() {
+    if (window._v360CompRenderHookInstalled) return;
+    const origRender = window.renderMarkers;
+    if (typeof origRender !== 'function') return;
+    window.renderMarkers = function() {
+      if (_activeStateFilter && _hookActive && getMode() !== 'solo') {
+        const orig = window.filteredData;
+        window.filteredData = orig.filter(passStateFilter);
+        try { origRender.apply(this, arguments); } finally { window.filteredData = orig; }
+      } else {
+        return origRender.apply(this, arguments);
+      }
+    };
+    window._v360CompRenderHookInstalled = true;
+  }
+
+  // ─── Activation lifecycle ───────────────────────────────────────────────
+  function activate() {
+    _hookActive = true;
+    if (window.V360Comp) {
+      const st = window.V360Comp.getState();
+      _ticketsFloor = st?.ticketsFloor || 5;
+    }
+    installRenderHook();
+    renderCompOverview();
+    rerenderMap();
+  }
+
+  function deactivate() {
+    _hookActive = false;
+    _activeStateFilter = null;
+    renderCompOverview(); // restaura mini-stats originais
+    rerenderMap();
+  }
+
+  // ─── Event wiring ───────────────────────────────────────────────────────
+  function onCompetitorsLoaded() {
+    const st = window.V360Comp?.getState();
+    if (st && st.competitors.length > 0) {
+      activate();
+    } else {
+      deactivate();
+    }
+  }
+
+  function onPerspectiveChanged() {
+    _classifyCache.clear();
+    _classifyCacheKey = '';
+    rerenderMap();
+    renderCompOverview();
+  }
+
+  function onFiltersChanged() {
+    renderCompOverview();
+  }
+
+  // Hook em updatePanels pra atualizar overview comparativa quando filtros mudam
+  function installPanelHook() {
+    if (window._v360CompPanelHookInstalled) return;
+    const orig = window.updatePanels;
+    if (typeof orig !== 'function') return;
+    window.updatePanels = function() {
+      const result = orig.apply(this, arguments);
+      if (_hookActive && getMode() !== 'solo') {
+        // Re-render overview comparativa após update
+        setTimeout(renderCompOverview, 60);
+      }
+      return result;
+    };
+    window._v360CompPanelHookInstalled = true;
+  }
+
+  // ─── Inicialização (espera V360Comp estar disponível) ──────────────────
+  function init() {
+    if (!window.V360Comp) {
+      // V360Comp ainda não carregou, tenta de novo
+      setTimeout(init, 100);
+      return;
+    }
+    installRenderHook();
+    installPanelHook();
+    window.addEventListener('v360:competitors-loaded', onCompetitorsLoaded);
+    window.addEventListener('v360:perspective-changed', onPerspectiveChanged);
+    // Re-render quando adicionar/remover concorrente também
+    const origRenderHeaderUI = window.V360Comp.renderHeaderUI;
+    if (origRenderHeaderUI) {
+      window.V360Comp.renderHeaderUI = function() {
+        const r = origRenderHeaderUI.apply(this, arguments);
+        onCompetitorsLoaded();
+        return r;
+      };
+    }
+    // Reset on map close
+    window.addEventListener('v360:map-closed', deactivate);
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', init);
+  } else {
+    init();
+  }
+
+  // ─── API pública ────────────────────────────────────────────────────────
+  window.V360CompRender = {
+    pinColor,
+    buildPopupExtension,
+    getMode,
+    classifyRow: (row) => {
+      const brands = brandsList();
+      return classifyRow(row, getMode(), brands.perspective, brands.others, _ticketsFloor);
+    },
+    STATE,
+    STATE_COLORS,
+    STATE_LABELS,
+  };
+
+})();

@@ -690,10 +690,12 @@
   async function loadForMap(mapId, sharedMode) {
     if (!mapId) {
       reset();
+      try { window.dispatchEvent(new CustomEvent('v360:competitors-loaded', { detail: { count: 0 } })); } catch(_) {}
       return;
     }
     if (state.loadedForMapId === mapId) {
       renderHeaderUI();
+      try { window.dispatchEvent(new CustomEvent('v360:competitors-loaded', { detail: { count: state.competitors.length } })); } catch(_) {}
       return;
     }
     reset();
@@ -715,6 +717,7 @@
       const comps = await window.sbFetch('map_competitors?map_id=eq.' + mapId + '&select=*&order=created_at.asc');
       if (!Array.isArray(comps) || !comps.length) {
         renderHeaderUI();
+        try { window.dispatchEvent(new CustomEvent('v360:competitors-loaded', { detail: { count: 0 } })); } catch(_) {}
         return;
       }
       for (const c of comps) {
