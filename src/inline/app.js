@@ -433,12 +433,51 @@ var _clusterDonutBound = false;
 var _clusterDonutRAF = null;
 
 function _clearClusterDonuts() {
+  _hideClusterTooltip(); // qualquer tooltip que esteja aberto será órfão após o clear
   if (_clusterMarkerPool && _clusterMarkerPool.size) {
     _clusterMarkerPool.forEach(function(entry) {
       try { entry.marker.remove(); } catch(_) {}
     });
     _clusterMarkerPool.clear();
   }
+}
+
+// ─── Cluster Tooltip (singleton global) ─────────────────────────────────────
+// Um único nó de tooltip vive no document.body. Ele é mostrado/escondido por
+// hover dos donuts. Esse padrão singleton evita "tooltip fantasma" quando o
+// marker sob o cursor é removido pelo pool antes de disparar mouseleave (caso
+// comum durante pan/zoom, troca de modo competitivo ou mudança de tema).
+var _clusterTooltipEl = null;
+var _clusterTooltipOwnerId = null; // cluster_id do marker que está exibindo o tooltip
+
+function _getOrCreateTooltipEl() {
+  if (_clusterTooltipEl && document.body.contains(_clusterTooltipEl)) return _clusterTooltipEl;
+  _clusterTooltipEl = document.createElement('div');
+  _clusterTooltipEl.className = 'cluster-tooltip';
+  _clusterTooltipEl.style.display = 'none';
+  document.body.appendChild(_clusterTooltipEl);
+  return _clusterTooltipEl;
+}
+
+function _showClusterTooltip(ownerId, innerHTML, anchorEl) {
+  var el = _getOrCreateTooltipEl();
+  el.innerHTML = innerHTML;
+  el.style.display = 'block';
+  _clusterTooltipOwnerId = ownerId;
+  _positionTooltipNearEl(el, anchorEl);
+}
+
+function _hideClusterTooltip() {
+  if (_clusterTooltipEl) {
+    _clusterTooltipEl.style.display = 'none';
+    _clusterTooltipEl.innerHTML = '';
+  }
+  _clusterTooltipOwnerId = null;
+}
+
+// Hide tooltip se ele pertencia a um marker que está sendo destruído
+function _maybeHideTooltipFor(clusterId) {
+  if (_clusterTooltipOwnerId === clusterId) _hideClusterTooltip();
 }
 
 function _bindClusterDonutEvents() {
@@ -451,10 +490,23 @@ function _bindClusterDonutEvents() {
       _renderClusterDonuts();
     });
   };
-  map.on('move', schedule);
-  map.on('moveend', schedule);
-  map.on('zoom', schedule);
-  map.on('zoomend', schedule);
+  // IMPORTANTE: não escutar 'move'/'zoom' (frame-by-frame). Durante o pan o
+  // MapLibre reposiciona os markers existentes pela LngLat automaticamente —
+  // re-rodar queryRenderedFeatures + setLngLat a cada frame causa "flutuação"
+  // porque supercluster pode fundir/desfundir clusters durante o gesto.
+  // Reconciliamos apenas quando o usuário PARA de mover/zoomar.
+  var onGestureStart = function() {
+    _hideClusterTooltip();
+    var c = map.getContainer(); if (c) c.classList.add('cluster-donuts-dim');
+  };
+  var onGestureEnd = function() {
+    var c = map.getContainer(); if (c) c.classList.remove('cluster-donuts-dim');
+    schedule();
+  };
+  map.on('movestart', onGestureStart);
+  map.on('zoomstart', onGestureStart);
+  map.on('moveend', onGestureEnd);
+  map.on('zoomend', onGestureEnd);
   map.on('sourcedata', function(e) {
     if (e.sourceId === 'pdvs' && e.isSourceLoaded) schedule();
   });
@@ -539,6 +591,7 @@ function _renderClusterDonuts() {
   // Remover markers que não estão mais visíveis
   _clusterMarkerPool.forEach(function(entry, cid) {
     if (!seen.has(cid)) {
+      _maybeHideTooltipFor(cid); // evita tooltip órfão se marker era o owner
       try { entry.marker.remove(); } catch(_) {}
       _clusterMarkerPool.delete(cid);
     }
@@ -548,14 +601,17 @@ function _renderClusterDonuts() {
 // SVG do donut — recebe array genérico de segmentos [{color, count}, ...]
 // Compatível com Solo/Duelo (4 segmentos) e Categoria (N marcas).
 function _buildDonutSVGFromSegments(total, segments) {
-  // Raio externo: escala log-suavizada
-  var R; // raio do círculo externo
-  if (total <= 5)         R = 16;
-  else if (total <= 25)   R = 19;
-  else if (total <= 75)   R = 22;
-  else if (total <= 200)  R = 26;
-  else if (total <= 500)  R = 30;
-  else                    R = 34;
+  // Raio externo: escala log-suavizada, comprimida para evitar que clusters
+  // grandes (4k+) dominem a tela visualmente. A diferença perceptual entre
+  // 200 e 4000 PDVs não precisa ser linear — basta sinalizar "grande".
+  var R;
+  if (total <= 5)         R = 15;
+  else if (total <= 25)   R = 17;
+  else if (total <= 75)   R = 19;
+  else if (total <= 200)  R = 22;
+  else if (total <= 500)  R = 25;
+  else if (total <= 1500) R = 27;
+  else                    R = 29;
 
   var sw = Math.max(4, Math.round(R * 0.22)); // espessura do anel
   var size = R * 2 + 4;
@@ -612,13 +668,13 @@ function _buildDonutSVG(total, win, lose, neu, abs) {
 
 // Tooltip + click handlers para cada donut
 function _attachDonutInteractions(el, clusterId, coords) {
-  var tooltipEl = null;
-
   el.addEventListener('mouseenter', function() {
     var entry = _clusterMarkerPool.get(clusterId);
     if (!entry) return;
     // Re-query features para pegar contagens atualizadas
-    var feats = map.queryRenderedFeatures({ layers: ['clusters'] });
+    var feats;
+    try { feats = map.queryRenderedFeatures({ layers: ['clusters'] }); }
+    catch(_) { return; }
     var feat = null;
     for (var i = 0; i < feats.length; i++) {
       if (feats[i].properties && feats[i].properties.cluster_id === clusterId) { feat = feats[i]; break; }
@@ -626,8 +682,8 @@ function _attachDonutInteractions(el, clusterId, coords) {
     if (!feat) return;
     var p = feat.properties || {};
     var total = p.point_count || 0;
-    if (tooltipEl) { try { tooltipEl.remove(); } catch(_) {} }
-    // Modo Categoria: tooltip por marca; outros: schema Vence/Disputa/Perde/Sem presença
+    // Construir conteúdo (HTML string) e mostrar via singleton
+    var contentEl;
     var aggMode = _currentClusterAggMode || 'solo';
     if (aggMode.indexOf('categoria:') === 0 && _categoryBrandIdxCache) {
       var brandCount = parseInt(aggMode.split(':')[1], 10) || 0;
@@ -638,21 +694,22 @@ function _attachDonutInteractions(el, clusterId, coords) {
         var count = p['c_b' + b] || 0;
         if (count > 0) brandRows.push({ label: brandName, n: count, c: color });
       }
-      tooltipEl = _buildClusterTooltipRows(total, brandRows);
+      contentEl = _buildClusterTooltipRows(total, brandRows);
     } else {
       var win = p.c_win || 0, lose = p.c_lose || 0, neu = p.c_neutral || 0, abs = p.c_absent || 0;
-      tooltipEl = _buildClusterTooltip(total, win, lose, neu, abs);
+      contentEl = _buildClusterTooltip(total, win, lose, neu, abs);
     }
-    document.body.appendChild(tooltipEl);
-    _positionTooltipNearEl(tooltipEl, el);
+    _showClusterTooltip(clusterId, contentEl.innerHTML, el);
   });
 
   el.addEventListener('mousemove', function() {
-    if (tooltipEl) _positionTooltipNearEl(tooltipEl, el);
+    if (_clusterTooltipOwnerId === clusterId && _clusterTooltipEl) {
+      _positionTooltipNearEl(_clusterTooltipEl, el);
+    }
   });
 
   el.addEventListener('mouseleave', function() {
-    if (tooltipEl) { try { tooltipEl.remove(); } catch(_) {} tooltipEl = null; }
+    _maybeHideTooltipFor(clusterId);
   });
 
   el.addEventListener('click', function(ev) {

@@ -740,11 +740,21 @@ input[type="range"]::-webkit-slider-thumb {
 /* ─── Cluster Donut Markers ─────────────────────────────────────────────── */
 .cluster-donut {
   filter: drop-shadow(0 2px 6px rgba(0,0,0,0.25));
-  transition: transform 0.15s ease;
+  transition: transform 0.15s ease, opacity 0.18s ease;
   will-change: transform;
 }
 .cluster-donut:hover { transform: translate(-50%, -50%) scale(1.06); z-index: 10; }
 [data-theme="light"] .cluster-donut { filter: drop-shadow(0 2px 4px rgba(0,0,0,0.12)); }
+
+/* Durante pan/zoom: dimar donuts para mascarar reposicionamento do supercluster.
+   Em vez de animação contínua frame-by-frame (que flutuava), o usuário vê os
+   markers como "fantasmas" durante o gesto e eles reaparecem nítidos quando o
+   movimento termina e o pool é reconciliado em moveend/zoomend. */
+.cluster-donuts-dim .cluster-donut {
+  opacity: 0.35;
+  pointer-events: none;
+  transition: opacity 0.08s ease;
+}
 
 .cluster-tooltip {
   background: var(--surface);
