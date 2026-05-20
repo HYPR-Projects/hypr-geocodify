@@ -1819,6 +1819,13 @@ function applyFilters() {
     });
   }
 
+  // Passada 3 (Fase 8): Lens preset (Sidebar V360) + esconder whitespace
+  // Esses passes só rodam em V360. Aplicados DENTRO de applyFilters pra
+  // garantir um único renderMarkers (sem race de re-render).
+  if (currentMapType === 'varejo360' && typeof window._v360FilterByPreset === 'function') {
+    filteredData = window._v360FilterByPreset(filteredData);
+  }
+
   renderMarkers();
   updatePanels();
   updateOverlay();
