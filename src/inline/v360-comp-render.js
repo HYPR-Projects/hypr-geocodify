@@ -27,17 +27,17 @@
   };
 
   const STATE_COLORS = {
-    // Paleta HYPR semântica (Fase 5).
+    // Paleta HYPR semântica (Fase 5) + ajuste dark (Fase 8).
     // Hex direto porque MapLibre paint properties não resolvem CSS vars.
     // Mapeia 1:1 com tokens em src/styles/app.css :root.
     dominance:   '#018376', // --win (verde HYPR escuro)
     leadership:  '#4CB050', // --win-hi (verde HYPR brilhante, distingue de dominância)
-    dispute:     '#EDD900', // --neutral (amarelo HYPR)
+    dispute:     '#E89A28', // warm orange (Fase 8: substituiu #EDD900 que berrava no dark)
     behind:      '#FF5528', // --lose-hi (laranja-vermelho HYPR, distingue de vulnerável)
     vulnerable:  '#F5272B', // --lose (vermelho HYPR puro)
     opportunity: '#3397B9', // --accent (teal HYPR)
     exclusive:   '#5F25FF', // --purple (índigo HYPR)
-    whitespace:  '#78909C', // --absent (cinza HYPR)
+    whitespace:  '#78909C', // --absent (cinza HYPR) — escondido por padrão no mapa
   };
 
   const STATE_LABELS = {

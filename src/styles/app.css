@@ -30,10 +30,11 @@
   --purple: #5F25FF;
   --win: #018376;
   --lose: #F5272B;
-  --neutral: #EDD900;
+  --neutral: #E89A28;
   --absent: #78909C;
   --win-bg: rgba(1,131,118,0.12);
   --lose-bg: rgba(245,39,43,0.13);
+  --neutral-bg: rgba(232,154,40,0.14);
   --sidebar-w: 280px;
   --right-w: 320px;
   --header-h: 56px;
@@ -67,12 +68,12 @@
   /* Foreground variants (bright) for text on dark surfaces */
   --win-hi: #4CB050;
   --lose-hi: #FF5528;
-  --warn-hi: #FFF047;
+  --warn-hi: #FFB347;
   --accent-hi: #5DD6E6;
   /* Edges (border equivalents for badges) */
   --win-edge: rgba(1,131,118,0.48);
   --lose-edge: rgba(245,39,43,0.48);
-  --warn-edge: rgba(237,217,0,0.45);
+  --warn-edge: rgba(232,154,40,0.48);
   --accent-edge: rgba(51,151,185,0.50);
   /* Existing theme variables — kept for backward compatibility */
   --text-on-accent: #FCFEFE;
@@ -84,8 +85,7 @@
   --indigo-bg: rgba(95,37,255,0.14);
   --indigo-bg-hover: rgba(95,37,255,0.22);
   --indigo-border: rgba(95,37,255,0.30);
-  --neutral-bg: rgba(237,217,0,0.14);
-  --neutral-border: rgba(237,217,0,0.30);
+  --neutral-border: rgba(232,154,40,0.32);
   --lose-border: rgba(245,39,43,0.30);
   --accent-bg: rgba(51,151,185,0.14);
   --win-bg-strong: rgba(1,131,118,0.20);
