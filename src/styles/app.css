@@ -3063,7 +3063,7 @@ body[data-v360-hero="active"] #v360-comp-overview-panel { display: none; }
    Big numbers no topo da home — vidro real + edge highlight + tipografia maior.
    ───────────────────────────────────────────────────────────────────────── */
 .gallery-kpis {
-  display: grid; grid-template-columns: repeat(4, 1fr);
+  display: grid; grid-template-columns: repeat(5, 1fr);
   gap: var(--sp-4); margin-bottom: var(--sp-8);
   animation: fadeInUp 0.3s ease 0.02s both;
 }
@@ -3103,11 +3103,11 @@ body[data-v360-hero="active"] #v360-comp-overview-panel { display: none; }
   color: var(--text);
   text-shadow: 0 0 24px var(--accent-glow);
 }
-@media (max-width: 1024px) {
-  .gallery-kpis { grid-template-columns: repeat(2, 1fr); }
+@media (max-width: 1200px) {
+  .gallery-kpis { grid-template-columns: repeat(3, 1fr); }
 }
 @media (max-width: 768px) {
-  .gallery-kpis { gap: var(--sp-3); margin-bottom: var(--sp-6); }
+  .gallery-kpis { grid-template-columns: repeat(2, 1fr); gap: var(--sp-3); margin-bottom: var(--sp-6); }
   .kpi-cell { padding: var(--sp-4) var(--sp-5); gap: 6px; }
   .kpi-value { font-size: 28px; }
 }
