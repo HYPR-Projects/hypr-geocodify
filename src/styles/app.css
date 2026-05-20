@@ -1308,7 +1308,7 @@ input[type="range"]:hover::-webkit-slider-thumb {
 #btn-fullmap.active { color: var(--accent-light) !important; border-color: var(--accent) !important; background: var(--accent-glow) !important; }
 
 /* Places Discovery badge */
-.badge-places { background: var(--purple-bg); color: var(--purple); }
+.badge-places { background: var(--accent-bg); color: var(--accent); }
 
 
 .places-section { margin-bottom: 20px; }

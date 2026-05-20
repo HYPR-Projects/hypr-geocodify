@@ -605,9 +605,11 @@ function _renderClusterDonuts() {
       //   Lat/Lon Generator  → accent (teal)
       //   Address Generator  → sky (cyan)
       if (!_pinColors) _refreshPinColors();
-      var modeColor = currentMapType === 'places_discovery' ? _pinColors.purple
-                    : currentMapType === 'geocoder'         ? _pinColors.accent
-                                                            : _pinColors.sky;
+      // Places Discovery + Lat/Lon Generator: ambos usam accent (HYPR brand teal).
+      // Reverse Geocoder: sky (#03A9F5) — único modo "Generator" diferenciado.
+      // Varejo 360 nunca cai aqui (não é single-color, usa status palette).
+      var modeColor = currentMapType === 'reverse_geocoder' ? _pinColors.sky
+                                                            : _pinColors.accent;
       svgHtml = _buildDonutSVGFromSegments(total, [
         { color: modeColor, count: total }
       ]);
@@ -1161,7 +1163,10 @@ function _refreshPinColors() {
 
 function pinColor(row) {
   if (!_pinColors) _refreshPinColors();
-  if (currentMapType === 'places_discovery') return _pinColors.purple;
+  // Modos single-color (não-V360): accent teal HYPR pra Places Discovery e
+  // Lat/Lon Generator; sky pra Reverse Geocoder. Purple foi aposentado a
+  // pedido do produto — HYPR teal é a cor universal de marca.
+  if (currentMapType === 'places_discovery') return _pinColors.accent;
   if (currentMapType === 'geocoder') return _pinColors.accent;
   if (currentMapType === 'reverse_geocoder') return _pinColors.sky;
   // V360 Competitors PR2: delega para o módulo de render quando há concorrentes carregados
@@ -5432,7 +5437,7 @@ function buildMapCard(m) {
     'reverse_geocoder':      { label: '🔄 Address Generator',  color: '#22d3ee', bg: 'rgba(34,211,238,0.2)',  c1: '#0891b2', c2: '#0c4a6e' },
     'varejo360':             { label: '📊 Varejo 360',         color: '#f59e0b', bg: 'rgba(245,158,11,0.2)',  c1: '#d97706', c2: '#7c2d12' },
     'varejo360_comparativo': { label: '📈 Attack Plan',    color: '#818cf8', bg: 'rgba(129,140,248,0.2)', c1: '#4f46e5', c2: '#1e1b4b' },
-    'places_discovery':      { label: '🔎 Places Discovery',   color: '#c084fc', bg: 'rgba(192,132,252,0.2)', c1: '#9333ea', c2: '#3b0764' },
+    'places_discovery':      { label: '🔎 Places Discovery',   color: '#5DD6E6', bg: 'rgba(51,151,185,0.20)', c1: '#3397B9', c2: '#0F3B4A' },
   };
   const tConf = typeLabels[m.map_type] || typeLabels['varejo360'];
   const periodoStr = m.periodo_label ? ` · ${m.periodo_label}` : '';
