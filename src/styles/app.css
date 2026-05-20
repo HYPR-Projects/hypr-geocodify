@@ -2539,7 +2539,7 @@ body[data-v360-hero="active"] #v360-comp-overview-panel { display: none; }
   .gallery-btn-new { font-size: 11px; padding: 7px 12px; white-space: nowrap; }
   #btn-logout { padding: 7px 10px !important; font-size: 10px !important; }
   /* Gallery body mobile */
-  .gallery-body { padding: var(--sp-5) var(--sp-3) var(--sp-6); }
+  .gallery-body { padding: calc(var(--header-h) + var(--sp-5)) var(--sp-3) var(--sp-6); }
   .gallery-filters {
     flex-direction: column; gap: 6px; padding: 8px;
     border-radius: var(--r-lg);
@@ -2885,7 +2885,7 @@ body[data-v360-hero="active"] #v360-comp-overview-panel { display: none; }
     radial-gradient(60% 50% at 12% -10%, var(--accent-glow), transparent 70%),
     radial-gradient(50% 50% at 100% 110%, rgba(95,37,255,0.10), transparent 70%),
     var(--bg);
-  display: flex; flex-direction: column; overflow: hidden;
+  overflow: hidden;
 }
 [data-theme="light"] #gallery-screen {
   background:
@@ -2896,12 +2896,13 @@ body[data-v360-hero="active"] #v360-comp-overview-panel { display: none; }
 #gallery-screen.hidden { display: none; }
 
 .gallery-header {
-  height: 64px; flex-shrink: 0;
+  position: absolute; top: 0; left: 0; right: 0;
+  height: 64px; z-index: 5;
   padding: 0 var(--sp-8);
   border-bottom: 1px solid var(--glass-border);
-  background: var(--glass-bg); backdrop-filter: var(--glass-blur); -webkit-backdrop-filter: var(--glass-blur);
+  background: var(--glass-bg);
+  backdrop-filter: var(--glass-blur); -webkit-backdrop-filter: var(--glass-blur);
   box-shadow: var(--glass-edge);
-  position: relative; z-index: 2;
 }
 .gallery-header-inner {
   height: 100%;
@@ -2963,9 +2964,10 @@ body[data-v360-hero="active"] #v360-comp-overview-panel { display: none; }
 }
 
 .gallery-body {
-  flex: 1; overflow-y: auto;
-  padding: var(--sp-12) var(--sp-8) var(--sp-10);
-  position: relative; z-index: 1;
+  position: absolute; inset: 0;
+  overflow-y: auto;
+  padding: calc(64px + var(--sp-12)) var(--sp-8) var(--sp-10);
+  z-index: 1;
 }
 .gallery-body-inner { max-width: 1440px; margin: 0 auto; }
 .gallery-empty { text-align: center; padding: 120px 40px; color: var(--text-muted); }
