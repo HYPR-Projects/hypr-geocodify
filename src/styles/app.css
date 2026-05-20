@@ -2997,19 +2997,19 @@ body[data-v360-hero="active"] #v360-comp-overview-panel { display: none; }
   color: var(--text); font-size: 13px; font-family: var(--font);
   transition: background 0.2s;
 }
-.gf-input:focus { outline: none; background: var(--surface-subtle); }
+.gf-input:focus { outline: none; background-color: var(--surface-subtle); }
 .gf-input::placeholder { color: var(--text-muted); }
 .gf-select {
   padding: 12px 36px 12px 18px;
-  background: transparent; border: none; border-radius: var(--r-pill);
+  background-color: transparent; border: none; border-radius: var(--r-pill);
   color: var(--text); font-size: 13px; font-family: var(--font);
-  cursor: pointer; transition: background 0.2s; min-width: 150px;
+  cursor: pointer; transition: background-color 0.2s; min-width: 150px;
   -webkit-appearance: none; appearance: none;
   background-image: url("data:image/svg+xml,%3Csvg width='10' height='6' viewBox='0 0 10 6' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%238A9FB0' stroke-width='1.5' fill='none' stroke-linecap='round'/%3E%3C/svg%3E");
   background-repeat: no-repeat; background-position: right 14px center;
 }
-.gf-select:hover { background: var(--surface-subtle); }
-.gf-select:focus { outline: none; background: var(--surface-subtle); }
+.gf-select:hover { background-color: var(--surface-subtle); }
+.gf-select:focus { outline: none; background-color: var(--surface-subtle); }
 .gf-select option { background: var(--bg); color: var(--text); }
 
 /* ─── Global animations ─────────────────────────────────────────────── */
