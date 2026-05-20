@@ -3228,16 +3228,17 @@ body[data-v360-hero="active"] #v360-comp-overview-panel { display: none; }
 .map-card-share:hover { color: var(--accent); background: var(--surface-subtle); }
 .map-card-del:hover { color: var(--lose); background: var(--lose-bg); }
 
-/* Pin button — outline em estado padrão, filled+purple quando ativo. O hover
-   antecipa o estado com tint para feedback claro. */
+/* Pin button — outline em estado padrão, filled+accent quando ativo. Accent
+   teal (chrome do app) em vez de purple: não conflita com Places Discovery
+   (que é purple) e dá vibe "chrome do produto" sem saturar o dark. */
 .map-card-pin:hover {
-  color: var(--purple);
-  background: var(--purple-bg);
+  color: var(--accent);
+  background: var(--accent-bg);
 }
 .map-card-pin:hover svg { transform: rotate(-12deg); }
 .map-card-pin.is-pinned {
-  color: var(--purple);
-  background: var(--purple-bg);
+  color: var(--accent);
+  background: var(--accent-bg);
 }
 .map-card-pin.is-pinned svg {
   fill: currentColor;
@@ -3249,29 +3250,38 @@ body[data-v360-hero="active"] #v360-comp-overview-panel { display: none; }
 }
 
 /* Pin flag — badge sutil no canto da thumb quando o card está fixado. Posição
-   simétrica ao .map-card-badge (que fica em baixo/direita). */
+   simétrica ao .map-card-badge (que fica em baixo/direita). Glass-style com
+   accent tint em vez de fill sólido — pesa menos no dark. */
 .map-card-pin-flag {
   position: absolute;
   top: 10px; right: 10px;
   z-index: 1;
-  width: 24px; height: 24px;
+  width: 22px; height: 22px;
   display: inline-flex; align-items: center; justify-content: center;
   border-radius: 50%;
-  background: var(--purple);
-  color: var(--text-on-accent, #fff);
-  box-shadow: 0 4px 12px rgba(95, 37, 255, 0.45), 0 0 0 2px rgba(0,0,0,0.25);
+  background: rgba(0,0,0,0.55);
+  color: var(--accent-hi, var(--accent));
+  border: 1px solid var(--accent-edge);
+  backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+  box-shadow: 0 2px 6px rgba(0,0,0,0.35);
   animation: pinPop 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+[data-theme="light"] .map-card-pin-flag {
+  background: rgba(252,254,254,0.85);
+  color: var(--accent);
+  box-shadow: 0 2px 8px rgba(28,38,47,0.15);
 }
 @keyframes pinPop {
   from { transform: scale(0); opacity: 0; }
   to   { transform: scale(1); opacity: 1; }
 }
 
-/* Card fixado: leve realce na borda + glow purple sutil pra reforçar
-   identidade sem competir com o tConf.color do badge de tipo. */
+/* Card fixado: borda accent sutil + leve glow. Bem mais discreto que a versão
+   purple anterior — o destaque vem da seção "Fixados" acima e do flag na
+   thumb, não do card competindo com os outros. */
 .map-card.is-pinned {
-  border-color: var(--indigo-border, rgba(95,37,255,0.30));
-  box-shadow: 0 0 0 1px rgba(95,37,255,0.25), var(--glass-shadow);
+  border-color: var(--accent-edge);
+  box-shadow: 0 0 0 1px var(--accent-glow), var(--glass-shadow);
 }
 
 /* ─── Gallery sections (Fixados + Todos os mapas) ───────────────────────── */
@@ -3288,23 +3298,18 @@ body[data-v360-hero="active"] #v360-comp-overview-panel { display: none; }
   font-size: 16px; font-weight: 600; color: var(--text);
   letter-spacing: -0.01em;
 }
-.gallery-section--pinned .gallery-section-title { color: var(--purple); }
+.gallery-section--pinned .gallery-section-title { color: var(--text); }
+.gallery-section--pinned .gallery-section-title svg { color: var(--accent); }
 .gallery-section-title svg { flex-shrink: 0; }
 .gallery-section-count {
   font-family: var(--mono);
   font-size: 11px; font-weight: 600;
   padding: 2px 9px;
   border-radius: var(--r-pill);
-  background: var(--purple-bg);
-  color: var(--purple);
-  border: 1px solid var(--indigo-border, rgba(95,37,255,0.25));
-  font-variant-numeric: tabular-nums;
-}
-/* Quando NÃO é a seção de fixados, count usa accent (caso reutilizemos depois). */
-.gallery-section:not(.gallery-section--pinned) .gallery-section-count {
   background: var(--accent-bg);
   color: var(--accent);
-  border-color: var(--accent-edge);
+  border: 1px solid var(--accent-edge);
+  font-variant-numeric: tabular-nums;
 }
 
 /* Gallery pagination */
