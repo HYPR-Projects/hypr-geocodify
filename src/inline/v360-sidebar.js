@@ -53,14 +53,18 @@
         else if (s === STATE.VULNERABLE) risk++;
       }
     } else {
-      // Solo: aproxima via diff vs média e share
+      // Solo: contadores INDEPENDENTES — paridade 1:1 com _passesPreset.
+      // (Fase 9) Antes: else-if encadeado fazia contador "exclusivo"
+      // (um PDV só conta em uma categoria), o que divergia do filtro
+      // que pega qualquer share<=0 / diff<-2 / diff>2 independentemente.
+      // Resultado: card "Whitespace 5.396" mas filtro retornava 5.500+.
+      // Agora cada preset conta seu próprio conjunto sem else-if.
       for (const row of all) {
         const diff = parseFloat(row.percentual_diff_media_dimensao || 0);
         const share = parseFloat(row.share_reais_sku_dimensao || 0);
         if (diff > 2) domain++;
-        else if (share <= 0) white++;
-        else if (diff < -2) risk++;
-        // Oportunidade em Solo ~ "acima da média com baixo penetração"
+        if (share <= 0) white++;
+        if (diff < -2) risk++;
         if (diff > 2 && share < 0.05) oport++;
       }
     }
@@ -341,12 +345,33 @@
     window.addEventListener('v360:competitors-loaded', refreshAll);
     window.addEventListener('v360:perspective-changed', refreshAll);
     window.addEventListener('v360:map-closed', function() {
+      // Fase 9: reset COMPLETO do estado da sidebar entre mapas.
+      // Evita que preset/busca/hideWhitespace de um mapa A vazem pro mapa B.
       const lenses = document.getElementById('sb-lenses');
       if (lenses) lenses.style.display = 'none';
-      // Reseta busca
+
+      // 1) Busca
       const search = document.getElementById('globalSearch');
       if (search) search.value = '';
       _searchTerm = '';
+
+      // 2) Lens preset — volta pra "Tudo"
+      _activePreset = null;
+      document.querySelectorAll('.preset').forEach(b => b.classList.remove('active'));
+      const allBtn = document.querySelector('.preset[data-preset="all"]');
+      if (allBtn) allBtn.classList.add('active');
+
+      // 3) Hide whitespace volta ao default true
+      _hideWhitespace = true;
+
+      // 4) Badges legados perf/oport voltam pra "Todos/Todas"
+      ['f-perf', 'f-oport'].forEach(gid => {
+        const container = document.getElementById(gid);
+        if (!container) return;
+        container.querySelectorAll('.badge').forEach(b => b.classList.remove('active'));
+        const all = container.querySelector('.badge[data-v=""]');
+        if (all) all.classList.add('active');
+      });
     });
 
     // Atalho ⌘K / Ctrl+K → foco na busca
