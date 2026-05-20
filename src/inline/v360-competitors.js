@@ -707,7 +707,7 @@
     `;
 
     const otherChipsHTML = others.map(o => `
-      <span class="persp-chip" data-brand="${_esc(o.name)}" style="color:${o.color}">
+      <span class="persp-chip${canEdit && o.compId ? ' is-draggable' : ''}" data-brand="${_esc(o.name)}"${canEdit && o.compId ? ` data-comp-id="${o.compId}" draggable="true"` : ''} style="color:${o.color}">
         <span class="persp-dot" aria-hidden="true"></span>
         <span class="persp-name">${_esc(o.name)}</span>
         ${o.matched != null ? `<span class="persp-count">${o.matched.toLocaleString('pt-BR')}</span>` : ''}
@@ -744,6 +744,9 @@
     });
     const addBtn = bar.querySelector('[data-persp-add="1"]');
     if (addBtn) addBtn.onclick = (e) => { e.stopPropagation(); openModal(); };
+
+    // Drag-and-drop pra reordenar concorrentes
+    if (canEdit) _wireDragReorder(bar);
 
     // (Fase 10) Click na bolinha persp-dot abre color picker.
     // Não propaga: clicando no dot, NÃO abre menu da lente nem deleta competitor.
@@ -869,6 +872,136 @@
       .replace(/>/g, '&gt;')
       .replace(/"/g, '&quot;')
       .replace(/'/g, '&#39;');
+  }
+
+  // ─── Drag-and-drop pra reordenar concorrentes ──────────────────────────
+  // Chips com data-comp-id (concorrentes) são arrastáveis. O drop em outro
+  // chip insere antes (metade esquerda) ou depois (metade direita). Persiste
+  // em saved_maps.payload.competitor_order (array de brand_name).
+  function _wireDragReorder(bar) {
+    let draggingId = null;
+    let beforeRects = null;
+    bar.addEventListener('dragstart', (e) => {
+      const chip = e.target.closest('.persp-chip.is-draggable');
+      if (!chip) return;
+      draggingId = chip.dataset.compId || null;
+      if (!draggingId) return;
+      try {
+        e.dataTransfer.effectAllowed = 'move';
+        e.dataTransfer.setData('text/plain', draggingId);
+        // Custom drag image — transparente pra controlarmos o feedback via CSS
+        // do chip original (escala/tilt) em vez do ghost padrão feioso do browser.
+        const ghost = document.createElement('div');
+        ghost.style.cssText = 'width:1px;height:1px;opacity:0;position:absolute;top:-1000px;';
+        document.body.appendChild(ghost);
+        e.dataTransfer.setDragImage(ghost, 0, 0);
+        setTimeout(() => ghost.remove(), 0);
+      } catch(_) {}
+      // Snapshot pra FLIP animation no drop
+      beforeRects = new Map();
+      bar.querySelectorAll('.persp-chip.is-draggable').forEach(c => {
+        beforeRects.set(c.dataset.compId, c.getBoundingClientRect());
+      });
+      // Atraso de 1 frame: garante que o dataTransfer.setDragImage capturou
+      // o chip ANTES da classe is-dragging aplicar o transform (senão fica
+      // desalinhado quando arrastando).
+      requestAnimationFrame(() => chip.classList.add('is-dragging'));
+    });
+    bar.addEventListener('dragend', () => {
+      bar.querySelectorAll('.persp-chip.is-dragging').forEach(c => c.classList.remove('is-dragging'));
+      bar.querySelectorAll('.persp-chip.drop-before, .persp-chip.drop-after').forEach(c => c.classList.remove('drop-before', 'drop-after'));
+      draggingId = null;
+      beforeRects = null;
+    });
+    bar.addEventListener('dragover', (e) => {
+      if (!draggingId) return;
+      const target = e.target.closest('.persp-chip.is-draggable');
+      if (!target || target.dataset.compId === draggingId) return;
+      e.preventDefault();
+      try { e.dataTransfer.dropEffect = 'move'; } catch(_) {}
+      bar.querySelectorAll('.persp-chip.drop-before, .persp-chip.drop-after').forEach(c => c.classList.remove('drop-before', 'drop-after'));
+      const rect = target.getBoundingClientRect();
+      const before = (e.clientX - rect.left) < rect.width / 2;
+      target.classList.add(before ? 'drop-before' : 'drop-after');
+    });
+    bar.addEventListener('drop', (e) => {
+      if (!draggingId) return;
+      const target = e.target.closest('.persp-chip.is-draggable');
+      if (!target || target.dataset.compId === draggingId) return;
+      e.preventDefault();
+      const rect = target.getBoundingClientRect();
+      const before = (e.clientX - rect.left) < rect.width / 2;
+      const fromIdx = state.competitors.findIndex(c => c.id === draggingId);
+      if (fromIdx < 0) return;
+      const [moved] = state.competitors.splice(fromIdx, 1);
+      let insertAt = state.competitors.findIndex(c => c.id === target.dataset.compId);
+      if (insertAt < 0) { state.competitors.splice(fromIdx, 0, moved); return; }
+      if (!before) insertAt += 1;
+      state.competitors.splice(insertAt, 0, moved);
+      const snapshot = beforeRects;
+      _persistCompetitorOrder();
+      renderHeaderUI();
+      _flipAnimateChips(bar, snapshot);
+      try {
+        window.dispatchEvent(new CustomEvent('v360:competitors-loaded', {
+          detail: { count: state.competitors.length, source: 'reorder' }
+        }));
+      } catch(_) {}
+    });
+  }
+
+  // FLIP animation: depois do re-render, anima cada chip da posição antiga
+  // pra nova com translateX. Dá sensação de "deslizou pro lugar" em vez de
+  // "teletransportou".
+  function _flipAnimateChips(bar, beforeRects) {
+    if (!beforeRects) return;
+    bar.querySelectorAll('.persp-chip.is-draggable').forEach(c => {
+      const id = c.dataset.compId;
+      const before = beforeRects.get(id);
+      if (!before) return;
+      const after = c.getBoundingClientRect();
+      const dx = before.left - after.left;
+      if (Math.abs(dx) < 1) return;
+      c.style.transition = 'none';
+      c.style.transform = `translateX(${dx}px)`;
+      // Force reflow pra aplicar o transform inicial antes da transição
+      void c.offsetWidth;
+      c.style.transition = 'transform 320ms cubic-bezier(.2,.9,.2,1)';
+      c.style.transform = '';
+      setTimeout(() => {
+        c.style.transition = '';
+        c.style.transform = '';
+      }, 360);
+    });
+  }
+
+  async function _persistCompetitorOrder() {
+    const mapId = window._currentOpenMapId || window._savedMapId;
+    if (!mapId) return;
+    try {
+      const payload = window._savedMapPayload || {};
+      payload.competitor_order = state.competitors.map(c => c.brand_name);
+      window._savedMapPayload = payload;
+      await window.sbFetch(`saved_maps?id=eq.${mapId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
+        body: JSON.stringify({ payload }),
+      });
+    } catch(e) { console.warn('[v360-comp] PATCH competitor_order failed:', e); }
+  }
+
+  // Reordena state.competitors pelo payload.competitor_order (se houver).
+  // Concorrentes não listados (adicionados depois) vão pro fim, mantendo
+  // ordem de inserção (created_at).
+  function _applyCompetitorOrder() {
+    const order = window._savedMapPayload?.competitor_order;
+    if (!Array.isArray(order) || !order.length) return;
+    const idx = new Map(order.map((b, i) => [b, i]));
+    state.competitors.sort((a, b) => {
+      const ai = idx.has(a.brand_name) ? idx.get(a.brand_name) : Number.MAX_SAFE_INTEGER;
+      const bi = idx.has(b.brand_name) ? idx.get(b.brand_name) : Number.MAX_SAFE_INTEGER;
+      return ai - bi;
+    });
   }
 
   async function deleteCompetitor(id) {
@@ -1041,6 +1174,7 @@
         return compState;
       }));
       for (const cs of compStates) state.competitors.push(cs);
+      _applyCompetitorOrder();
       if (!state.perspectiveBrand && window._currentMapBaseBrand) {
         state.perspectiveBrand = window._currentMapBaseBrand;
       }

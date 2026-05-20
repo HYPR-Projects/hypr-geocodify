@@ -388,7 +388,7 @@
       return `
         <div class="popup-brand-row" style="color:${r.color}">
           <span class="pdot"></span>
-          <span class="${nameClass}">${_esc(r.brand)}${r.isBase ? '<span class="base-tag">base</span>' : ''}</span>
+          <span class="${nameClass}">${_esc(r.brand)}</span>
           <div class="bar-wrap"><div class="bar-fill" style="width:${wPct}%"></div></div>
           <span class="val">${valLabel}${lowConfBadge}</span>
         </div>
