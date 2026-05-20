@@ -188,7 +188,7 @@
     const ops = computeOpportunities(data, 50);
     const persp = window.V360Comp.getState().perspectiveBrand || getBaseBrand();
     const colorMap = buildColorMap();
-    const perspColor = colorMap[persp.toUpperCase()] || '#111827';
+    const perspColor = colorMap[persp.toUpperCase()] || 'var(--accent)';
 
     if (!ops.length) {
       section.innerHTML = `
@@ -207,24 +207,24 @@
     let rowsHtml = '';
     for (let i = 0; i < ops.length; i++) {
       const op = ops[i];
-      const leaderColor = colorMap[op.leaderBrand?.toUpperCase()] || '#dc2626';
+      const leaderColor = colorMap[op.leaderBrand?.toUpperCase()] || 'var(--lose)';
       const stateLabel = window.V360CompRender?.STATE_LABELS?.[op.state] || op.state;
-      const stateColor = window.V360CompRender?.STATE_COLORS?.[op.state] || '#94a3b8';
+      const stateColor = window.V360CompRender?.STATE_COLORS?.[op.state] || 'var(--absent)';
       const isAbsent = op.perspShare <= 0;
 
       rowsHtml += `
-        <div class="v360-op-row" data-cnpj="${op.cnpj_14}" data-idx="${i}" style="display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:6px;cursor:pointer;transition:background 0.12s;border-bottom:1px solid var(--border,#eef2f7);">
-          <div style="flex:0 0 22px;font-size:10px;color:var(--text-muted);text-align:right;font-variant-numeric:tabular-nums;">${i+1}</div>
-          <div style="flex:1;min-width:0;">
-            <div style="font-size:11.5px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--text);">${op.bandeira}</div>
-            <div style="font-size:9.5px;color:var(--text-muted);font-family:var(--mono);margin-top:1px;">${op.cnpj_14}</div>
+        <div class="v360-op-row" data-cnpj="${op.cnpj_14}" data-idx="${i}">
+          <div class="v360-op-rank">${i+1}</div>
+          <div class="v360-op-mid">
+            <div class="v360-op-bandeira">${op.bandeira}</div>
+            <div class="v360-op-cnpj">${op.cnpj_14}</div>
           </div>
-          <div style="flex:0 0 auto;text-align:right;">
-            <div style="display:flex;align-items:center;gap:4px;justify-content:flex-end;">
-              <span style="width:6px;height:6px;border-radius:50%;background:${leaderColor};"></span>
-              <span style="font-size:11px;font-weight:600;color:${leaderColor};font-variant-numeric:tabular-nums;">${(op.leaderShare * 100).toFixed(1)}%</span>
+          <div class="v360-op-right">
+            <div class="v360-op-leader">
+              <span class="v360-op-dot" style="background:${leaderColor};"></span>
+              <span class="v360-op-leader-val" style="color:${leaderColor};">${(op.leaderShare * 100).toFixed(1)}%</span>
             </div>
-            <div style="font-size:9px;color:var(--text-muted);margin-top:1px;">${fmtInt(op.tickets)} tickets · ${isAbsent ? `<span style="color:${stateColor};font-weight:600;">${stateLabel}</span>` : `você ${(op.perspShare*100).toFixed(1)}%`}</div>
+            <div class="v360-op-meta">${fmtInt(op.tickets)} tickets · ${isAbsent ? `<span class="v360-op-state" style="color:${stateColor};">${stateLabel}</span>` : `você ${(op.perspShare*100).toFixed(1)}%`}</div>
           </div>
         </div>
       `;
@@ -232,21 +232,19 @@
 
     section.innerHTML = `
       <div class="panel-section-title">Oportunidades priorizadas · <span style="color:${perspColor};">${persp}</span></div>
-      <div style="display:flex;align-items:center;gap:8px;font-size:10.5px;color:var(--text-muted);margin-bottom:8px;line-height:1.4;">
+      <div class="v360-op-subtitle">
         Top ${ops.length} PDVs ranqueados por <b>share × tickets</b> onde a marca não está vencendo. Os top 10 concentram <b>${top10Pct}%</b> do potencial.
       </div>
-      <div id="v360-op-list" style="max-height:380px;overflow-y:auto;border:1px solid var(--border,#e5e7eb);border-radius:8px;background:var(--bg-elev,#fff);">
+      <div id="v360-op-list" class="v360-op-list">
         ${rowsHtml}
       </div>
-      <div style="display:flex;gap:6px;margin-top:8px;">
-        <button id="v360-op-export" style="flex:1;padding:6px 10px;border-radius:6px;border:1px solid var(--border,#d1d5db);background:transparent;font-size:11px;cursor:pointer;color:var(--text);">Baixar CSV das oportunidades</button>
+      <div class="v360-op-actions">
+        <button id="v360-op-export" class="v360-op-export">Baixar CSV das oportunidades</button>
       </div>
     `;
 
     // Wire up clicks: fly to + popup
     section.querySelectorAll('.v360-op-row').forEach(el => {
-      el.onmouseover = () => el.style.background = 'var(--bg-subtle,rgba(0,0,0,0.04))';
-      el.onmouseout = () => el.style.background = '';
       el.onclick = () => {
         const idx = parseInt(el.dataset.idx, 10);
         const op = ops[idx];
@@ -492,7 +490,7 @@
 
     const persp = window.V360Comp.getState().perspectiveBrand || getBaseBrand();
     const colorMap = buildColorMap();
-    const perspColor = colorMap[persp.toUpperCase()] || '#111827';
+    const perspColor = colorMap[persp.toUpperCase()] || 'var(--accent)';
 
     // Renderiza com toggle Top vencedores / Top desafios
     let rowsHtml = '';
@@ -500,42 +498,42 @@
       const winBar = (g.winRate * 100).toFixed(0);
       const loseBar = (g.loseRate * 100).toFixed(0);
       const opBar = (g.opRate * 100).toFixed(0);
-      const netColor = g.netScore > 0.05 ? '#16a34a' : g.netScore < -0.05 ? '#dc2626' : '#6b7280';
+      const netClass = g.netScore > 0.05 ? 'pos' : g.netScore < -0.05 ? 'neg' : 'neu';
       const netSign = g.netScore >= 0 ? '+' : '';
       rowsHtml += `
-        <div class="v360-bandeira-row" data-bandeira="${csvEsc(g.name).replace(/"/g,'')}" style="padding:10px;border-radius:8px;border:1px solid var(--border,#eef2f7);margin-bottom:6px;cursor:pointer;transition:background 0.12s;">
-          <div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:6px;">
-            <div style="font-size:12px;font-weight:600;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;min-width:0;padding-right:8px;">${g.name}</div>
-            <div style="display:flex;align-items:baseline;gap:8px;flex-shrink:0;">
-              <span style="font-size:10px;color:var(--text-muted);">${fmtInt(g.total)} PDVs</span>
-              <span style="font-size:13px;font-weight:700;color:${netColor};font-variant-numeric:tabular-nums;">${netSign}${(g.netScore*100).toFixed(0)}</span>
+        <div class="v360-bandeira-row" data-bandeira="${csvEsc(g.name).replace(/"/g,'')}">
+          <div class="v360-band-head">
+            <div class="v360-band-name">${g.name}</div>
+            <div class="v360-band-meta">
+              <span class="v360-band-pdvs">${fmtInt(g.total)} PDVs</span>
+              <span class="v360-band-net v360-band-net-${netClass}">${netSign}${(g.netScore*100).toFixed(0)}</span>
             </div>
           </div>
-          <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:6px;font-size:10px;">
-            <div title="Lidera com share alto">
-              <div style="color:var(--text-muted);text-transform:uppercase;letter-spacing:0.04em;font-size:9px;font-weight:600;">Vence</div>
-              <div style="display:flex;align-items:center;gap:5px;margin-top:2px;">
-                <div style="flex:1;height:5px;background:rgba(0,0,0,0.05);border-radius:3px;overflow:hidden;"><div style="width:${winBar}%;height:100%;background:#16a34a;border-radius:3px;"></div></div>
-                <span style="flex:0 0 28px;text-align:right;font-variant-numeric:tabular-nums;color:#16a34a;font-weight:600;">${fmtInt(g.wins)}</span>
+          <div class="v360-band-stats">
+            <div class="v360-band-stat" title="Lidera com share alto">
+              <div class="v360-band-stat-label">Vence</div>
+              <div class="v360-band-stat-bar">
+                <div class="v360-band-bar v360-band-bar-track"><div class="v360-band-bar-fill v360-band-bar-win" style="width:${winBar}%;"></div></div>
+                <span class="v360-band-stat-val v360-band-val-win">${fmtInt(g.wins)}</span>
               </div>
             </div>
-            <div title="Está atrás/vulnerável">
-              <div style="color:var(--text-muted);text-transform:uppercase;letter-spacing:0.04em;font-size:9px;font-weight:600;">Perde</div>
-              <div style="display:flex;align-items:center;gap:5px;margin-top:2px;">
-                <div style="flex:1;height:5px;background:rgba(0,0,0,0.05);border-radius:3px;overflow:hidden;"><div style="width:${loseBar}%;height:100%;background:#dc2626;border-radius:3px;"></div></div>
-                <span style="flex:0 0 28px;text-align:right;font-variant-numeric:tabular-nums;color:#dc2626;font-weight:600;">${fmtInt(g.loses)}</span>
+            <div class="v360-band-stat" title="Está atrás/vulnerável">
+              <div class="v360-band-stat-label">Perde</div>
+              <div class="v360-band-stat-bar">
+                <div class="v360-band-bar v360-band-bar-track"><div class="v360-band-bar-fill v360-band-bar-lose" style="width:${loseBar}%;"></div></div>
+                <span class="v360-band-stat-val v360-band-val-lose">${fmtInt(g.loses)}</span>
               </div>
             </div>
-            <div title="Concorrente vende e perspectiva não">
-              <div style="color:var(--text-muted);text-transform:uppercase;letter-spacing:0.04em;font-size:9px;font-weight:600;">Oportun.</div>
-              <div style="display:flex;align-items:center;gap:5px;margin-top:2px;">
-                <div style="flex:1;height:5px;background:rgba(0,0,0,0.05);border-radius:3px;overflow:hidden;"><div style="width:${opBar}%;height:100%;background:#3b82f6;border-radius:3px;"></div></div>
-                <span style="flex:0 0 28px;text-align:right;font-variant-numeric:tabular-nums;color:#3b82f6;font-weight:600;">${fmtInt(g.opportunities)}</span>
+            <div class="v360-band-stat" title="Concorrente vende e perspectiva não">
+              <div class="v360-band-stat-label">Oportun.</div>
+              <div class="v360-band-stat-bar">
+                <div class="v360-band-bar v360-band-bar-track"><div class="v360-band-bar-fill v360-band-bar-op" style="width:${opBar}%;"></div></div>
+                <span class="v360-band-stat-val v360-band-val-op">${fmtInt(g.opportunities)}</span>
               </div>
             </div>
           </div>
           ${g.perspAvgShare > 0 || g.leaderAvgShare > 0 ? `
-          <div style="margin-top:6px;font-size:10px;color:var(--text-muted);">
+          <div class="v360-band-foot">
             Share méd. — <span style="color:${perspColor};font-weight:600;">${persp}: ${(g.perspAvgShare*100).toFixed(1)}%</span> · líder: ${(g.leaderAvgShare*100).toFixed(1)}%
           </div>` : ''}
         </div>
@@ -544,10 +542,10 @@
 
     section.innerHTML = `
       <div class="panel-section-title">Análise por bandeira · <span style="color:${perspColor};">${persp}</span></div>
-      <div style="font-size:10.5px;color:var(--text-muted);margin-bottom:8px;line-height:1.4;">
+      <div class="v360-band-subtitle">
         Score = % vence − % perde (em PDVs com mín. ${minPdvs}). Clique para filtrar mapa pela bandeira.
       </div>
-      <div id="v360-band-list" style="max-height:420px;overflow-y:auto;">${rowsHtml}</div>
+      <div id="v360-band-list" class="v360-band-list">${rowsHtml}</div>
     `;
 
     // Click → filtra mapa pela bandeira
@@ -579,11 +577,21 @@
   function buildColorMap() {
     const map = {};
     const baseBrand = getBaseBrand();
-    if (baseBrand) map[baseBrand] = '#111827';
+    if (baseBrand) {
+      // (Fase 10) Base com paleta HYPR (não #111827).
+      const persisted = window._savedMapPayload?.base_brand_color;
+      if (persisted) {
+        map[baseBrand.toUpperCase()] = persisted;
+      } else if (window.V360Comp?.pickBrandColor) {
+        map[baseBrand.toUpperCase()] = window.V360Comp.pickBrandColor(baseBrand);
+      } else {
+        map[baseBrand.toUpperCase()] = 'var(--accent)';
+      }
+    }
     const st = window.V360Comp?.getState();
     if (st) {
       for (const c of st.competitors) {
-        map[c.brand_name.toUpperCase()] = c.brand_color || '#6b7280';
+        map[c.brand_name.toUpperCase()] = c.brand_color || 'var(--absent)';
       }
     }
     return map;
