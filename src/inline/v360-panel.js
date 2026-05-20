@@ -104,18 +104,86 @@
       const restPct = (rest * 100).toFixed(0);
 
       const segsHtml = segments.map(s => {
-        const w = (s.avg * 100).toFixed(1);
-        const short = s.brand.length > 4 ? s.brand.slice(0, 4) : s.brand;
-        return `<div class="sbt-seg" style="background:${s.color};width:${w}%" title="${_esc(s.brand)} ${w}%">${_esc(short)} ${w}%</div>`;
+        const wNum = s.avg * 100;
+        const w = wNum.toFixed(1);
+        // Mostra a % dentro do segmento só se houver largura suficiente (≥8%).
+        // Abaixo disso, segmento fica só com a cor — o nome+valor da marca
+        // aparece no tooltip custom ao passar o mouse (data-brand / data-pct).
+        const label = wNum >= 8 ? `${wNum.toFixed(0)}%` : '';
+        return `<div class="sbt-seg" style="background:${s.color};width:${w}%" data-brand="${_esc(s.brand)}" data-color="${s.color}" data-pct="${w}">${label}</div>`;
       }).join('');
 
+      const restPctExact = (rest * 100).toFixed(1);
       return `
         <div class="sbt-row">
           <span class="sbt-label">${t.label}</span>
-          <div class="sbt-bars">${segsHtml}<div class="sbt-rest">${restPct}% outras</div></div>
+          <div class="sbt-bars">${segsHtml}<div class="sbt-rest" data-brand="Outras marcas" data-pct="${restPctExact}">${restPct}% outras</div></div>
         </div>
       `;
     }).join('');
+
+    _ensureSbtTooltipWired();
+  }
+
+  // ─── Tooltip custom pra Share por Tipo ─────────────────────────────────────
+  // Delegação no card; bind feito uma vez. Pega data-brand / data-pct do alvo
+  // (segmento ou "outras") e mostra um tooltip flutuante ancorado acima.
+  let _sbtTooltipEl = null;
+  let _sbtTooltipWired = false;
+  function _getSbtTooltip() {
+    if (_sbtTooltipEl && document.body.contains(_sbtTooltipEl)) return _sbtTooltipEl;
+    _sbtTooltipEl = document.createElement('div');
+    _sbtTooltipEl.className = 'sbt-tooltip';
+    _sbtTooltipEl.style.display = 'none';
+    document.body.appendChild(_sbtTooltipEl);
+    return _sbtTooltipEl;
+  }
+  function _showSbtTooltip(target) {
+    const brand = target.dataset.brand;
+    const pct = target.dataset.pct;
+    const color = target.dataset.color || 'var(--text-dim)';
+    if (!brand || pct == null) return;
+    const tt = _getSbtTooltip();
+    tt.innerHTML =
+      `<span class="sbt-tt-dot" style="background:${color}"></span>` +
+      `<span class="sbt-tt-brand">${_esc(brand)}</span>` +
+      `<span class="sbt-tt-pct">${pct}%</span>`;
+    tt.style.display = '';
+    const r = target.getBoundingClientRect();
+    // Centro horizontal do segmento; acima dele (com offset).
+    const cx = r.left + r.width / 2;
+    const top = r.top - 8;
+    // Mede e aplica posição clampeada nas bordas do viewport
+    tt.style.left = '0px'; tt.style.top = '0px';
+    const tr = tt.getBoundingClientRect();
+    const left = Math.max(6, Math.min(window.innerWidth - tr.width - 6, cx - tr.width / 2));
+    tt.style.left = left + 'px';
+    tt.style.top = Math.max(6, top - tr.height) + 'px';
+  }
+  function _hideSbtTooltip() {
+    if (_sbtTooltipEl) _sbtTooltipEl.style.display = 'none';
+  }
+  function _ensureSbtTooltipWired() {
+    if (_sbtTooltipWired) return;
+    const card = document.getElementById('v360-sbt-card');
+    if (!card) return;
+    card.addEventListener('mouseover', (e) => {
+      const t = e.target.closest('.sbt-seg, .sbt-rest');
+      if (!t || !card.contains(t)) return;
+      _showSbtTooltip(t);
+    });
+    card.addEventListener('mouseout', (e) => {
+      const t = e.target.closest('.sbt-seg, .sbt-rest');
+      if (!t) return;
+      // Esconde só quando o mouse sai pro fora do alvo
+      const next = e.relatedTarget;
+      if (next && t.contains(next)) return;
+      _hideSbtTooltip();
+    });
+    // Segurança: scroll/resize fecha o tooltip (posição vira stale)
+    window.addEventListener('scroll', _hideSbtTooltip, true);
+    window.addEventListener('resize', _hideSbtTooltip);
+    _sbtTooltipWired = true;
   }
 
   // ─── Card 2: Top Redes por PDVs (lista) ────────────────────────────────

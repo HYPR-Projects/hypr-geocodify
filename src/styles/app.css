@@ -638,11 +638,12 @@ html.theme-switching, html.theme-switching *, html.theme-switching *::before, ht
   background: var(--accent-bg);
 }
 
-/* Dropdown da lente (trocar perspectiva) */
+/* Dropdown da lente (trocar perspectiva)
+   position: fixed + appended to <body> via JS — assim escapa do overflow:hidden
+   do .h-zone-center (que clipa o perspBar horizontalmente). top/left são
+   definidos inline pelo JS a partir do getBoundingClientRect do chip. */
 .persp-lens-menu {
-  position: absolute;
-  top: calc(100% + 8px);
-  left: 0;
+  position: fixed;
   min-width: 200px;
   padding: 6px;
   background: var(--surface-modal);
@@ -651,7 +652,7 @@ html.theme-switching, html.theme-switching *, html.theme-switching *::before, ht
   border: 1px solid var(--border-medium);
   border-radius: var(--r-md);
   box-shadow: var(--glass-shadow);
-  z-index: 1000;
+  z-index: 10000;
   display: flex; flex-direction: column; gap: 2px;
 }
 .persp-lens-menu-item {
@@ -1716,6 +1717,45 @@ input[type="range"]:hover::-webkit-slider-thumb {
   font-variant-numeric: tabular-nums;
 }
 .sbt-seg:last-of-type { border-right: none; }
+.sbt-seg, .sbt-rest { cursor: default; }
+.sbt-seg:hover, .sbt-rest:hover { filter: brightness(1.08); }
+
+/* Tooltip custom do "Share por Tipo" — posicionado via JS */
+.sbt-tooltip {
+  position: fixed;
+  z-index: 10000;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  background: var(--surface-modal, var(--surface));
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-family: 'Urbanist', sans-serif;
+  font-size: 12px;
+  color: var(--text);
+  white-space: nowrap;
+  pointer-events: none;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.32), 0 2px 8px rgba(0,0,0,0.18);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  animation: sbt-tt-in 120ms ease-out;
+}
+@keyframes sbt-tt-in {
+  from { opacity: 0; transform: translateY(2px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.sbt-tt-dot {
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.sbt-tt-brand { font-weight: 600; }
+.sbt-tt-pct {
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--text-dim);
+}
 .sbt-rest {
   flex: 1;
   display: flex;
@@ -2478,12 +2518,13 @@ body[data-v360-hero="active"] #v360-comp-overview-panel { display: none; }
   #places-panel {
     width: calc(100% - 24px) !important; max-width: 400px;
     left: 12px !important; right: 12px !important;
+    bottom: auto !important;
     max-height: calc(100vh - 70px) !important;
-    top: 56px !important;
+    top: calc(var(--header-h) + 16px) !important;
   }
   /* Geocoding overlay mobile */
   #geocoding-overlay { min-width: 0; width: calc(100% - 24px); max-width: 400px; }
-  #places-map-badge { bottom: 8px; left: 8px; padding: 6px 10px; }
+  #places-map-badge { bottom: 8px; right: 8px; left: auto; padding: 6px 10px; }
   #places-map-badge span:first-child { font-size: 14px !important; }
   /* Gallery header mobile */
   .gallery-header { padding: 0 var(--sp-3); height: var(--header-h); }
@@ -2778,6 +2819,56 @@ body[data-v360-hero="active"] #v360-comp-overview-panel { display: none; }
 .geo-eta-label { font-size: 10px; color: var(--text-muted); }
 .geo-cancel { font-size: 10px; color: var(--text-muted); cursor: pointer; text-decoration: underline; text-underline-offset: 2px; }
 .geo-cancel:hover { color: var(--lose); }
+
+/* ─── Skeleton loading state — usado ao abrir mapa salvo ─────────────────────
+   Aplica-se a #right-panel.panel-loading: cobre cada section com shimmer
+   discreto enquanto os painéis hidratam. Sections com display:none não
+   aparecem naturalmente, então não é preciso filtrar.                       */
+#right-panel.panel-loading .panel-section,
+#right-panel.panel-loading .overview-mini-stats {
+  position: relative;
+}
+#right-panel.panel-loading .panel-section { min-height: 88px; }
+#right-panel.panel-loading .overview-mini-stats { min-height: 70px; }
+#right-panel.panel-loading .panel-section > *:not(.panel-section-title):not(.card-head),
+#right-panel.panel-loading .overview-mini-stats > * {
+  visibility: hidden;
+}
+#right-panel.panel-loading .panel-section::after,
+#right-panel.panel-loading .overview-mini-stats::after {
+  content: "";
+  position: absolute;
+  left: 12px; right: 12px; top: 38px; bottom: 10px;
+  background: linear-gradient(
+    90deg,
+    var(--surface2) 0%,
+    var(--border) 50%,
+    var(--surface2) 100%
+  );
+  background-size: 200% 100%;
+  animation: skeleton-shimmer 1.4s ease-in-out infinite;
+  border-radius: 8px;
+  opacity: 0.7;
+  pointer-events: none;
+}
+#right-panel.panel-loading .overview-mini-stats::after { top: 8px; }
+@keyframes skeleton-shimmer {
+  0%   { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+/* Pequeno dot pulsante junto ao nome do mapa quando carregando */
+.map-title.loading::after {
+  content: "";
+  display: inline-block;
+  width: 6px; height: 6px;
+  margin-left: 8px;
+  border-radius: 50%;
+  background: var(--accent);
+  vertical-align: middle;
+  animation: pulse 1.2s ease-in-out infinite;
+}
+
 /* ─── Galeria de Mapas Salvos ────────────────────────────────────────────────── */
 #gallery-screen {
   position: fixed; inset: 0; z-index: 8000; background: var(--bg);

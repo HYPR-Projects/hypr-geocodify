@@ -55,6 +55,20 @@ function toggleTheme() {
   }
 }
 
+// Quando o usuário altera a cor de uma marca via color picker, V360Comp
+// dispara 'v360:competitors-loaded' com detail.colorChanged=true. O pool de
+// donut markers do mapa usa um sig baseado em contagens (não cores), então
+// re-renderizar sem invalidar o pool não repinta os SVGs existentes. Aqui
+// limpamos o pool e forçamos um renderMarkers() completo — assim cluster
+// donuts (modo Categoria) e pdv-points individuais pegam a cor nova.
+window.addEventListener('v360:competitors-loaded', function(e) {
+  if (!e || !e.detail || e.detail.colorChanged !== true) return;
+  try { if (typeof _clearClusterDonuts === 'function') _clearClusterDonuts(); } catch(_) {}
+  if (typeof renderMarkers === 'function' && typeof map !== 'undefined' && map) {
+    try { renderMarkers(); } catch(_) {}
+  }
+});
+
 function _onThemeChange(theme) {
   if (typeof map === 'undefined' || !map) return;
   var style = theme === 'light' ? _buildLightMapStyle() : _buildDarkStyle();
@@ -549,7 +563,24 @@ function _renderClusterDonuts() {
     var total = p.point_count || 0;
     var sig, svgHtml;
 
-    if (isCategoria && brandColors) {
+    if (currentMapType === 'places_discovery' ||
+        currentMapType === 'geocoder' ||
+        currentMapType === 'reverse_geocoder') {
+      // Modos sem categoria competitiva: anel único na cor de assinatura da
+      // marca do modo. Sem esse caminho, todos os c_* ficam em 0 e o donut
+      // renderiza só o miolo, deixando o cluster invisível no modo dark.
+      //   Places Discovery   → purple
+      //   Lat/Lon Generator  → accent (teal)
+      //   Address Generator  → sky (cyan)
+      if (!_pinColors) _refreshPinColors();
+      var modeColor = currentMapType === 'places_discovery' ? _pinColors.purple
+                    : currentMapType === 'geocoder'         ? _pinColors.accent
+                                                            : _pinColors.sky;
+      sig = total + '|' + currentMapType;
+      svgHtml = _buildDonutSVGFromSegments(total, [
+        { color: modeColor, count: total }
+      ]);
+    } else if (isCategoria && brandColors) {
       // Modo Categoria: 1 segmento por marca
       var brandSegs = [];
       var sigParts = [String(total)];
@@ -1092,12 +1123,19 @@ function _refreshPinColors() {
     neutral: _cssVar('--neutral'),
     absent: _cssVar('--absent') || '#94a3b8',
     purple: _cssVar('--purple') || '#a855f7',
+    // Assinaturas de marca por modo de mapa (cores HYPR — paleta de suporte).
+    // Usadas em pinColor() + _renderClusterDonuts() para dar identidade visual
+    // distinta a Lat/Lon Generator e Address Generator.
+    accent: _cssVar('--accent') || '#3397B9',
+    sky: _cssVar('--sky') || '#03A9F5',
   };
 }
 
 function pinColor(row) {
   if (!_pinColors) _refreshPinColors();
   if (currentMapType === 'places_discovery') return _pinColors.purple;
+  if (currentMapType === 'geocoder') return _pinColors.accent;
+  if (currentMapType === 'reverse_geocoder') return _pinColors.sky;
   // V360 Competitors PR2: delega para o módulo de render quando há concorrentes carregados
   try {
     if (window.V360CompRender && typeof window.V360CompRender.pinColor === 'function') {
@@ -1126,6 +1164,10 @@ function pinColor(row) {
 // Modo Categoria: retorna 0 (não usa schema 1-4; donut é montado via brand_idx)
 function pinCategory(row) {
   if (currentMapType === 'places_discovery') return 0;
+  // Geocoder/Reverse Geocoder: sem dados V360 → não usa schema 1-4. Retorna 0
+  // pra que _renderClusterDonuts use o caminho de cor única por modo (assinatura
+  // de marca em accent/sky) em vez de cair no fallback absent (cinza).
+  if (currentMapType === 'geocoder' || currentMapType === 'reverse_geocoder') return 0;
   // V360 Competitors: mapeia conforme o modo
   try {
     if (window.V360CompRender && typeof window.V360CompRender.getMode === 'function') {
@@ -5763,9 +5805,33 @@ async function openSavedMap(mapId, name, mapType) {
   await new Promise(r => setTimeout(r, 100)); // aguardar MapLibre inicializar
   if (map) map.resize();
 
+  // ─── Limpeza forte do mapa anterior ──────────────────────────────────────
+  // Antes de qualquer fetch, zera tudo o que pode "vazar" do mapa anterior:
+  // dados em memória, source GeoJSON do MapLibre, donut markers HTML, estado
+  // do V360Comp (perspBar/chips/competidores). Sem isso, o usuário vê pins/
+  // chips do mapa antigo durante o load do novo.
+  allData = [];
+  filteredData = [];
+  try {
+    if (map && map.getSource('pdvs')) {
+      map.getSource('pdvs').setData({ type: 'FeatureCollection', features: [] });
+    }
+  } catch(_) {}
+  try { if (typeof _clearClusterDonuts === 'function') _clearClusterDonuts(); } catch(_) {}
+  try { if (window.V360Comp && typeof window.V360Comp.reset === 'function') window.V360Comp.reset(); } catch(_) {}
+  try { if (map) map.jumpTo({ center: [-47.93, -15.78], zoom: 4 }); } catch(_) {}
+
   const overlay = document.getElementById('geocoding-overlay');
   _resetPlacesOverlayFields();
-  overlay.classList.add('active');
+  // Estado de loading minimalista: skeleton shimmer no right-panel + dot pulsante
+  // no header. Nada de overlay pesado — esse é o fluxo de "abrir mapa salvo",
+  // não há geocoding acontecendo, é só fetch.
+  const _rightPanelEl = document.getElementById('right-panel');
+  const _headerNameEl = document.getElementById('header-map-name');
+  if (_rightPanelEl) _rightPanelEl.classList.add('panel-loading');
+  if (_headerNameEl) _headerNameEl.classList.add('loading');
+  // Mantém referências para limpeza posterior; campos do overlay seguem
+  // sendo escritos durante o load mas o overlay nunca fica visível.
   document.getElementById('geo-current').textContent = `Carregando "${name}"...`;
   document.getElementById('geo-fill').style.width = '0%';
   document.getElementById('geo-pct').textContent = '';
@@ -5779,24 +5845,29 @@ async function openSavedMap(mapId, name, mapType) {
     window._savedMapPayload = (Array.isArray(mapMeta) && mapMeta[0]?.payload) || null;
     window._savedMapId = mapId;
 
-    let page = 0; const PAGE = 1000;
+    const PAGE = 1000;
+    const CONCURRENCY = 4;
     allData = [];
       map.jumpTo({ center: [-47.93, -15.78], zoom: 4 });
 
-    while (true) {
-      const rows = await sbFetch(`map_pdvs?map_id=eq.${mapId}&select=*&offset=${page*PAGE}&limit=${PAGE}`);
-      if (!rows || rows.length === 0) break;
-
-      for (const r of rows) {
-        allData.push(r);
-        // pins adicionados via renderMarkers() após carregamento completo
+    let page = 0;
+    let done = false;
+    while (!done) {
+      const batch = [];
+      for (let i = 0; i < CONCURRENCY; i++) {
+        const p = page + i;
+        batch.push(sbFetch(`map_pdvs?map_id=eq.${mapId}&select=*&offset=${p*PAGE}&limit=${PAGE}`));
       }
-
+      const results = await Promise.all(batch);
+      for (const rows of results) {
+        if (!rows || rows.length === 0) { done = true; continue; }
+        for (const r of rows) allData.push(r);
+        if (rows.length < PAGE) done = true;
+      }
       const pct = Math.min(99, Math.round(allData.length/500*10));
       document.getElementById('geo-fill').style.width = pct+'%';
       document.getElementById('geo-current').textContent = `${allData.length.toLocaleString('pt-BR')} PDVs carregados...`;
-      if (rows.length < PAGE) break;
-      page++;
+      page += CONCURRENCY;
     }
 
     overlay.classList.remove('active');
@@ -5812,18 +5883,17 @@ async function openSavedMap(mapId, name, mapType) {
     // painéis/mapa para evitar flash Solo → Duelo/Categoria. Se o mapa não
     // tem concorrentes, _loadCompetitorsAndWait resolve rapidamente (~200ms).
     if (currentMapType === 'varejo360') {
-      // mantém overlay visível com mensagem genérica enquanto sincronizamos
-      overlay.classList.add('active');
-      document.getElementById('geo-current').textContent = 'Preparando análise...';
-      document.getElementById('geo-fill').style.width = '99%';
+      // Skeleton no right-panel já comunica "preparando" — sem overlay pesado.
       try {
         await _loadCompetitorsAndWait(mapId, false);
       } catch(_) {}
-      overlay.classList.remove('active');
     } else if (window.V360Comp) {
       window.V360Comp.reset();
     }
     populateFilters(); updatePanels(); updateOverlay();
+    // Conteúdo dos painéis pronto — remover skeleton/dot
+    if (_rightPanelEl) _rightPanelEl.classList.remove('panel-loading');
+    if (_headerNameEl) _headerNameEl.classList.remove('loading');
     checkReenrichBar();
     if (currentMapType === 'places_discovery' && allData.length > 0) {
       document.getElementById('places-panel').style.display = 'block';
@@ -5862,14 +5932,16 @@ async function openSavedMap(mapId, name, mapType) {
       }
       updatePlacesBadge(allData.length);
     }
-    // Renderizar pins — aguardar style estar pronto se necessário
-    if (map.isStyleLoaded() && map.getSource('pdvs')) {
-      renderMarkers();
-    } else {
-      map.once('styledata', () => renderMarkers());
-    }
+    // Renderizar pins — renderMarkers já lida internamente com style/source não
+    // prontos via map.once('styledata'). Aguardar source aqui criava deadlock
+    // quando style estava loaded mas 'pdvs' ainda não existia (após initMap
+    // recém-feito): o styledata já não disparava de novo e renderMarkers nunca
+    // rodava → 1027 places carregados em memória, 0 plotados no mapa.
+    renderMarkers();
   } catch(e) {
     overlay.classList.remove('active');
+    if (_rightPanelEl) _rightPanelEl.classList.remove('panel-loading');
+    if (_headerNameEl) _headerNameEl.classList.remove('loading');
     alert('Erro ao carregar mapa: '+e.message);
   }
 }

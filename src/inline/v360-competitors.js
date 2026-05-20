@@ -817,7 +817,14 @@
         <span>${_esc(b.name)}${b.isBase ? ' (base)' : ''}</span>
       </button>
     `).join('');
-    lensChip.appendChild(menu);
+    // Append no body para escapar do overflow:hidden do header. Posiciona
+    // ancorado abaixo do chip via getBoundingClientRect (position: fixed).
+    document.body.appendChild(menu);
+    const rect = lensChip.getBoundingClientRect();
+    menu.style.top = (rect.bottom + 8) + 'px';
+    menu.style.left = Math.max(8, Math.min(window.innerWidth - 220, rect.left)) + 'px';
+    // Stash da ref do chip pra _closeLensMenu atualizar aria-expanded
+    menu._lensChip = lensChip;
     lensChip.setAttribute('aria-expanded', 'true');
 
     menu.querySelectorAll('button[data-set-lens]').forEach(b => {
@@ -840,9 +847,12 @@
 
   function _closeLensMenu() {
     const m = document.getElementById('persp-lens-menu');
-    if (m && m.parentNode) {
-      m.parentNode.setAttribute('aria-expanded', 'false');
-      m.parentNode.removeChild(m);
+    if (m) {
+      // menu agora vive em <body>; o chip âncora é guardado em _lensChip
+      if (m._lensChip) {
+        try { m._lensChip.setAttribute('aria-expanded', 'false'); } catch(_) {}
+      }
+      m.remove();
     }
     document.removeEventListener('click', _onDocClickCloseLensMenu);
   }
@@ -969,7 +979,7 @@
         if (c) _universeSet.add(c);
       }
 
-      for (const c of comps) {
+      const compStates = await Promise.all(comps.map(async (c) => {
         const compState = {
           id: c.id,
           brand_name: c.brand_name,
@@ -1028,8 +1038,9 @@
           } catch(_) {}
         }
 
-        state.competitors.push(compState);
-      }
+        return compState;
+      }));
+      for (const cs of compStates) state.competitors.push(cs);
       if (!state.perspectiveBrand && window._currentMapBaseBrand) {
         state.perspectiveBrand = window._currentMapBaseBrand;
       }
@@ -1061,7 +1072,7 @@
   //   brand: nome da marca
   //   color: hex novo
   // Para base: salva em saved_maps.payload.base_brand_color
-  // Para competitor: PATCH em v360_competitors.brand_color
+  // Para competitor: PATCH em map_competitors.brand_color
   async function updateBrandColor(brand, color) {
     const baseBrand = (window.V360Comp?.getState()?.perspectiveBrand) || '';
     // Identifica como base se brand matchear o baseBrand atual OU se nenhum
@@ -1074,7 +1085,7 @@
       // É competitor — PATCH
       comp.brand_color = color;
       try {
-        await window.sbFetch(`v360_competitors?id=eq.${comp.id}`, {
+        await window.sbFetch(`map_competitors?id=eq.${comp.id}`, {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
           body: JSON.stringify({ brand_color: color }),
