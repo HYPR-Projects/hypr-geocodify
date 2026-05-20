@@ -6967,7 +6967,7 @@ async function ensureBRCities() {
 }
 
 
-var _placesMode = 'pin'; // 'pin' | 'states' | 'country'
+var _placesMode = 'states'; // 'states' | 'country' | 'pin' — default Estados (mais comum)
 var _selectedStates = new Set();
 var _radiusPins = []; // [{lat, lon, radiusKm, marker, circleId}]
 var _placesDiscoveryCancelled = false;
@@ -7235,14 +7235,14 @@ async function showPlacesSetup() {
   }, 50);
   _selectedStates.clear();
   clearAllPins();
-  _placesMode = 'pin';
+  _placesMode = 'states';
   document.getElementById('places-query-input').value = '';
   document.getElementById('places-map-name').value = '';
   document.getElementById('places-setup-error').style.display = 'none';
   document.getElementById('places-results-section').style.display = 'none';
   document.getElementById('places-cost-info').style.display = 'none';
   document.getElementById('places-panel').style.display = 'block';
-  setPlacesMode('pin');
+  setPlacesMode('states');
   buildStateGrid();
   updatePlacesEstimate();
 }
@@ -8466,8 +8466,8 @@ function resetPlacesForNewSearch() {
   document.getElementById('places-estimate').classList.remove('visible');
   document.getElementById('places-cost-info').style.display = 'none';
   document.getElementById('places-run-btn').disabled = true;
-  // Reset to pin mode
-  setPlacesMode('pin');
+  // Reset pro modo default (Estados — primeira aba)
+  setPlacesMode('states');
   // Reset map view
   if (map) map.jumpTo({ center: [-47.93, -15.78], zoom: 4 });
   // Switch to map view if on list
