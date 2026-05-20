@@ -6083,7 +6083,14 @@ async function openSavedMap(mapId, name, mapType) {
   filteredData = allData.slice();
   if (allData.length > 0) {
       const _pts = allData.filter(r => r.lat && r.lon);
-      if (!_pts.length) return;
+      if (!_pts.length) {
+        // Edge case: mapa salvo sem nenhuma lat/lon válida (DB corrompido).
+        // Sem isso aqui, o early return deixaria skeleton + loading dot presos
+        // pulsando pra sempre. Limpa o loading state antes de sair.
+        if (_rightPanelEl) _rightPanelEl.classList.remove('panel-loading');
+        if (_headerNameEl) _headerNameEl.classList.remove('loading');
+        return;
+      }
       const bounds = _pts.reduce((b, r) => b.extend([parseFloat(r.lon), parseFloat(r.lat)]),
         new maplibregl.LngLatBounds([parseFloat(_pts[0].lon), parseFloat(_pts[0].lat)], [parseFloat(_pts[0].lon), parseFloat(_pts[0].lat)]));
       map.fitBounds(bounds, { padding:[40,40] });
