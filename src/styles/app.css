@@ -3039,8 +3039,15 @@ body[data-v360-hero="active"] #v360-comp-overview-panel { display: none; }
 /* Places panel */
 #places-panel { animation: slideInLeft 0.3s ease both; }
 
-/* Map popups */
-.maplibregl-popup { animation: scaleIn 0.2s ease; }
+/* Map popups
+   IMPORTANTE: NÃO animar `transform` aqui. MapLibre usa transform:translate(...)
+   no .maplibregl-popup pra posicionar o popup ancorado no pin. Se a animação
+   incluir transform:scale (como o scaleIn fazia), o scale sobrescreve o
+   translate durante a animação inteira — o popup pisca no canto superior
+   esquerdo do mapa e só "centraliza" no pin quando a animação acaba. Só
+   opacity garante posicionamento estável desde o primeiro frame. */
+.maplibregl-popup { animation: popupFadeIn 0.18s ease-out; }
+@keyframes popupFadeIn { from { opacity: 0; } to { opacity: 1; } }
 
 /* Modal overlays */
 .modal-overlay.active .modal-box { animation: scaleIn 0.25s ease; }
