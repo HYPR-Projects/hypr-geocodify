@@ -937,23 +937,14 @@ function _setupMapInteractions() {
 
     if (_popup) _popup.remove();
     const coords = e.features[0].geometry.coordinates.slice();
-    _popup = new maplibregl.Popup({ maxWidth: '340px', closeButton: true, anchor: 'bottom' })
+    // anchor: 'auto' — MapLibre escolhe a direção (cima/baixo/lados) baseado
+    // no espaço disponível. Sem isso, popup com anchor:'bottom' ficava cortado
+    // no topo do viewport e a gente compensava com map.panBy() — que gerava
+    // sensação de "salto" (animação de 300ms reposicionando o mapa pós-render).
+    _popup = new maplibregl.Popup({ maxWidth: '340px', closeButton: true, anchor: 'auto' })
       .setLngLat(coords)
       .setHTML(buildPopup(row))
       .addTo(map);
-    // Pan map only if popup is clipped — measure actual popup position vs viewport
-    requestAnimationFrame(() => {
-      const popupEl = _popup.getElement();
-      if (!popupEl) return;
-      const rect = popupEl.getBoundingClientRect();
-      const mapRect = map.getContainer().getBoundingClientRect();
-      // How many pixels the popup top is above the map viewport (negative = clipped)
-      const overflow = mapRect.top - rect.top + 16; // 16px breathing room
-      if (overflow > 0) {
-        // Pan down by exactly the overflow amount (pixel offset)
-        map.panBy([0, -overflow], { duration: 300 });
-      }
-    });
   });
 
   // Cursor pointer (apenas pdv-points — donut markers HTML já têm cursor:pointer inline)
