@@ -390,7 +390,7 @@
       </div>
 
       <div class="type-card" onclick="selectVarejoSubType('comparativo')">
-        <div class="type-card-badge" style="background:var(--indigo-bg);color:var(--indigo);position:absolute;top:10px;right:10px;">Novo</div>
+        <div class="type-card-badge" style="background:var(--accent-bg);color:var(--accent);position:absolute;top:10px;right:10px;">Novo</div>
         <div class="type-card-icon">📈</div>
         <div class="type-card-title">Attack Plan</div>
         <div class="type-card-desc">
@@ -820,7 +820,7 @@
 <div id="places-panel" style="display:none; position:absolute; top:calc(var(--gap-edge) + var(--header-h) + var(--gap-edge)); left:var(--gap-edge); bottom:var(--gap-edge); z-index:100; width:340px; overflow-y:auto; background:var(--glass-bg); border:1px solid var(--glass-border); border-radius:var(--r-xl); box-shadow:var(--glass-shadow), var(--glass-edge); padding:20px; backdrop-filter:var(--glass-blur); -webkit-backdrop-filter:var(--glass-blur); transition: width 0.2s, padding 0.2s;">
   <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:14px;padding-bottom:10px;border-bottom:1px solid var(--glass-border);">
     <div style="font-size:13px;font-weight:600;color:var(--text);letter-spacing:0.2px;" id="places-panel-title">🔎 Places Discovery</div>
-    <button onclick="togglePlacesPanel()" id="btn-minimize-panel" style="background:var(--surface2);border:1px solid var(--border);color:var(--text);font-size:14px;cursor:pointer;font-family:var(--font);width:28px;height:28px;border-radius:8px;display:inline-flex;align-items:center;justify-content:center;transition:all 0.15s;line-height:1;" title="Minimizar painel" onmouseover="this.style.background='var(--purple-bg)';this.style.borderColor='var(--purple)';this.style.color='var(--purple)';" onmouseout="this.style.background='var(--surface2)';this.style.borderColor='var(--border)';this.style.color='var(--text)';">‹</button>
+    <button onclick="togglePlacesPanel()" id="btn-minimize-panel" style="background:var(--surface2);border:1px solid var(--border);color:var(--text);font-size:14px;cursor:pointer;font-family:var(--font);width:28px;height:28px;border-radius:8px;display:inline-flex;align-items:center;justify-content:center;transition:all 0.15s;line-height:1;" title="Minimizar painel" onmouseover="this.style.background='var(--accent-bg)';this.style.borderColor='var(--accent)';this.style.color='var(--accent)';" onmouseout="this.style.background='var(--surface2)';this.style.borderColor='var(--border)';this.style.color='var(--text)';">‹</button>
   </div>
   <div id="places-panel-body">
 
@@ -840,7 +840,7 @@
     <div class="radius-row" style="margin-top:0;">
       <span style="font-size:11px;color:var(--text-dim);">Raio:</span>
       <input type="range" id="pin-radius-km" aria-label="Raio em km" min="1" max="50" value="5" step="1" style="flex:1;" oninput="document.getElementById('pin-radius-val').textContent=this.value+'km'; updatePlacesEstimate();">
-      <span id="pin-radius-val" style="font-size:11px;font-family:var(--mono);color:var(--purple);min-width:36px;text-align:right;">5km</span>
+      <span id="pin-radius-val" style="font-size:11px;font-family:var(--mono);color:var(--accent);min-width:36px;text-align:right;">5km</span>
     </div>
     <div id="radius-pins-list" style="margin-top:6px;display:flex;flex-wrap:wrap;gap:4px;"></div>
     <button id="btn-clear-pins" onclick="clearAllPins()" style="display:none;margin-top:6px;width:100%;padding:5px;background:transparent;border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text-muted);font-size:10px;font-family:var(--font);cursor:pointer;">✕ Limpar todos os pins</button>
@@ -881,16 +881,16 @@
       <div style="margin-bottom:14px;">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
           <span style="font-size:12px;color:var(--text);font-weight:500;">População mínima</span>
-          <span id="pop-filter-val" style="font-size:13px;color:var(--purple);font-family:var(--mono);font-weight:600;">20k</span>
+          <span id="pop-filter-val" style="font-size:13px;color:var(--accent);font-family:var(--mono);font-weight:600;">20k</span>
         </div>
-        <input type="range" id="pop-filter" aria-label="População mínima" min="20" max="500" value="20" step="10" style="width:100%;accent-color:var(--purple);" oninput="document.getElementById('pop-filter-val').textContent=this.value+'k'; updatePlacesEstimate();">
+        <input type="range" id="pop-filter" aria-label="População mínima" min="20" max="500" value="20" step="10" style="width:100%;accent-color:var(--accent);" oninput="document.getElementById('pop-filter-val').textContent=this.value+'k'; updatePlacesEstimate();">
         <div style="display:flex;justify-content:space-between;font-size:10px;color:var(--text-muted);margin-top:2px;">
           <span>20k</span><span>100k</span><span>250k</span><span>500k</span>
         </div>
       </div>
       <!-- Capitals only -->
       <label style="display:flex;align-items:center;gap:8px;font-size:12px;color:var(--text);cursor:pointer;padding:8px 0 0;">
-        <input type="checkbox" id="capitals-only" aria-label="Apenas capitais" onchange="updatePlacesEstimate()" style="accent-color:var(--purple);width:16px;height:16px;">
+        <input type="checkbox" id="capitals-only" aria-label="Apenas capitais" onchange="updatePlacesEstimate()" style="accent-color:var(--accent);width:16px;height:16px;">
         <span>Apenas capitais <span style="color:var(--text-muted);font-size:11px;">(27 cidades)</span></span>
       </label>
     </div>

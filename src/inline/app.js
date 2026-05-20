@@ -7261,14 +7261,14 @@ function addRadiusPin(lat, lon) {
   var radiusKm = parseFloat(document.getElementById('pin-radius-km').value) || 5;
   var pinData = { lat: +lat.toFixed(5), lon: +lon.toFixed(5), radiusKm: radiusKm, marker: null, circleId: null };
   var el = document.createElement('div');
-  el.style.cssText = 'width:14px;height:14px;background:var(--purple);border:2px solid var(--text-on-accent);border-radius:50%;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,0.5);';
+  el.style.cssText = 'width:14px;height:14px;background:var(--accent);border:2px solid var(--text-on-accent);border-radius:50%;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,0.5);';
   pinData.marker = new maplibregl.Marker({ element: el }).setLngLat([lon, lat]).addTo(map);
   var idx = _radiusPins.length;
   pinData.circleId = 'places-circle-' + idx + '-' + Date.now();
   var circle = generateCircleGeoJSON(lat, lon, radiusKm);
   if (map.isStyleLoaded()) {
     map.addSource(pinData.circleId, { type: 'geojson', data: circle });
-    map.addLayer({ id: pinData.circleId, type: 'fill', source: pinData.circleId, paint: { 'fill-color': _cssVar('--purple'), 'fill-opacity': 0.1 } });
+    map.addLayer({ id: pinData.circleId, type: 'fill', source: pinData.circleId, paint: { 'fill-color': _cssVar('--accent'), 'fill-opacity': 0.12 } });
   }
   _radiusPins.push(pinData);
   renderRadiusPinTags();

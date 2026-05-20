@@ -32,6 +32,9 @@
   --accent-glow: rgba(51,151,185,0.25);
   --accent-pressed: #246C84;
   --purple: #5F25FF;
+  --sky: #03A9F5;
+  --sky-bg: rgba(3,169,245,0.14);
+  --sky-edge: rgba(3,169,245,0.32);
   --win: #018376;
   --lose: #F5272B;
   --neutral: #E89A28;
@@ -153,6 +156,9 @@
   --accent-glow: rgba(36,108,132,0.12);
   --accent-pressed: #3397B9;
   --purple: #4E1E9C;
+  --sky: #0288D1;
+  --sky-bg: rgba(2,136,209,0.10);
+  --sky-edge: rgba(2,136,209,0.30);
   --win: #018376;
   --lose: #B11C1F;
   --neutral: #B1A300;
@@ -1320,18 +1326,18 @@ input[type="range"]:hover::-webkit-slider-thumb {
   border: 1px solid var(--border); color: var(--text-dim); cursor: pointer;
   transition: all 0.12s; background: transparent; font-family: var(--font);
 }
-.state-chip.active { background: var(--purple); border-color: var(--purple); color: var(--text-on-accent); }
+.state-chip.active { background: var(--accent); border-color: var(--accent); color: var(--text-on-accent); }
 .state-chip:hover:not(.active) { border-color: var(--border-active); color: var(--text); }
 .state-chip.select-all { color: var(--accent-light); border-color: var(--accent); font-weight: 600; }
 .state-chip.select-all.active { background: var(--accent); color: var(--text-on-accent); }
 
 .radius-pin-tag {
   display: inline-flex; align-items: center; gap: 4px; padding: 3px 8px;
-  background: var(--purple-bg); border-radius: 12px; font-size: 10px;
-  color: var(--purple); margin: 3px 2px; font-family: var(--mono);
+  background: var(--accent-bg); border-radius: 12px; font-size: 10px;
+  color: var(--accent); margin: 3px 2px; font-family: var(--mono);
 }
 .radius-pin-tag button {
-  background: none; border: none; color: var(--purple); cursor: pointer;
+  background: none; border: none; color: var(--accent); cursor: pointer;
   font-size: 12px; padding: 0 2px; opacity: 0.7;
 }
 .radius-pin-tag button:hover { opacity: 1; }
@@ -1342,7 +1348,7 @@ input[type="range"]:hover::-webkit-slider-thumb {
   border-radius: var(--radius-sm); padding: 12px; color: var(--text);
   font-family: var(--font); font-size: 14px; transition: border-color var(--transition);
 }
-.places-search-input:focus { outline: none; border-color: var(--purple); }
+.places-search-input:focus { outline: none; border-color: var(--accent); }
 .places-search-input::placeholder { color: var(--text-muted); }
 
 /* Estimate box */
@@ -1352,16 +1358,16 @@ input[type="range"]:hover::-webkit-slider-thumb {
   display: none;
 }
 .places-estimate.visible { display: block; }
-.places-estimate .est-highlight { color: var(--purple); font-weight: 600; font-family: var(--mono); }
+.places-estimate .est-highlight { color: var(--accent); font-weight: 600; font-family: var(--mono); }
 
 /* Run button */
 .places-run-btn {
   width: 100%; padding: 12px; border-radius: var(--radius-sm);
-  background: var(--purple); color: var(--text-on-accent); border: none; cursor: pointer;
+  background: var(--accent); color: var(--text-on-accent); border: none; cursor: pointer;
   font-size: 14px; font-weight: 600; font-family: var(--font);
   transition: all 0.15s; letter-spacing: 0.2px;
 }
-.places-run-btn:hover { background: var(--purple-hover); }
+.places-run-btn:hover { background: var(--accent-pressed); }
 .places-run-btn:disabled { opacity: 0.4; cursor: not-allowed; }
 
 .places-mode-tabs {
@@ -1372,7 +1378,7 @@ input[type="range"]:hover::-webkit-slider-thumb {
   border: 1px solid var(--border); background: transparent; color: var(--text-muted);
   cursor: pointer; transition: all 0.12s; font-family: var(--font);
 }
-.places-mode-tab.active { background: var(--purple); color: var(--text-on-accent); border-color: var(--purple); }
+.places-mode-tab.active { background: var(--accent); color: var(--text-on-accent); border-color: var(--accent); }
 
 /* Radius input row */
 .radius-row {
@@ -2644,7 +2650,7 @@ body[data-v360-hero="active"] #v360-comp-overview-panel { display: none; }
   padding: 4px 10px; border-radius: 4px;
 }
 .badge-geo { background: var(--win-bg); color: var(--win); }
-.badge-rev { background: var(--indigo-bg); color: var(--indigo); }
+.badge-rev { background: var(--sky-bg); color: var(--sky); }
 .badge-v360 { background: var(--neutral-bg); color: var(--neutral); }
 .modal-close {
   position: absolute; top: 16px; right: 20px; font-size: 20px;
