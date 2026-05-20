@@ -5479,6 +5479,7 @@ async function deleteMap(id, btn) {
   btn.disabled = true;
   try {
     await sbFetch(`saved_maps?id=eq.${id}`, { method:'DELETE', headers:{'Prefer':'return=minimal'} });
+    _invalidateOpenedMapCache(id);
     _galleryMaps = _galleryMaps.filter(function(m) { return m.id !== id; });
     if (_galleryMaps.length === 0) {
       document.getElementById('gallery-grid').style.display = 'none';
@@ -5862,6 +5863,7 @@ async function bulkDeleteSelected() {
     var idSet = new Set(ids);
     allData = allData.filter(function(r) { return !idSet.has(r.id); });
     filteredData = filteredData.filter(function(r) { return !idSet.has(r.id); });
+    _invalidateOpenedMapCache(mapId);
 
     // Atualiza row_count
     try {
@@ -5912,6 +5914,52 @@ function _loadCompetitorsAndWait(mapId, sharedMode) {
     }
   });
 }
+
+// ─── Cache de 1 slot pra reabertura instantânea de mapa ────────────────────
+// Quando o user sai de um mapa e volta no mesmo, restaura tudo da memória —
+// zero fetches. Cache sobrevive enquanto a aba estiver aberta. Invalidado por
+// mutações conhecidas (delete, bulk delete, add/remove competitor).
+var _lastOpenedMap = null;
+
+function _saveOpenedMapToCache(mapId) {
+  if (!mapId || !Array.isArray(allData) || !allData.length) return;
+  var compSnap = null;
+  try {
+    if (window.V360Comp && typeof window.V360Comp.snapshotCompetitors === 'function') {
+      compSnap = window.V360Comp.snapshotCompetitors();
+    }
+  } catch(_) {}
+  _lastOpenedMap = {
+    mapId: mapId,
+    mapType: currentMapType,
+    allData: allData,
+    meta: window._savedMapMeta || null,
+    payload: window._savedMapPayload || null,
+    baseBrand: window._currentMapBaseBrand || null,
+    competitorsSnapshot: compSnap,
+  };
+}
+
+function _tryRestoreOpenedMapFromCache(mapId) {
+  if (!_lastOpenedMap || _lastOpenedMap.mapId !== mapId) return false;
+  allData = _lastOpenedMap.allData;
+  filteredData = allData.slice();
+  window._savedMapMeta = _lastOpenedMap.meta;
+  window._savedMapPayload = _lastOpenedMap.payload;
+  window._savedMapId = mapId;
+  window._currentMapBaseBrand = _lastOpenedMap.baseBrand;
+  if (_lastOpenedMap.competitorsSnapshot && window.V360Comp && typeof window.V360Comp.restoreCompetitors === 'function') {
+    try { window.V360Comp.restoreCompetitors(_lastOpenedMap.competitorsSnapshot, mapId); } catch(_) {}
+  }
+  return true;
+}
+
+function _invalidateOpenedMapCache(mapId) {
+  if (mapId == null || (_lastOpenedMap && _lastOpenedMap.mapId === mapId)) {
+    _lastOpenedMap = null;
+  }
+}
+try { window._invalidateOpenedMapCache = _invalidateOpenedMapCache; } catch(_) {}
 
 async function openSavedMap(mapId, name, mapType) {
   // Limpar pendências de geocoding anterior — evita save acidental
@@ -6004,10 +6052,36 @@ async function openSavedMap(mapId, name, mapType) {
   document.getElementById('geo-fail').textContent = '';
   document.getElementById('geo-eta').textContent = '';
 
+  // ─── Cache hit: reabriu o mesmo mapa? Pula todos os fetches. ────────────
+  if (_tryRestoreOpenedMapFromCache(mapId)) {
+    try {
+      if (allData.length > 0) {
+        const _pts = allData.filter(r => r.lat && r.lon);
+        if (_pts.length) {
+          const bounds = _pts.reduce((b, r) => b.extend([parseFloat(r.lon), parseFloat(r.lat)]),
+            new maplibregl.LngLatBounds([parseFloat(_pts[0].lon), parseFloat(_pts[0].lat)], [parseFloat(_pts[0].lon), parseFloat(_pts[0].lat)]));
+          map.fitBounds(bounds, { padding:[40,40], animate: false });
+        }
+      }
+      populateFilters(); updatePanels(); updateOverlay();
+      if (_rightPanelEl) _rightPanelEl.classList.remove('panel-loading');
+      if (_headerNameEl) _headerNameEl.classList.remove('loading');
+      checkReenrichBar();
+      // restoreCompetitors() já disparou v360:competitors-loaded → renderMarkers
+      // já roda (listener em ~app.js:62). Se não é V360, força aqui.
+      if (currentMapType !== 'varejo360' && typeof renderMarkers === 'function') {
+        try { renderMarkers(); } catch(_) {}
+      }
+    } catch(_) {}
+    return;
+  }
+
   try {
-    // Load map metadata (payload with search context)
-    var mapMeta = await sbFetch('saved_maps?id=eq.' + mapId + '&select=payload');
-    window._savedMapPayload = (Array.isArray(mapMeta) && mapMeta[0]?.payload) || null;
+    // Load map metadata (payload + base_brand + tickets_floor numa só request).
+    // v360-competitors.js lê window._savedMapMeta em vez de refetchar.
+    var mapMeta = await sbFetch('saved_maps?id=eq.' + mapId + '&select=payload,base_brand,tickets_floor');
+    window._savedMapMeta = (Array.isArray(mapMeta) && mapMeta[0]) || null;
+    window._savedMapPayload = window._savedMapMeta?.payload || null;
     window._savedMapId = mapId;
 
     const PAGE = 1000;
@@ -6110,6 +6184,8 @@ async function openSavedMap(mapId, name, mapType) {
     // recém-feito): o styledata já não disparava de novo e renderMarkers nunca
     // rodava → 1027 places carregados em memória, 0 plotados no mapa.
     renderMarkers();
+    // Cache este mapa pra reabertura instantânea (sai e volta = zero fetches)
+    try { _saveOpenedMapToCache(mapId); } catch(_) {}
   } catch(e) {
     overlay.classList.remove('active');
     if (_rightPanelEl) _rightPanelEl.classList.remove('panel-loading');
@@ -6389,6 +6465,10 @@ async function initSharedMode() {
   if (!shareToken) return false;
 
   _isSharedMode = true;
+  // Sincroniza com window.* — v360-competitors.js (perspBar / chip × / botão +)
+  // e outros módulos checam window._isSharedMode pra esconder ações de edição.
+  // Sem isso a perspBar renderiza '+' e '×' mesmo no link compartilhado.
+  try { window._isSharedMode = true; } catch(e) {}
   document.body.classList.add('shared-mode');
 
   // Esconder login, gallery, upload
