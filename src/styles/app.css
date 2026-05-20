@@ -2312,7 +2312,8 @@ body[data-v360-panel="active"] #ov-bandeiras-section {
    Toggle aplicado via JS no body: data-v360-hero="active". */
 body[data-v360-hero="active"] #overview-mini-stats,
 body[data-v360-hero="active"] #ov-share-section,
-body[data-v360-hero="active"] #ov-dist-section { display: none; }
+body[data-v360-hero="active"] #ov-dist-section,
+body[data-v360-hero="active"] #v360-comp-overview-panel { display: none; }
 
 /* Charts */
 .chart-wrap { position: relative; }
