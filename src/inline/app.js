@@ -6154,6 +6154,18 @@ async function openSavedMap(mapId, name, mapType) {
     // recém-feito): o styledata já não disparava de novo e renderMarkers nunca
     // rodava → 1027 places carregados em memória, 0 plotados no mapa.
     renderMarkers();
+    // Safety net: força _renderClusterDonuts depois que o fitBounds termina.
+    // O overlay HTML de donuts depende de map.queryRenderedFeatures, que só é
+    // confiável quando a câmera para de animar (event 'idle'). Sem isso, o
+    // overlay renderiza uma vez mid-animação (parcial) e o user vê só 1
+    // cluster + alguns pins soltos até interagir com o mapa.
+    try {
+      if (map) {
+        map.once('idle', function() {
+          try { if (typeof _renderClusterDonuts === 'function') _renderClusterDonuts(); } catch(_) {}
+        });
+      }
+    } catch(_) {}
   } catch(e) {
     overlay.classList.remove('active');
     if (_rightPanelEl) _rightPanelEl.classList.remove('panel-loading');
