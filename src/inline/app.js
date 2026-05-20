@@ -5161,12 +5161,29 @@ async function loadGallery() {
   var empty = document.getElementById('gallery-empty');
   var filters = document.getElementById('gallery-filters');
   var kpis = document.getElementById('gallery-kpis');
-  loading.style.display = 'block';
-  grid.style.display = 'none';
-  empty.style.display = 'none';
-  if (filters) filters.style.display = 'none';
-  if (kpis) kpis.style.display = 'none';
-  document.getElementById('gallery-pagination').style.display = 'none';
+  var pagination = document.getElementById('gallery-pagination');
+
+  // Stale-while-revalidate: se já temos _galleryMaps em memória (voltou de um
+  // mapa, p.ex.), renderiza imediato do cache e refresca em background. Sem
+  // isso, cada retorno à gallery exibia um flash de "Carregando..." com
+  // KPIs/filtros/grid escondidos enquanto a fetch rodava.
+  var hasCachedData = Array.isArray(_galleryMaps) && _galleryMaps.length > 0;
+
+  if (!hasCachedData) {
+    // 1º load da sessão — mostra spinner
+    loading.style.display = 'block';
+    grid.style.display = 'none';
+    empty.style.display = 'none';
+    if (filters) filters.style.display = 'none';
+    if (kpis) kpis.style.display = 'none';
+    pagination.style.display = 'none';
+  } else {
+    // Re-entrada na gallery — re-renderiza imediato dos dados em cache.
+    loading.style.display = 'none';
+    if (filters) filters.style.display = 'flex';
+    if (kpis) kpis.style.display = 'grid';
+    try { applyGalleryFilters(true); } catch(_) {}
+  }
 
   try {
     // Fetch em paralelo: lista de mapas + ids fixados do usuário atual.
@@ -5178,25 +5195,44 @@ async function loadGallery() {
     var maps = fetchResults[0];
     loading.style.display = 'none';
     if (!maps || maps.length === 0) { empty.style.display = 'block'; return; }
+
+    // Detecta mudança real antes de re-renderizar (evita flicker quando
+    // os dados vieram idênticos ao cache). Compara tamanho + IDs/timestamps
+    // dos extremos da lista — suficiente pra detectar inserções, deleções
+    // e edições mais recentes (lista vem ordenada por created_at desc).
+    var changed = !hasCachedData
+      || maps.length !== _galleryMaps.length
+      || maps[0]?.id !== _galleryMaps[0]?.id
+      || maps[0]?.updated_at !== _galleryMaps[0]?.updated_at
+      || maps[maps.length - 1]?.id !== _galleryMaps[_galleryMaps.length - 1]?.id;
+
     _galleryMaps = maps;
-    // Populate creator dropdown
+
+    // Populate creator dropdown (preserva valor selecionado)
     var creatorEl = document.getElementById('gf-creator');
     if (creatorEl) {
       var creators = {};
       maps.forEach(function(m) { if (m.created_by) creators[m.created_by] = true; });
+      var prevValue = creatorEl.value;
       creatorEl.innerHTML = '<option value="">Todos os criadores</option>';
       Object.keys(creators).sort().forEach(function(c) {
         var opt = document.createElement('option');
         opt.value = c; opt.textContent = c.split('@')[0];
         creatorEl.appendChild(opt);
       });
+      creatorEl.value = prevValue;
     }
     if (filters) filters.style.display = 'flex';
     if (kpis) kpis.style.display = 'grid';
-    _galleryPage = 1;
-    applyGalleryFilters();
+    if (changed) {
+      _galleryPage = 1;
+      applyGalleryFilters();
+    }
   } catch (e) {
-    loading.innerHTML = '<span style="color:var(--lose)">Erro ao carregar: ' + escHtml(e.message) + '</span>';
+    if (!hasCachedData) {
+      loading.innerHTML = '<span style="color:var(--lose)">Erro ao carregar: ' + escHtml(e.message) + '</span>';
+    }
+    // Com cache em tela, falha de refetch é silenciosa — mantém o que tá visível.
   }
 }
 
