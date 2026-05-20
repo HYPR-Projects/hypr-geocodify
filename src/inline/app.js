@@ -6067,9 +6067,14 @@ async function openSavedMap(mapId, name, mapType) {
       if (_rightPanelEl) _rightPanelEl.classList.remove('panel-loading');
       if (_headerNameEl) _headerNameEl.classList.remove('loading');
       checkReenrichBar();
-      // restoreCompetitors() já disparou v360:competitors-loaded → renderMarkers
-      // já roda (listener em ~app.js:62). Se não é V360, força aqui.
-      if (currentMapType !== 'varejo360' && typeof renderMarkers === 'function') {
+      // SEMPRE força renderMarkers no cache hit. A limpeza forte (~6001) zerou
+      // o source 'pdvs' do MapLibre, então independente do tipo precisamos
+      // repopular. O listener de v360:competitors-loaded em ~app.js:62 só
+      // dispara renderMarkers quando colorChanged=true; restoreCompetitors
+      // emite com source='cache-restore' (sem colorChanged), então o listener
+      // não cobre esse caso — daí o force aqui. Sem isso, V360 reabria sem
+      // pins no mapa apesar dos painéis estarem corretos.
+      if (typeof renderMarkers === 'function') {
         try { renderMarkers(); } catch(_) {}
       }
     } catch(_) {}
