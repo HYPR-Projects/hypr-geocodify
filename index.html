@@ -979,6 +979,26 @@
             <div id="h2hContent"></div>
           </div>
 
+          <!-- SBT CARD (Fase 7): Share por tipo — bars empilhadas HEI:B com %.
+               Visível só com 1+ marca em V360. Renderizado via v360-panel.js -->
+          <div class="panel-section v360-panel-card" id="v360-sbt-card" style="display:none;">
+            <div class="card-head">
+              <div class="card-title"><span class="card-title-dot" style="background:var(--accent)"></span>Share por tipo</div>
+              <span class="card-meta">empilhado · 100%</span>
+            </div>
+            <div class="sbt" id="sbtRows"></div>
+          </div>
+
+          <!-- TOP REDES CARD (Fase 7): Top redes (bandeiras) por # de PDVs.
+               Lista numerada com bar + valor. -->
+          <div class="panel-section v360-panel-card" id="v360-topredes-card" style="display:none;">
+            <div class="card-head">
+              <div class="card-title"><span class="card-title-dot" style="background:var(--accent)"></span>Top redes por PDVs</div>
+              <span class="card-meta" id="topredes-count">— redes</span>
+            </div>
+            <div class="tb-list" id="topBandeiras"></div>
+          </div>
+
           <div class="overview-mini-stats" id="overview-mini-stats">
             <div class="overview-mini-stat clickable" data-perf="acima" title="Filtrar PDVs ganhando share">
               <div class="overview-mini-stat-val overview-mini-stat-val--win" id="ov-win">—</div>
@@ -1015,14 +1035,14 @@
             </div>
           </div>
 
-          <div class="panel-section">
+          <div class="panel-section" id="ov-sharetype-section">
             <div class="panel-section-title">Share por Tipo</div>
             <div class="chart-wrap" style="height:160px">
               <canvas id="chart-shares"></canvas>
             </div>
           </div>
 
-          <div class="panel-section">
+          <div class="panel-section" id="ov-bandeiras-section">
             <div class="panel-section-title">PDVs por Bandeira</div>
             <div class="chart-active-chip" id="chip-bandeira-chart" style="display:none;"></div>
             <div class="chart-wrap" style="height:180px">
