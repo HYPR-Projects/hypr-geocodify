@@ -360,7 +360,7 @@
 
   // Insere item no kebab menu
   function ensureKebabItem() {
-    if (!isV360() || !hasCompetitors()) {
+    if (!isV360() || !hasCompetitors() || isShared()) {
       const el = document.getElementById('menu-item-comp-csv');
       if (el) el.style.display = 'none';
       return;
