@@ -6122,6 +6122,25 @@ async function openSavedMap(mapId, name, mapType) {
         var qInput = document.getElementById('places-query-input');
         if (qInput) qInput.value = plPayload.search_query;
       }
+      // Alinha a tab de modo com o que foi salvo. Sem isso, o default 'states'
+      // (do showPlacesSetup) fica selecionado mesmo abrindo um mapa salvo em
+      // pin mode — gera inconsistência: tab Estados ativa + controles de pin
+      // + círculo de raio visíveis no mapa simultaneamente.
+      var savedMode = plPayload?.search_mode;
+      if (savedMode === 'pin' || savedMode === 'states' || savedMode === 'country') {
+        setPlacesMode(savedMode);
+        // Restaura UFs ativos quando o modo é 'states' (country já popula tudo
+        // internamente em setPlacesMode).
+        if (savedMode === 'states' && Array.isArray(plPayload.search_states)) {
+          _selectedStates.clear();
+          document.querySelectorAll('.state-chip[data-uf]').forEach(function(c) { c.classList.remove('active'); });
+          plPayload.search_states.forEach(function(uf) {
+            _selectedStates.add(uf);
+            var chip = document.querySelector('.state-chip[data-uf="' + uf + '"]');
+            if (chip) chip.classList.add('active');
+          });
+        }
+      }
       // Restore the original search pins visually if the payload has them.
       // Required for Aprofundar busca to work on previously-saved maps.
       // Older saves predate this field — they silently no-op here.
@@ -6134,7 +6153,10 @@ async function openSavedMap(mapId, name, mapType) {
             plPayload.search_pins.forEach(function(p) {
               if (typeof p.lat !== 'number' || typeof p.lon !== 'number') return;
               if (radiusInput) radiusInput.value = p.radiusKm || plPayload.search_radius_km || 5;
-              addRadiusPin(p.lat, p.lon);
+              // historical=true → não desenha o círculo de raio (que ficava
+              // dominando visualmente o mapa de visualização). O pin marker
+              // + metadata em _radiusPins continuam pra Aprofundar busca.
+              addRadiusPin(p.lat, p.lon, { historical: true });
             });
             if (radiusInput && prevRadiusValue !== null) radiusInput.value = prevRadiusValue;
           } catch(e) {
@@ -7322,18 +7344,26 @@ function disablePinMode() {
   if (_placesClickHandler) { map.off('click', _placesClickHandler); _placesClickHandler = null; }
 }
 
-function addRadiusPin(lat, lon) {
+function addRadiusPin(lat, lon, opts) {
+  // opts.historical=true: pin restaurado de mapa salvo. Mantém o marker + dados
+  // em _radiusPins (Aprofundar busca precisa), mas NÃO desenha o círculo de
+  // raio — pra mapa de visualização, o disco grande translúcido competia com
+  // os clusters dos places. Pra search ativa, o círculo continua mostrando a
+  // área que o user tá prestes a buscar.
+  var historical = !!(opts && opts.historical);
   var radiusKm = parseFloat(document.getElementById('pin-radius-km').value) || 5;
   var pinData = { lat: +lat.toFixed(5), lon: +lon.toFixed(5), radiusKm: radiusKm, marker: null, circleId: null };
   var el = document.createElement('div');
   el.style.cssText = 'width:14px;height:14px;background:var(--accent);border:2px solid var(--text-on-accent);border-radius:50%;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,0.5);';
   pinData.marker = new maplibregl.Marker({ element: el }).setLngLat([lon, lat]).addTo(map);
-  var idx = _radiusPins.length;
-  pinData.circleId = 'places-circle-' + idx + '-' + Date.now();
-  var circle = generateCircleGeoJSON(lat, lon, radiusKm);
-  if (map.isStyleLoaded()) {
-    map.addSource(pinData.circleId, { type: 'geojson', data: circle });
-    map.addLayer({ id: pinData.circleId, type: 'fill', source: pinData.circleId, paint: { 'fill-color': _cssVar('--accent'), 'fill-opacity': 0.12 } });
+  if (!historical) {
+    var idx = _radiusPins.length;
+    pinData.circleId = 'places-circle-' + idx + '-' + Date.now();
+    var circle = generateCircleGeoJSON(lat, lon, radiusKm);
+    if (map.isStyleLoaded()) {
+      map.addSource(pinData.circleId, { type: 'geojson', data: circle });
+      map.addLayer({ id: pinData.circleId, type: 'fill', source: pinData.circleId, paint: { 'fill-color': _cssVar('--accent'), 'fill-opacity': 0.12 } });
+    }
   }
   _radiusPins.push(pinData);
   renderRadiusPinTags();
