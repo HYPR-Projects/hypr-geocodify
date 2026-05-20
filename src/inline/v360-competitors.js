@@ -573,6 +573,8 @@
       await ensureBaseBrandPersisted();
 
       closeModal();
+      // Cache do mapa atual fica stale com novo competitor — invalida
+      try { window._invalidateOpenedMapCache && window._invalidateOpenedMapCache(mapId); } catch(_) {}
       renderHeaderUI();
       // Notifica V360CompRender (hook em renderHeaderUI não pega chamadas
       // internas porque o monkey-patch só substitui window.V360Comp.renderHeaderUI,
@@ -879,6 +881,12 @@
   // chip insere antes (metade esquerda) ou depois (metade direita). Persiste
   // em saved_maps.payload.competitor_order (array de brand_name).
   function _wireDragReorder(bar) {
+    // Idempotência: renderPerspBar() roda toda vez que algo muda (drop, color,
+    // perspectiva, etc) e re-chama _wireDragReorder. Sem este guard, cada
+    // render acumula um novo set de listeners — depois de N drags, o drop
+    // dispara N vezes e o state.competitors fica embaralhado.
+    if (bar._dragReorderWired) return;
+    bar._dragReorderWired = true;
     let draggingId = null;
     let beforeRects = null;
     bar.addEventListener('dragstart', (e) => {
@@ -933,6 +941,8 @@
       state.competitors.splice(insertAt, 0, moved);
       const snapshot = beforeRects;
       _persistCompetitorOrder();
+      // Cache stale com ordem antiga — invalida
+      try { window._invalidateOpenedMapCache && window._invalidateOpenedMapCache(window._currentOpenMapId); } catch(_) {}
       renderHeaderUI();
       _flipAnimateChips(bar, snapshot);
       try {
@@ -1008,6 +1018,7 @@
       if (state.perspectiveBrand && !state.competitors.some(c => c.brand_name === state.perspectiveBrand) && state.perspectiveBrand !== window._currentMapBaseBrand) {
         state.perspectiveBrand = window._currentMapBaseBrand;
       }
+      try { window._invalidateOpenedMapCache && window._invalidateOpenedMapCache(window._currentOpenMapId); } catch(_) {}
       renderHeaderUI();
       try {
         window.dispatchEvent(new CustomEvent('v360:competitors-loaded', {
@@ -1036,11 +1047,22 @@
       try { window.dispatchEvent(new CustomEvent('v360:competitors-loaded', { detail: { count: 0 } })); } catch(_) {}
       return;
     }
-    if (state.loadedForMapId === mapId) {
-      // Mesmo mapa já carregado, mas refetcha meta pra pegar base_brand
-      // que pode ter sido persistido por upload/auto-detect anterior.
+    // Helper: usa window._savedMapMeta (prefetchado em openSavedMap) quando
+    // disponível e dedo certo, evitando round-trip duplicado em saved_maps.
+    async function _getMapMeta() {
+      if (window._savedMapMeta && window._currentOpenMapId === mapId) {
+        return [window._savedMapMeta];
+      }
       try {
-        const meta = await window.sbFetch('saved_maps?id=eq.' + mapId + '&select=base_brand,tickets_floor');
+        return await window.sbFetch('saved_maps?id=eq.' + mapId + '&select=base_brand,tickets_floor');
+      } catch(_) { return null; }
+    }
+
+    if (state.loadedForMapId === mapId) {
+      // Mesmo mapa já carregado — só atualiza meta (base_brand pode ter mudado
+      // por upload/auto-detect anterior). Usa cache se disponível.
+      try {
+        const meta = await _getMapMeta();
         if (Array.isArray(meta) && meta[0]) {
           if (meta[0].base_brand) window._currentMapBaseBrand = meta[0].base_brand;
           state.ticketsFloor = meta[0].tickets_floor || state.ticketsFloor;
@@ -1053,9 +1075,9 @@
     reset();
     state.loadedForMapId = mapId;
 
-    // base_brand do saved_maps
+    // base_brand do saved_maps (usa cache quando disponível)
     try {
-      const meta = await window.sbFetch('saved_maps?id=eq.' + mapId + '&select=base_brand,tickets_floor');
+      const meta = await _getMapMeta();
       if (Array.isArray(meta) && meta[0]) {
         window._currentMapBaseBrand = meta[0].base_brand || null;
         state.ticketsFloor = meta[0].tickets_floor || 5;
@@ -1234,6 +1256,8 @@
       } catch(e) { console.warn('[v360-comp] PATCH base color failed:', e); }
     }
 
+    // Cache stale com cor antiga — invalida
+    try { window._invalidateOpenedMapCache && window._invalidateOpenedMapCache(window._currentOpenMapId); } catch(_) {}
     // Dispara re-render
     // (Fase 11) Re-renderiza perspBar localmente — o evento abaixo é escutado
     // pelo hero/comp-render mas não pelo perspBar, então sem isso o chip do
@@ -1268,6 +1292,39 @@
     },
     setPerspective: (brand) => {
       state.perspectiveBrand = brand;
+    },
+    // ─── Cache de 1 slot: snapshot/restore p/ reabertura instantânea ─────
+    // Snapshot retorna refs diretas (pdvs Map não é mutado pós-load).
+    // Restore reseta state e repopula sem refetch. Caller é responsável por
+    // restaurar window._currentMapBaseBrand antes de chamar restore.
+    snapshotCompetitors: () => {
+      return {
+        competitors: state.competitors.map(c => ({
+          id: c.id,
+          brand_name: c.brand_name,
+          brand_color: c.brand_color,
+          row_count: c.row_count,
+          matched_count: c.matched_count,
+          unmatched_count: c.unmatched_count,
+          pdvs: c.pdvs,
+        })),
+        perspectiveBrand: state.perspectiveBrand,
+        ticketsFloor: state.ticketsFloor,
+      };
+    },
+    restoreCompetitors: (snap, mapId) => {
+      if (!snap || !mapId) return;
+      reset();
+      for (const c of (snap.competitors || [])) state.competitors.push(c);
+      state.perspectiveBrand = snap.perspectiveBrand || window._currentMapBaseBrand || null;
+      state.ticketsFloor = snap.ticketsFloor || 5;
+      state.loadedForMapId = mapId;
+      renderHeaderUI();
+      try {
+        window.dispatchEvent(new CustomEvent('v360:competitors-loaded', {
+          detail: { count: state.competitors.length, source: 'cache-restore' }
+        }));
+      } catch(_) {}
     },
   };
 
