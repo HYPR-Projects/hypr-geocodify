@@ -384,11 +384,17 @@
     }).join('');
 
     // Metric cards (gap + share-of-shelf)
+    // Whitespace: lensShare=0 E sumShares=0. Mostra "—" em vez de "0.0pp" e "0%"
+    // que dão impressão errada (valor real é "não há amostra").
+    const isWhitespaceRow = lensShare === 0 && sumShares === 0;
     const gapClass = gapPP > 0.05 ? 'pos' : gapPP < -0.05 ? 'neg' : '';
-    const gapVal = concCount > 0
-      ? `${gapPP > 0 ? '+' : ''}${gapPP.toFixed(1)}pp`
-      : `${(lensShare * 100).toFixed(1)}%`;
+    const gapVal = isWhitespaceRow
+      ? '—'
+      : (concCount > 0
+          ? `${gapPP > 0 ? '+' : ''}${gapPP.toFixed(1)}pp`
+          : `${(lensShare * 100).toFixed(1)}%`);
     const gapLabel = concCount > 0 ? 'Gap vs. concorrentes' : 'Share absoluto';
+    const sosVal = isWhitespaceRow ? '—' : `${sos.toFixed(0)}%`;
     const sosLabel = concCount > 0
       ? `${_esc(persp)} no mix de ${rows.length} marcas`
       : `${_esc(persp)} no mix`;
@@ -423,7 +429,7 @@
             <div class="l">${gapLabel}</div>
           </div>
           <div class="popup-ext-metric">
-            <div class="v">${sos.toFixed(0)}%</div>
+            <div class="v">${sosVal}</div>
             <div class="l">${sosLabel}</div>
           </div>
         </div>
