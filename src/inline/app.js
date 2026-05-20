@@ -3233,8 +3233,10 @@ function toggleFullMap() {
   const isFullMap = app.classList.toggle('map-only');
   btn.classList.toggle('active', isFullMap);
   btn.innerHTML = isFullMap
-    ? '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="4 14 10 14 10 20"/><polyline points="20 10 14 10 14 4"/><line x1="10" y1="14" x2="3" y2="21"/><line x1="21" y1="3" x2="14" y2="10"/></svg> Recolher'
-    : '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/></svg> Expandir';
+    ? '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="4 14 10 14 10 20"/><polyline points="20 10 14 10 14 4"/><line x1="10" y1="14" x2="3" y2="21"/><line x1="21" y1="3" x2="14" y2="10"/></svg>'
+    : '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/></svg>';
+  btn.setAttribute('title', isFullMap ? 'Recolher (F)' : 'Tela cheia (F)');
+  btn.setAttribute('aria-label', isFullMap ? 'Recolher mapa' : 'Expandir mapa');
   try { localStorage.setItem('hypr_fullmap', isFullMap); } catch(e) {}
   setTimeout(() => map && map.resize(), 250);
 }
@@ -5027,7 +5029,61 @@ function showUploadZone() {
 var _galleryMaps = []; // Store for filtering
 var _galleryPage = 1;
 var _galleryPerPage = 30;
-var _galleryFiltered = []; // Current filtered set
+var _galleryFiltered = []; // Filtered + sem fixados (paginado)
+var _galleryFilteredPinned = []; // Filtered + fixados (sempre renderizados completos)
+
+// ─── Pinned Maps (por usuário) ─────────────────────────────────────────────
+// Cada user pode pinar N mapas; persiste em pinned_maps (RLS por auth.uid()).
+// _pinnedMapIds é a snapshot em memória, atualizada via loadPinnedMaps() e
+// togglePinMap(). isPinned(id) é o predicate usado pelo render do card.
+var _pinnedMapIds = new Set();
+
+async function loadPinnedMaps() {
+  if (!currentUser) { _pinnedMapIds = new Set(); return; }
+  try {
+    var rows = await sbFetch('pinned_maps?select=map_id&order=pinned_at.desc');
+    _pinnedMapIds = new Set((rows || []).map(function(r) { return r.map_id; }));
+  } catch(e) {
+    console.warn('[pins] load failed:', e);
+    _pinnedMapIds = new Set();
+  }
+}
+
+function isPinned(mapId) {
+  return _pinnedMapIds.has(mapId);
+}
+
+async function togglePinMap(mapId, btn) {
+  if (!currentUser || !mapId) return;
+  var wasPinned = _pinnedMapIds.has(mapId);
+  // Optimistic: atualiza UI imediatamente, reverte se falhar
+  if (wasPinned) _pinnedMapIds.delete(mapId);
+  else _pinnedMapIds.add(mapId);
+  if (btn) { btn.classList.toggle('is-pinned', !wasPinned); btn.disabled = true; }
+  try {
+    if (wasPinned) {
+      await sbFetch('pinned_maps?map_id=eq.' + encodeURIComponent(mapId),
+        { method: 'DELETE', headers: { 'Prefer': 'return=minimal' } });
+    } else {
+      await sbFetch('pinned_maps', {
+        method: 'POST',
+        headers: { 'Prefer': 'return=minimal' },
+        body: JSON.stringify({ user_id: currentUser.id, map_id: mapId }),
+      });
+    }
+    // Re-render pra mover o card pra/da seção "Fixados"
+    if (typeof applyGalleryFilters === 'function') applyGalleryFilters(true);
+  } catch(e) {
+    // Rollback
+    if (wasPinned) _pinnedMapIds.add(mapId);
+    else _pinnedMapIds.delete(mapId);
+    if (btn) btn.classList.toggle('is-pinned', wasPinned);
+    console.warn('[pins] toggle failed:', e);
+    alert('Falha ao ' + (wasPinned ? 'desafixar' : 'fixar') + ' o mapa. Tente de novo.');
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
 
 // ─── Gallery KPIs (big numbers na home) ─────────────────────────────────────
 // Baseline historico HYPR (PDVs ja mapeados antes do Geocodify). Atualizar este
@@ -5111,7 +5167,13 @@ async function loadGallery() {
   document.getElementById('gallery-pagination').style.display = 'none';
 
   try {
-    var maps = await sbFetch('saved_maps?select=*&order=created_at.desc&limit=500');
+    // Fetch em paralelo: lista de mapas + ids fixados do usuário atual.
+    // loadPinnedMaps() nunca rejeita (try/catch interno) — falha vira Set vazio.
+    var fetchResults = await Promise.all([
+      sbFetch('saved_maps?select=*&order=created_at.desc&limit=500'),
+      loadPinnedMaps()
+    ]);
+    var maps = fetchResults[0];
     loading.style.display = 'none';
     if (!maps || maps.length === 0) { empty.style.display = 'block'; return; }
     _galleryMaps = maps;
@@ -5163,9 +5225,16 @@ function applyGalleryFilters(keepPage) {
   }
   // newest is default (already sorted from API)
   
-  _galleryFiltered = filtered;
+  // Separa fixados (mantêm a ordem do sort selecionado) dos demais. Pinados
+  // ignoram paginação — usuário típico tem ≤20 e quer ver todos sem clicar.
+  _galleryFilteredPinned = [];
+  _galleryFiltered = [];
+  for (var i = 0; i < filtered.length; i++) {
+    if (isPinned(filtered[i].id)) _galleryFilteredPinned.push(filtered[i]);
+    else _galleryFiltered.push(filtered[i]);
+  }
   if (!keepPage) _galleryPage = 1;
-  
+
   // Atualiza big numbers da home (reage ao filtro). Historico HYPR e' fixo
   // baseado em _galleryMaps, nao em filtered, portanto sempre consistente.
   try { updateGalleryKPIs(filtered); } catch(e) {}
@@ -5176,6 +5245,11 @@ function applyGalleryFilters(keepPage) {
     pagEl.style.display = 'none';
     empty.style.display = 'block';
     empty.querySelector('.gallery-empty-title').textContent = searchVal || typeVal || creatorVal ? 'Nenhum mapa encontrado com esses filtros' : 'Nenhum mapa salvo ainda';
+    // Esconder seção de pinados quando empty
+    var _pinSec0 = document.getElementById('gallery-pinned-section');
+    var _allHead0 = document.getElementById('gallery-all-section-head');
+    if (_pinSec0) _pinSec0.style.display = 'none';
+    if (_allHead0) _allHead0.style.display = 'none';
   } else {
     empty.style.display = 'none';
     renderGalleryPage();
@@ -5185,19 +5259,42 @@ function applyGalleryFilters(keepPage) {
 function renderGalleryPage() {
   var grid = document.getElementById('gallery-grid');
   var pagEl = document.getElementById('gallery-pagination');
+
+  // ── Seção de fixados (sempre todos, sem paginação) ───────────────────────
+  var pinSection = document.getElementById('gallery-pinned-section');
+  var pinGrid = document.getElementById('gallery-pinned-grid');
+  var pinCount = document.getElementById('gallery-pinned-count');
+  var allHead = document.getElementById('gallery-all-section-head');
+  if (pinSection && pinGrid) {
+    if (_galleryFilteredPinned.length > 0) {
+      pinGrid.innerHTML = '';
+      for (var pi = 0; pi < _galleryFilteredPinned.length; pi++) {
+        pinGrid.appendChild(buildMapCard(_galleryFilteredPinned[pi]));
+      }
+      if (pinCount) pinCount.textContent = _galleryFilteredPinned.length;
+      pinSection.style.display = '';
+      // Mostra header "Todos os mapas" só quando há fixados E há outros mapas
+      if (allHead) allHead.style.display = _galleryFiltered.length > 0 ? '' : 'none';
+    } else {
+      pinSection.style.display = 'none';
+      if (allHead) allHead.style.display = 'none';
+    }
+  }
+
+  // ── Grid principal (paginado, sem fixados) ───────────────────────────────
   var total = _galleryFiltered.length;
   var totalPages = Math.ceil(total / _galleryPerPage);
-  
+
   if (_galleryPage < 1) _galleryPage = 1;
-  if (_galleryPage > totalPages) _galleryPage = totalPages;
-  
+  if (totalPages > 0 && _galleryPage > totalPages) _galleryPage = totalPages;
+
   var start = (_galleryPage - 1) * _galleryPerPage;
   var end = Math.min(start + _galleryPerPage, total);
-  var pageItems = _galleryFiltered.slice(start, end);
-  
+  var pageItems = total > 0 ? _galleryFiltered.slice(start, end) : [];
+
   grid.innerHTML = '';
   for (var i = 0; i < pageItems.length; i++) grid.appendChild(buildMapCard(pageItems[i]));
-  grid.style.display = 'grid';
+  grid.style.display = total > 0 ? 'grid' : 'none';
   
   // Scroll gallery body to top
   var body = document.querySelector('.gallery-body');
@@ -5325,7 +5422,9 @@ function _buildThumbDots(mapId, rowCount) {
 
 function buildMapCard(m) {
   const card = document.createElement('div');
-  card.className = 'map-card';
+  const pinned = isPinned(m.id);
+  card.className = 'map-card' + (pinned ? ' is-pinned' : '');
+  card.dataset.mapId = m.id;
   const date = new Date(m.created_at).toLocaleDateString('pt-BR', { day:'2-digit', month:'short', year:'numeric' });
   const dots = _buildThumbDots(m.id, m.row_count);
   const typeLabels = {
@@ -5343,6 +5442,7 @@ function buildMapCard(m) {
       <svg class="map-card-thumb-dots" viewBox="0 0 100 100" preserveAspectRatio="none">${dots}</svg>
       <div class="map-card-badge">${(m.row_count||0).toLocaleString('pt-BR')} ${rowLabel}</div>
       <div style="position:absolute;top:10px;left:10px;z-index:1;font-size:10px;font-weight:600;padding:4px 10px;border-radius:6px;background:rgba(0,0,0,0.6);color:${tConf.color};backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);letter-spacing:0.2px;">${tConf.label}</div>
+      ${pinned ? '<div class="map-card-pin-flag" title="Fixado" aria-hidden="true"><svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M16 12V4h1V2H7v2h1v8l-2 2v2h5.2v6h1.6v-6H18v-2l-2-2z"/></svg></div>' : ''}
     </div>
     <div class="map-card-body">
       <div class="map-card-name">${escHtml(m.name)}</div>
@@ -5353,6 +5453,7 @@ function buildMapCard(m) {
           <div class="map-card-user">${escHtml(m.created_by)}</div>
         </div>
         <div class="map-card-actions">
+          <button class="map-card-pin${pinned ? ' is-pinned' : ''}" title="${pinned ? 'Desafixar mapa' : 'Fixar mapa'}" aria-label="${pinned ? 'Desafixar mapa' : 'Fixar mapa'}" aria-pressed="${pinned}" onclick="event.stopPropagation();togglePinMap('${m.id}',this)"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 17v5"/><path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z"/></svg></button>
           <button class="map-card-share" title="Compartilhar" aria-label="Compartilhar" onclick="event.stopPropagation();openShareModalFromCard('${m.id}')"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg></button>
           <button class="map-card-del" title="Excluir" aria-label="Excluir" onclick="event.stopPropagation();deleteMap('${m.id}',this)"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-2 14a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2L5 6"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg></button>
         </div>
@@ -8416,6 +8517,7 @@ function resetPlacesForNewSearch() {
   try { window.ensureXLSX = ensureXLSX; } catch(e) {}
   try { window.ensureBRCities = ensureBRCities; } catch(e) {}
   try { window.deleteMap = deleteMap; } catch(e) {}
+  try { window.togglePinMap = togglePinMap; } catch(e) {}
   try { window.destroyChart = destroyChart; } catch(e) {}
   try { window.detectAndNormalize = detectAndNormalize; } catch(e) {}
   try { window.disablePinMode = disablePinMode; } catch(e) {}

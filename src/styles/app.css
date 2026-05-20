@@ -620,6 +620,44 @@ html.theme-switching, html.theme-switching *, html.theme-switching *::before, ht
 }
 .persp-chip.lens[aria-expanded="true"] .lens-caret { transform: rotate(180deg); }
 
+/* ─── Drag-and-drop pra reordenar concorrentes ───────────────────────────
+   FLIP animation faz os chips deslizarem pra nova posição. Chip arrastado
+   ganha tilt + scale (sensação "elevada"). Drop indicator pulsa com glow.
+   ───────────────────────────────────────────────────────────────────────── */
+.persp-chip.is-draggable {
+  cursor: grab;
+  transition: transform 220ms cubic-bezier(.2,.9,.2,1), opacity 180ms ease, box-shadow 180ms ease;
+}
+.persp-chip.is-draggable:active { cursor: grabbing; }
+.persp-chip.is-dragging {
+  opacity: 0.35;
+  transform: scale(0.92) rotate(-1.5deg);
+  box-shadow: 0 8px 24px -8px rgba(0,0,0,0.6);
+}
+.persp-chip.drop-before,
+.persp-chip.drop-after { position: relative; }
+.persp-chip.drop-before::before,
+.persp-chip.drop-after::after {
+  content: '';
+  position: absolute;
+  top: 6px; bottom: 6px;
+  width: 3px;
+  background: var(--accent);
+  border-radius: 2px;
+  box-shadow: 0 0 10px var(--accent), 0 0 4px var(--accent);
+  animation: persp-drop-pulse 0.9s ease-in-out infinite alternate;
+  pointer-events: none;
+}
+.persp-chip.drop-before::before { left: -6px; }
+.persp-chip.drop-after::after { right: -6px; }
+@keyframes persp-drop-pulse {
+  from { opacity: 0.55; transform: scaleY(0.85); }
+  to   { opacity: 1;    transform: scaleY(1);    }
+}
+/* Não interfere com .x button e .persp-dot — eles têm seu próprio cursor */
+.persp-chip.is-draggable .x,
+.persp-chip.is-draggable .persp-dot { cursor: pointer; }
+
 .persp-add {
   width: 30px; height: 30px;
   border-radius: 50%;
@@ -1519,17 +1557,6 @@ input[type="range"]:hover::-webkit-slider-thumb {
 .popup-brand-row .name.lens {
   font-weight: 700;
   color: var(--text);
-}
-.popup-brand-row .name .base-tag {
-  font-size: 8px;
-  font-family: var(--mono);
-  font-weight: 600;
-  color: var(--text-faint);
-  background: var(--border);
-  padding: 1px 4px;
-  border-radius: 3px;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
 }
 .popup-brand-row .bar-wrap {
   height: 8px;
@@ -3188,15 +3215,97 @@ body[data-v360-hero="active"] #v360-comp-overview-panel { display: none; }
   margin-top: 2px;
 }
 .map-card-actions { display: flex; gap: 2px; }
-.map-card-share, .map-card-del {
+.map-card-pin, .map-card-share, .map-card-del {
   display: inline-flex; align-items: center; justify-content: center;
   width: 28px; height: 28px;
   background: none; border: none; color: var(--text-muted); cursor: pointer;
   padding: 0; border-radius: var(--r-sm);
-  transition: color var(--transition), background var(--transition);
+  transition: color var(--transition), background var(--transition), transform 0.15s;
+}
+.map-card-pin svg, .map-card-share svg, .map-card-del svg {
+  transition: transform 0.2s ease;
 }
 .map-card-share:hover { color: var(--accent); background: var(--surface-subtle); }
 .map-card-del:hover { color: var(--lose); background: var(--lose-bg); }
+
+/* Pin button — outline em estado padrão, filled+purple quando ativo. O hover
+   antecipa o estado com tint para feedback claro. */
+.map-card-pin:hover {
+  color: var(--purple);
+  background: var(--purple-bg);
+}
+.map-card-pin:hover svg { transform: rotate(-12deg); }
+.map-card-pin.is-pinned {
+  color: var(--purple);
+  background: var(--purple-bg);
+}
+.map-card-pin.is-pinned svg {
+  fill: currentColor;
+  stroke-width: 0;
+}
+.map-card-pin:disabled {
+  opacity: 0.5;
+  cursor: progress;
+}
+
+/* Pin flag — badge sutil no canto da thumb quando o card está fixado. Posição
+   simétrica ao .map-card-badge (que fica em baixo/direita). */
+.map-card-pin-flag {
+  position: absolute;
+  top: 10px; right: 10px;
+  z-index: 1;
+  width: 24px; height: 24px;
+  display: inline-flex; align-items: center; justify-content: center;
+  border-radius: 50%;
+  background: var(--purple);
+  color: var(--text-on-accent, #fff);
+  box-shadow: 0 4px 12px rgba(95, 37, 255, 0.45), 0 0 0 2px rgba(0,0,0,0.25);
+  animation: pinPop 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+@keyframes pinPop {
+  from { transform: scale(0); opacity: 0; }
+  to   { transform: scale(1); opacity: 1; }
+}
+
+/* Card fixado: leve realce na borda + glow purple sutil pra reforçar
+   identidade sem competir com o tConf.color do badge de tipo. */
+.map-card.is-pinned {
+  border-color: var(--indigo-border, rgba(95,37,255,0.30));
+  box-shadow: 0 0 0 1px rgba(95,37,255,0.25), var(--glass-shadow);
+}
+
+/* ─── Gallery sections (Fixados + Todos os mapas) ───────────────────────── */
+.gallery-section { margin-bottom: var(--sp-8); }
+.gallery-section--pinned { margin-bottom: var(--sp-6); }
+.gallery-section-head {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: var(--sp-4);
+  padding: 0 2px;
+}
+.gallery-section-title {
+  display: inline-flex; align-items: center; gap: 10px;
+  margin: 0;
+  font-size: 16px; font-weight: 600; color: var(--text);
+  letter-spacing: -0.01em;
+}
+.gallery-section--pinned .gallery-section-title { color: var(--purple); }
+.gallery-section-title svg { flex-shrink: 0; }
+.gallery-section-count {
+  font-family: var(--mono);
+  font-size: 11px; font-weight: 600;
+  padding: 2px 9px;
+  border-radius: var(--r-pill);
+  background: var(--purple-bg);
+  color: var(--purple);
+  border: 1px solid var(--indigo-border, rgba(95,37,255,0.25));
+  font-variant-numeric: tabular-nums;
+}
+/* Quando NÃO é a seção de fixados, count usa accent (caso reutilizemos depois). */
+.gallery-section:not(.gallery-section--pinned) .gallery-section-count {
+  background: var(--accent-bg);
+  color: var(--accent);
+  border-color: var(--accent-edge);
+}
 
 /* Gallery pagination */
 .gallery-pagination {
@@ -3295,6 +3404,7 @@ body[data-v360-hero="active"] #v360-comp-overview-panel { display: none; }
 .shared-mode #save-modal,
 .shared-mode #reenrich-bar,
 .shared-mode .map-card-del,
+.shared-mode .map-card-pin,
 .shared-mode .map-card-share,
 .shared-mode .gallery-btn-new { display: none !important; }
 

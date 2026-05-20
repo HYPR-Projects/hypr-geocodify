@@ -193,6 +193,22 @@
       </select>
     </div>
     <div id="gallery-loading" style="text-align:center;padding:60px;color:var(--text-muted);font-size:12px;">Carregando mapas...</div>
+    <!-- Pinned section: aparece só quando há mapas fixados pelo user atual. -->
+    <section id="gallery-pinned-section" class="gallery-section gallery-section--pinned" style="display:none;">
+      <header class="gallery-section-head">
+        <h2 class="gallery-section-title">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M16 12V4h1V2H7v2h1v8l-2 2v2h5.2v6h1.6v-6H18v-2l-2-2z"/></svg>
+          <span>Fixados</span>
+          <span class="gallery-section-count" id="gallery-pinned-count">0</span>
+        </h2>
+      </header>
+      <div id="gallery-pinned-grid" class="gallery-grid"></div>
+    </section>
+    <!-- Header da seção principal — aparece junto com o grid quando há fixados,
+         pra contextualizar que abaixo são "todos os outros". -->
+    <header id="gallery-all-section-head" class="gallery-section-head" style="display:none;">
+      <h2 class="gallery-section-title"><span>Todos os mapas</span></h2>
+    </header>
     <div id="gallery-grid" class="gallery-grid" style="display:none;"></div>
     <div id="gallery-pagination" class="gallery-pagination" style="display:none;"></div>
     <div id="gallery-empty" class="gallery-empty" style="display:none;">
