@@ -58,9 +58,9 @@
   --sp-8: 32px;
   /* Glass primitive — standardized for all floating chrome */
   --glass-blur: blur(32px) saturate(1.8);
-  --glass-bg: rgba(28,38,47,0.62);
-  --glass-bg-strong: rgba(28,38,47,0.82);
-  --glass-border: rgba(229,235,242,0.09);
+  --glass-bg: rgba(28,38,47,0.75);
+  --glass-bg-strong: rgba(28,38,47,0.88);
+  --glass-border: rgba(229,235,242,0.12);
   --glass-shadow: 0 20px 60px -10px rgba(0,0,0,0.55), 0 4px 16px -4px rgba(0,0,0,0.4);
   --glass-shadow-sm: 0 8px 24px -4px rgba(0,0,0,0.4);
   --glass-edge: inset 0 1px 0 rgba(252,254,254,0.10), inset 0 -1px 0 rgba(0,0,0,0.25);
@@ -1896,6 +1896,15 @@ body[data-v360-panel="active"] #ov-bandeiras-section {
 .panel-tab-content { display: none; }
 .panel-tab-content.active { display: flex; flex-direction: column; gap: 16px; }
 
+/* Fase 7 polish: panel-section como card visível (substitui o flat antigo) */
+.panel-section {
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  padding: 16px;
+}
+.panel-section--hero { padding: 0 !important; background: transparent !important; border: none !important; }
+
 .panel-section-title { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.6px; color: var(--text-muted); margin-bottom: var(--sp-3); }
 
 /* Share Overview Card */
@@ -1921,7 +1930,7 @@ body[data-v360-panel="active"] #ov-bandeiras-section {
                           2 = big number + 1 linha secundária + delta
                           3+ = big number + N linhas secundárias + matriz h2h em outro card
    ───────────────────────────────────────────────────────────────────────── */
-.panel-section--hero { padding: 0; background: transparent; border: none; }
+/* (panel-section--hero declarado acima junto da .panel-section base) */
 .hero {
   background: var(--surface3);
   border: 1px solid var(--border);
