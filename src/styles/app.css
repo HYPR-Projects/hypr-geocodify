@@ -363,42 +363,6 @@ html.theme-switching, html.theme-switching *, html.theme-switching *::before, ht
 .map-title:focus { background: var(--surface2); border-color: var(--accent); }
 .map-title[hidden] { display: none; }
 
-/* ─── h-stats: stats minimal à direita do header ──────────────────────────
-   PDVs + Share méd. em pequeno; aparece em V360 só com mapa aberto.
-   Estilo: número grande + label muted, lado a lado.
-   ───────────────────────────────────────────────────────────────────────── */
-.h-stats {
-  display: inline-flex;
-  align-items: center;
-  gap: 14px;
-  padding: 0 6px 0 4px;
-  margin-right: 4px;
-  border-right: 1px solid var(--border);
-  height: 20px;
-}
-.h-stat {
-  display: inline-flex;
-  flex-direction: column;
-  align-items: flex-start;
-  line-height: 1;
-  gap: 2px;
-}
-.h-stat .v {
-  font-family: var(--mono);
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--text);
-  font-variant-numeric: tabular-nums;
-  letter-spacing: -0.01em;
-}
-.h-stat .l {
-  font-size: 9px;
-  color: var(--text-muted);
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  font-weight: 600;
-}
-
 /* ─── icon-btn: botões de ícone do header (protótipo) ─────────────────────
    28x28 com hover sutil, sem peso visual excessivo. Coerente com .hdr-btn
    legado, mas mais discreto.

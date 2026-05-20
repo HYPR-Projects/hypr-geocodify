@@ -1994,11 +1994,9 @@ function updateHeader() {
       else absentCount++;
     }
   }
-  // Bandeiras e h-pdvs continuam refletindo o que está visível no mapa
+  // Bandeiras refletem o que está visível no mapa (PDVs e share méd. agora
+  // só no rodapé — não duplica no header)
   var bandeiras = new Set(filteredData.map(function(r) { return r.bandeira || 'Outros'; })).size;
-
-  var elPdvs = document.getElementById('h-pdvs');
-  if (elPdvs) elPdvs.textContent = filteredData.length.toLocaleString('pt-BR');
 
   // KPIs do painel Overview
   var elOvWin = document.getElementById('ov-win');
@@ -2794,9 +2792,6 @@ function applyMapMode(type) {
   // View toggle buttons
   const vt = document.getElementById('view-toggle-btns');
   if (vt) vt.style.display = (isGeo || isPlaces) ? 'flex' : 'none';
-  // Fase 6: h-stats minimal (PDVs + Share méd.) só em V360
-  const hStats = document.getElementById('h-stats');
-  if (hStats) hStats.style.display = (currentMapType === 'varejo360') ? 'inline-flex' : 'none';
 }
 
 // ─── Modal de seleção de tipo ─────────────────────────────────────────────────

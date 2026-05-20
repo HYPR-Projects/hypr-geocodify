@@ -319,47 +319,6 @@
     }
   }
 
-  // ─── Header h-stat — Share médio (lente / mapa) (Fase 6) ────────────────
-  // Em V360 sempre exibe share médio. O label muda conforme há concorrentes:
-  //   Solo:           "Share méd." (geral do mapa)
-  //   Duelo/Categoria: "Share méd. (LENTE)" — share só da marca lente
-  function renderHeaderLensStat() {
-    const stat = document.getElementById('h-stat-share');
-    const valEl = document.getElementById('h-lens-share');
-    const labelEl = document.getElementById('h-lens-label');
-    if (!stat || !valEl || !labelEl) return;
-
-    const brands = _selectedBrands();
-    const filtered = (window.filteredData || []);
-
-    if (!_isV360() || !filtered.length) {
-      stat.style.display = 'none';
-      return;
-    }
-
-    const hasComp = brands && brands.length >= 2;
-    if (hasComp) {
-      // Lente: 1ª brand do conjunto selecionado
-      const lens = brands[0];
-      const stats = _avgShareForBrand(filtered, lens);
-      const pct = (stats.avg * 100).toFixed(1);
-      valEl.textContent = pct + '%';
-      const lensShort = lens.length > 8 ? lens.slice(0, 7) + '…' : lens;
-      labelEl.textContent = `Share méd. (${lensShort})`;
-    } else {
-      // Solo: share médio geral usando share_reais_sku_dimensao
-      let sum = 0, n = 0;
-      for (const row of filtered) {
-        const s = parseFloat(row.share_reais_sku_dimensao || 0);
-        if (s > 0) { sum += s; n++; }
-      }
-      const avg = n > 0 ? sum / n : 0;
-      valEl.textContent = (avg * 100).toFixed(1) + '%';
-      labelEl.textContent = 'Share méd.';
-    }
-    stat.style.display = '';
-  }
-
   // ─── Map pill "Lente vence em X (Y%)" (Fase 5) ──────────────────────────
   // Só visível em modo Duelo/Categoria (precisa de 2+ marcas).
   function renderMapPillWins() {
@@ -412,7 +371,6 @@
   function refreshAll() {
     try { renderHero(); } catch(e) { console.error('[v360-hero] renderHero:', e); }
     try { renderH2H(); } catch(e) { console.error('[v360-hero] renderH2H:', e); }
-    try { renderHeaderLensStat(); } catch(e) { console.error('[v360-hero] headerLensStat:', e); }
     try { renderMapPillWins(); } catch(e) { console.error('[v360-hero] mapPillWins:', e); }
   }
 
@@ -425,9 +383,6 @@
     const heroEl = document.getElementById('hero');
     if (heroEl) heroEl.innerHTML = '';
     document.body.removeAttribute('data-v360-hero');
-    // Fase 6: esconde só o share méd. do header + map pill wins
-    const shareStat = document.getElementById('h-stat-share');
-    if (shareStat) shareStat.style.display = 'none';
     const pillWins = document.getElementById('overlay-lens-wins');
     if (pillWins) pillWins.style.display = 'none';
   }
@@ -470,7 +425,6 @@
   window.V360Hero = {
     renderHero,
     renderH2H,
-    renderHeaderLensStat,
     renderMapPillWins,
     refreshAll,
     hideAll,
