@@ -1332,7 +1332,7 @@ function _v360BuildPopupOriginal(row, compExtension, hasExt) {
       <div class="popup-bandeira">${row.bandeira || 'Bandeira desconhecida'}</div>
       ${row.razao_social && row.razao_social !== row.bandeira ? `<div class="popup-fantasia">${row.razao_social}</div>` : ''}
       <div class="popup-address">${row.geo_address || addrDisplay}</div>
-      <div class="popup-cnpj">CNPJ ${v360CnpjDisplay}${row.situacao && row.situacao !== 'ATIVA' ? ` · <span style="color:var(--lose)">${row.situacao}</span>` : ''}${row.atividade ? `<div style="font-size:9px;color:var(--text-muted);margin-top:2px">${row.atividade.slice(0,60)}${row.atividade.length>60?'…':''}</div>` : ''}</div>
+      <div class="popup-cnpj">CNPJ ${v360CnpjDisplay}${row.situacao && !/^ativa$/i.test(row.situacao.trim()) ? ` · <span style="color:var(--lose)">${row.situacao}</span>` : ''}${row.atividade ? `<div style="font-size:9px;color:var(--text-muted);margin-top:2px">${row.atividade.slice(0,60)}${row.atividade.length>60?'…':''}</div>` : ''}</div>
     </div>
     <div class="popup-metrics popup-metrics--legacy">
       <div class="popup-metric">
@@ -1817,6 +1817,13 @@ function applyFilters() {
       if (perf === 'sem_presenca' && !(d >= -2 && d <= 2 && s <= 0)) return false;
       return true;
     });
+  }
+
+  // Passada 3 (Fase 8): Lens preset (Sidebar V360) + esconder whitespace
+  // Esses passes só rodam em V360. Aplicados DENTRO de applyFilters pra
+  // garantir um único renderMarkers (sem race de re-render).
+  if (currentMapType === 'varejo360' && typeof window._v360FilterByPreset === 'function') {
+    filteredData = window._v360FilterByPreset(filteredData);
   }
 
   renderMarkers();

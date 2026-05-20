@@ -70,10 +70,10 @@
       if (el) el.textContent = txt;
     };
     set('preset-count-all', `${all.length.toLocaleString('pt-BR')} PDVs`);
-    set('preset-count-oport', `${oport.toLocaleString('pt-BR')} vence`);
+    set('preset-count-oport', `${oport.toLocaleString('pt-BR')} PDVs`);
     set('preset-count-white', `${white.toLocaleString('pt-BR')} sem amostra`);
     set('preset-count-domain', `${domain.toLocaleString('pt-BR')} lideram`);
-    set('preset-count-risk', `${risk.toLocaleString('pt-BR')} PDVs · perdem para todos`);
+    set('preset-count-risk', `${risk.toLocaleString('pt-BR')} perdem p/ todos`);
   }
 
   // ─── Apply Lens Preset ───────────────────────────────────────────────────
@@ -83,6 +83,10 @@
   // via hook em applyFilters. Isso garante consistência: o que conta no card
   // é exatamente o que aparece no mapa.
   let _activePreset = null;
+
+  // Estado: esconder whitespace por padrão (sua preferência).
+  // Quando o preset Whitespace é ativado, override pra mostrar.
+  let _hideWhitespace = true;
 
   // Classifica uma row no preset ativo. Retorna true se passa, false se filtra.
   // Replica EXATAMENTE a lógica de renderPresetCounts pra garantir paridade.
@@ -116,6 +120,53 @@
     return true;
   }
 
+  // Detecta se a row é whitespace pro modo atual.
+  function _isWhitespace(row) {
+    const hasComp = window.V360CompRender
+      && window.V360CompRender.getMode
+      && window.V360CompRender.getMode() !== 'solo';
+    if (hasComp) {
+      const cls = window.V360CompRender.classifyRow(row);
+      return !!cls && cls.state === window.V360CompRender.STATE.WHITESPACE;
+    }
+    // Solo: share === 0 OU null
+    const share = parseFloat(row.share_reais_sku_dimensao || 0);
+    return share <= 0;
+  }
+
+  // ─── Export usado dentro de applyFilters em app.js (Fase 8) ────────────
+  // Recebe o array filtrado pelas Passadas 1+2 e aplica:
+  //   - Lens preset (se ativo)
+  //   - Esconde whitespace (se _hideWhitespace e preset != 'white')
+  //   - Busca global (se _searchTerm)
+  // Retorna array novo. Chamado UMA vez por applyFilters, sem race.
+  window._v360FilterByPreset = function(rows) {
+    if (!Array.isArray(rows)) return rows;
+    let out = rows;
+
+    // 1) Lens preset
+    if (_activePreset) {
+      out = out.filter(row => _passesPreset(row, _activePreset));
+    }
+
+    // 2) Esconde whitespace por padrão (override quando preset === 'white')
+    if (_hideWhitespace && _activePreset !== 'white') {
+      out = out.filter(row => !_isWhitespace(row));
+    }
+
+    // 3) Busca global
+    if (_searchTerm) {
+      const term = _searchTerm;
+      out = out.filter(row => {
+        const b = (row.bandeira || '').toLowerCase();
+        const c = (row.cnpj || row.cnpj_14 || '').toLowerCase();
+        const city = (row.geo_address || row.municipio || '').toLowerCase();
+        return b.includes(term) || c.includes(term) || city.includes(term);
+      });
+    }
+    return out;
+  };
+
   window.applyLensPreset = function(preset) {
     // Toggle: clicando no preset ativo, volta pra 'all'
     const currentBtn = document.querySelector('.preset.active');
@@ -139,57 +190,26 @@
       if (all) all.classList.add('active');
     });
 
-    // Dispara apply — nosso hook (instalado abaixo) vai filtrar pelo preset
+    // Dispara apply — applyFilters em app.js chama _v360FilterByPreset
     try { window.applyFilters && window.applyFilters(); } catch (e) {}
   };
 
   // Expor pra outros módulos / smoke tests
   window._v360GetActivePreset = function() { return _activePreset; };
+  window._v360GetHideWhitespace = function() { return _hideWhitespace; };
+  window._v360SetHideWhitespace = function(v) {
+    _hideWhitespace = !!v;
+    try { window.applyFilters && window.applyFilters(); } catch (e) {}
+  };
 
   // ─── Busca global ────────────────────────────────────────────────────────
-  // Filtra allData por bandeira/CNPJ/cidade. Implementa client-side simples;
-  // se filteredData é gerenciada por applyFilters, fazemos override temporário.
+  // Filtra allData por bandeira/CNPJ/cidade. applyFilters chama
+  // _v360FilterByPreset que aplica a busca como passe final.
   let _searchTerm = '';
   window._sbGlobalSearch = function(term) {
     _searchTerm = (term || '').trim().toLowerCase();
     try { window.applyFilters && window.applyFilters(); } catch (e) {}
   };
-
-  // Hook em applyFilters: pós-filtro, aplicamos lens preset + busca global
-  function installSearchHook() {
-    if (window._v360SidebarSearchHook) return;
-    const orig = window.applyFilters;
-    if (typeof orig !== 'function') return;
-    window.applyFilters = function() {
-      const r = orig.apply(this, arguments);
-      let needsRerender = false;
-
-      // 1) Lens preset (whitespace, oport, domain, risk)
-      if (_activePreset && Array.isArray(window.filteredData)) {
-        window.filteredData = window.filteredData.filter(row => _passesPreset(row, _activePreset));
-        needsRerender = true;
-      }
-
-      // 2) Busca global
-      if (_searchTerm && Array.isArray(window.filteredData)) {
-        window.filteredData = window.filteredData.filter(row => {
-          const b = (row.bandeira || '').toLowerCase();
-          const c = (row.cnpj || row.cnpj_14 || '').toLowerCase();
-          const city = (row.geo_address || row.municipio || '').toLowerCase();
-          return b.includes(_searchTerm) || c.includes(_searchTerm) || city.includes(_searchTerm);
-        });
-        needsRerender = true;
-      }
-
-      // Re-render dependentes se algum post-filter foi aplicado
-      if (needsRerender) {
-        try { window.renderMarkers && window.renderMarkers(); } catch (e) {}
-        try { window.updatePanels && window.updatePanels(); } catch (e) {}
-      }
-      return r;
-    };
-    window._v360SidebarSearchHook = true;
-  }
 
   // ─── Legend counts ───────────────────────────────────────────────────────
   // Atualiza contadores ao lado de cada item da legenda (Solo: acima/abaixo/
@@ -303,7 +323,8 @@
       return;
     }
 
-    installSearchHook();
+    // (Fase 8) applyFilters em app.js chama _v360FilterByPreset diretamente.
+    // Não precisamos mais de hook em window.applyFilters.
 
     // Hook em updatePanels — refresh sempre que filtros/data mudam
     if (typeof window.updatePanels === 'function' && !window._v360SbPanelHook) {

@@ -27,17 +27,17 @@
   };
 
   const STATE_COLORS = {
-    // Paleta HYPR semântica (Fase 5).
+    // Paleta HYPR semântica (Fase 5) + ajuste dark (Fase 8).
     // Hex direto porque MapLibre paint properties não resolvem CSS vars.
     // Mapeia 1:1 com tokens em src/styles/app.css :root.
     dominance:   '#018376', // --win (verde HYPR escuro)
     leadership:  '#4CB050', // --win-hi (verde HYPR brilhante, distingue de dominância)
-    dispute:     '#EDD900', // --neutral (amarelo HYPR)
+    dispute:     '#E89A28', // warm orange (Fase 8: substituiu #EDD900 que berrava no dark)
     behind:      '#FF5528', // --lose-hi (laranja-vermelho HYPR, distingue de vulnerável)
     vulnerable:  '#F5272B', // --lose (vermelho HYPR puro)
     opportunity: '#3397B9', // --accent (teal HYPR)
     exclusive:   '#5F25FF', // --purple (índigo HYPR)
-    whitespace:  '#78909C', // --absent (cinza HYPR)
+    whitespace:  '#78909C', // --absent (cinza HYPR) — escondido por padrão no mapa
   };
 
   const STATE_LABELS = {
@@ -384,11 +384,17 @@
     }).join('');
 
     // Metric cards (gap + share-of-shelf)
+    // Whitespace: lensShare=0 E sumShares=0. Mostra "—" em vez de "0.0pp" e "0%"
+    // que dão impressão errada (valor real é "não há amostra").
+    const isWhitespaceRow = lensShare === 0 && sumShares === 0;
     const gapClass = gapPP > 0.05 ? 'pos' : gapPP < -0.05 ? 'neg' : '';
-    const gapVal = concCount > 0
-      ? `${gapPP > 0 ? '+' : ''}${gapPP.toFixed(1)}pp`
-      : `${(lensShare * 100).toFixed(1)}%`;
+    const gapVal = isWhitespaceRow
+      ? '—'
+      : (concCount > 0
+          ? `${gapPP > 0 ? '+' : ''}${gapPP.toFixed(1)}pp`
+          : `${(lensShare * 100).toFixed(1)}%`);
     const gapLabel = concCount > 0 ? 'Gap vs. concorrentes' : 'Share absoluto';
+    const sosVal = isWhitespaceRow ? '—' : `${sos.toFixed(0)}%`;
     const sosLabel = concCount > 0
       ? `${_esc(persp)} no mix de ${rows.length} marcas`
       : `${_esc(persp)} no mix`;
@@ -423,7 +429,7 @@
             <div class="l">${gapLabel}</div>
           </div>
           <div class="popup-ext-metric">
-            <div class="v">${sos.toFixed(0)}%</div>
+            <div class="v">${sosVal}</div>
             <div class="l">${sosLabel}</div>
           </div>
         </div>
