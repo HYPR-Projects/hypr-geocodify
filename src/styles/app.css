@@ -621,19 +621,14 @@ html.theme-switching, html.theme-switching *, html.theme-switching *::before, ht
 .persp-chip.lens[aria-expanded="true"] .lens-caret { transform: rotate(180deg); }
 
 /* ─── Drag-and-drop pra reordenar concorrentes ───────────────────────────
-   FLIP animation faz os chips deslizarem pra nova posição. Chip arrastado
-   ganha tilt + scale (sensação "elevada"). Drop indicator pulsa com glow.
+   Ghost padrão do browser segue o cursor (visível e claro). Chip original
+   fica com opacity baixa pra indicar "este é o que tá sendo arrastado".
+   FLIP só roda DEPOIS do drop, pra deslizar os outros chips. Sem transition
+   base no chip — interferia com o drag visual e dava sensação de lag.
    ───────────────────────────────────────────────────────────────────────── */
-.persp-chip.is-draggable {
-  cursor: grab;
-  transition: transform 220ms cubic-bezier(.2,.9,.2,1), opacity 180ms ease, box-shadow 180ms ease;
-}
+.persp-chip.is-draggable { cursor: grab; }
 .persp-chip.is-draggable:active { cursor: grabbing; }
-.persp-chip.is-dragging {
-  opacity: 0.35;
-  transform: scale(0.92) rotate(-1.5deg);
-  box-shadow: 0 8px 24px -8px rgba(0,0,0,0.6);
-}
+.persp-chip.is-dragging { opacity: 0.3; }
 .persp-chip.drop-before,
 .persp-chip.drop-after { position: relative; }
 .persp-chip.drop-before::before,

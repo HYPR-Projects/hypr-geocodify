@@ -889,22 +889,15 @@
       try {
         e.dataTransfer.effectAllowed = 'move';
         e.dataTransfer.setData('text/plain', draggingId);
-        // Custom drag image — transparente pra controlarmos o feedback via CSS
-        // do chip original (escala/tilt) em vez do ghost padrão feioso do browser.
-        const ghost = document.createElement('div');
-        ghost.style.cssText = 'width:1px;height:1px;opacity:0;position:absolute;top:-1000px;';
-        document.body.appendChild(ghost);
-        e.dataTransfer.setDragImage(ghost, 0, 0);
-        setTimeout(() => ghost.remove(), 0);
       } catch(_) {}
       // Snapshot pra FLIP animation no drop
       beforeRects = new Map();
       bar.querySelectorAll('.persp-chip.is-draggable').forEach(c => {
         beforeRects.set(c.dataset.compId, c.getBoundingClientRect());
       });
-      // Atraso de 1 frame: garante que o dataTransfer.setDragImage capturou
-      // o chip ANTES da classe is-dragging aplicar o transform (senão fica
-      // desalinhado quando arrastando).
+      // is-dragging só aplica opacity no original; ghost padrão do browser
+      // segue o cursor com o chip em aparência normal (feedback claro pro user).
+      // Aplica num rAF pra não interferir com a captura do ghost.
       requestAnimationFrame(() => chip.classList.add('is-dragging'));
     });
     bar.addEventListener('dragend', () => {
