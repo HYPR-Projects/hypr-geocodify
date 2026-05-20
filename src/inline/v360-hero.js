@@ -283,7 +283,7 @@
       `;
     } else {
       // Matriz N×N (3+ marcas)
-      titleEl.textContent = 'Matriz cabeça-a-cabeça';
+      titleEl.textContent = 'Confronto direto';
       const cols = brands.length;
       let html = `<div class="h2h-grid" style="grid-template-columns:auto repeat(${cols},minmax(0,1fr));">`;
       html += `<div class="h2h-cell h2h-corner">Vence ↓<br>Perde →</div>`;

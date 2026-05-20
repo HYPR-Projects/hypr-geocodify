@@ -1097,6 +1097,10 @@
     }
 
     // Dispara re-render
+    // (Fase 11) Re-renderiza perspBar localmente — o evento abaixo é escutado
+    // pelo hero/comp-render mas não pelo perspBar, então sem isso o chip do
+    // header fica com a cor antiga até reload. Idempotente.
+    try { renderPerspBar(); } catch(_) {}
     try {
       window.dispatchEvent(new CustomEvent('v360:competitors-loaded', {
         detail: { count: state.competitors.length, colorChanged: true },

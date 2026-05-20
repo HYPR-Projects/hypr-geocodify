@@ -650,7 +650,7 @@
       }
     }
 
-    let html = `<div class="h2h-title">Matriz cabeça a cabeça</div>`;
+    let html = `<div class="h2h-title">Confronto direto</div>`;
     html += `<div class="h2h-wrap">`;
     html += `<table class="h2h-table">`;
     html += `<thead><tr><th class="h2h-th h2h-th-corner">Vence ↓ / Perde →</th>`;
