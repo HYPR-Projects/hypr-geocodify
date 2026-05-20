@@ -16,4 +16,5 @@ import './inline/v360-comp-render.js';
 import './inline/v360-comp-pr3.js';
 import './inline/v360-hero.js';
 import './inline/v360-sidebar.js';
+import './inline/v360-color-picker.js';
 import './inline/v360-panel.js';
