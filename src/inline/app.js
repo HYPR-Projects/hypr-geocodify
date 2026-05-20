@@ -5476,7 +5476,6 @@ async function deleteMap(id, btn) {
   btn.disabled = true;
   try {
     await sbFetch(`saved_maps?id=eq.${id}`, { method:'DELETE', headers:{'Prefer':'return=minimal'} });
-    _invalidateOpenedMapCache(id);
     _galleryMaps = _galleryMaps.filter(function(m) { return m.id !== id; });
     if (_galleryMaps.length === 0) {
       document.getElementById('gallery-grid').style.display = 'none';
@@ -5860,7 +5859,6 @@ async function bulkDeleteSelected() {
     var idSet = new Set(ids);
     allData = allData.filter(function(r) { return !idSet.has(r.id); });
     filteredData = filteredData.filter(function(r) { return !idSet.has(r.id); });
-    _invalidateOpenedMapCache(mapId);
 
     // Atualiza row_count
     try {
@@ -5912,51 +5910,10 @@ function _loadCompetitorsAndWait(mapId, sharedMode) {
   });
 }
 
-// ─── Cache de 1 slot pra reabertura instantânea de mapa ────────────────────
-// Quando o user sai de um mapa e volta no mesmo, restaura tudo da memória —
-// zero fetches. Cache sobrevive enquanto a aba estiver aberta. Invalidado por
-// mutações conhecidas (delete, bulk delete, add/remove competitor).
-var _lastOpenedMap = null;
-
-function _saveOpenedMapToCache(mapId) {
-  if (!mapId || !Array.isArray(allData) || !allData.length) return;
-  var compSnap = null;
-  try {
-    if (window.V360Comp && typeof window.V360Comp.snapshotCompetitors === 'function') {
-      compSnap = window.V360Comp.snapshotCompetitors();
-    }
-  } catch(_) {}
-  _lastOpenedMap = {
-    mapId: mapId,
-    mapType: currentMapType,
-    allData: allData,
-    meta: window._savedMapMeta || null,
-    payload: window._savedMapPayload || null,
-    baseBrand: window._currentMapBaseBrand || null,
-    competitorsSnapshot: compSnap,
-  };
-}
-
-function _tryRestoreOpenedMapFromCache(mapId) {
-  if (!_lastOpenedMap || _lastOpenedMap.mapId !== mapId) return false;
-  allData = _lastOpenedMap.allData;
-  filteredData = allData.slice();
-  window._savedMapMeta = _lastOpenedMap.meta;
-  window._savedMapPayload = _lastOpenedMap.payload;
-  window._savedMapId = mapId;
-  window._currentMapBaseBrand = _lastOpenedMap.baseBrand;
-  if (_lastOpenedMap.competitorsSnapshot && window.V360Comp && typeof window.V360Comp.restoreCompetitors === 'function') {
-    try { window.V360Comp.restoreCompetitors(_lastOpenedMap.competitorsSnapshot, mapId); } catch(_) {}
-  }
-  return true;
-}
-
-function _invalidateOpenedMapCache(mapId) {
-  if (mapId == null || (_lastOpenedMap && _lastOpenedMap.mapId === mapId)) {
-    _lastOpenedMap = null;
-  }
-}
-try { window._invalidateOpenedMapCache = _invalidateOpenedMapCache; } catch(_) {}
+// Cache de 1 slot foi removido por causar bugs de UX recorrentes (charts
+// stale, painéis presos em skeleton, V360 reabrindo sem pins). O fluxo de
+// fetch paralelo (4× paginação) já é rápido o suficiente; consistência
+// vale mais do que ~500ms de "reabertura instantânea".
 
 async function openSavedMap(mapId, name, mapType) {
   // Limpar pendências de geocoding anterior — evita save acidental
@@ -6033,46 +5990,10 @@ async function openSavedMap(mapId, name, mapType) {
 
   const overlay = document.getElementById('geocoding-overlay');
   _resetPlacesOverlayFields();
+  // Skeleton minimalista no right-panel + dot pulsante no header. Nada de
+  // overlay pesado — esse é o fluxo de "abrir mapa salvo", só fetch.
   const _rightPanelEl = document.getElementById('right-panel');
   const _headerNameEl = document.getElementById('header-map-name');
-
-  // ─── Cache hit (fast path): reabriu o mesmo mapa? Pula skeleton e fetches.
-  // Tentar restore ANTES de adicionar .panel-loading — senão o user vê um flash
-  // de skeleton mesmo no cache hit (~50-150ms). E usar finally pra GARANTIR
-  // que a classe nunca fica presa caso populateFilters/updatePanels jogue
-  // exception (caso anterior: panel-loading ficava preso → painéis em skeleton
-  // permanente apesar de allData estar populado).
-  if (_tryRestoreOpenedMapFromCache(mapId)) {
-    try {
-      if (allData.length > 0) {
-        const _pts = allData.filter(r => r.lat && r.lon);
-        if (_pts.length) {
-          const bounds = _pts.reduce((b, r) => b.extend([parseFloat(r.lon), parseFloat(r.lat)]),
-            new maplibregl.LngLatBounds([parseFloat(_pts[0].lon), parseFloat(_pts[0].lat)], [parseFloat(_pts[0].lon), parseFloat(_pts[0].lat)]));
-          map.fitBounds(bounds, { padding:[40,40], animate: false });
-        }
-      }
-      // Granular try/catch: uma falha não trava o resto.
-      try { populateFilters(); } catch(e) { console.warn('[cache-restore] populateFilters:', e); }
-      try { updatePanels(); }   catch(e) { console.warn('[cache-restore] updatePanels:', e); }
-      try { updateOverlay(); }  catch(e) { console.warn('[cache-restore] updateOverlay:', e); }
-      try { checkReenrichBar(); } catch(_) {}
-      // SEMPRE força renderMarkers — a limpeza forte zerou o source 'pdvs'.
-      if (typeof renderMarkers === 'function') {
-        try { renderMarkers(); } catch(_) {}
-      }
-    } finally {
-      // GARANTIA: limpa qualquer estado de loading legado (mesmo que não tenha
-      // sido adicionado nesta chamada — defesa contra estado herdado de
-      // navegação anterior, e contra ordens de operação que adicionem antes).
-      if (_rightPanelEl) _rightPanelEl.classList.remove('panel-loading');
-      if (_headerNameEl) _headerNameEl.classList.remove('loading');
-    }
-    return;
-  }
-
-  // ─── Cache miss: vai fazer fetch, então mostra skeleton minimalista ──────
-  // Não adicionar isso ANTES do cache check evita o flash em reabertura.
   if (_rightPanelEl) _rightPanelEl.classList.add('panel-loading');
   if (_headerNameEl) _headerNameEl.classList.add('loading');
   document.getElementById('geo-current').textContent = `Carregando "${name}"...`;
@@ -6190,8 +6111,6 @@ async function openSavedMap(mapId, name, mapType) {
     // recém-feito): o styledata já não disparava de novo e renderMarkers nunca
     // rodava → 1027 places carregados em memória, 0 plotados no mapa.
     renderMarkers();
-    // Cache este mapa pra reabertura instantânea (sai e volta = zero fetches)
-    try { _saveOpenedMapToCache(mapId); } catch(_) {}
   } catch(e) {
     overlay.classList.remove('active');
     if (_rightPanelEl) _rightPanelEl.classList.remove('panel-loading');
