@@ -77,8 +77,45 @@
   }
 
   // ─── Apply Lens Preset ───────────────────────────────────────────────────
-  // Aplica filtros legados via badges existentes. Não inventa estado novo:
-  // delega a applyFilters() que já existe e cuida do filteredData.
+  // Estado do preset ativo. Em vez de delegar pra badges legados (que têm
+  // critério diferente do contador, gerando bug de "click sem efeito"),
+  // mantemos o preset como filtro próprio aplicado em cima do filteredData
+  // via hook em applyFilters. Isso garante consistência: o que conta no card
+  // é exatamente o que aparece no mapa.
+  let _activePreset = null;
+
+  // Classifica uma row no preset ativo. Retorna true se passa, false se filtra.
+  // Replica EXATAMENTE a lógica de renderPresetCounts pra garantir paridade.
+  function _passesPreset(row, preset) {
+    if (!preset || preset === 'all') return true;
+
+    const hasComp = window.V360CompRender
+      && window.V360CompRender.getMode
+      && window.V360CompRender.getMode() !== 'solo';
+
+    if (hasComp) {
+      const classify = window.V360CompRender.classifyRow;
+      const STATE = window.V360CompRender.STATE;
+      const cls = classify(row);
+      if (!cls) return false;
+      const s = cls.state;
+      if (preset === 'oport') return s === STATE.OPPORTUNITY;
+      if (preset === 'white') return s === STATE.WHITESPACE;
+      if (preset === 'domain') return s === STATE.DOMINANCE || s === STATE.LEADERSHIP;
+      if (preset === 'risk') return s === STATE.VULNERABLE;
+      return true;
+    }
+
+    // Solo: replica lógica de renderPresetCounts (linhas 56-64)
+    const diff = parseFloat(row.percentual_diff_media_dimensao || 0);
+    const share = parseFloat(row.share_reais_sku_dimensao || 0);
+    if (preset === 'oport') return diff > 2 && share < 0.05;
+    if (preset === 'white') return share <= 0;
+    if (preset === 'domain') return diff > 2;
+    if (preset === 'risk') return diff < -2;
+    return true;
+  }
+
   window.applyLensPreset = function(preset) {
     // Toggle: clicando no preset ativo, volta pra 'all'
     const currentBtn = document.querySelector('.preset.active');
@@ -90,40 +127,24 @@
     const btn = document.querySelector(`.preset[data-preset="${target}"]`);
     if (btn) btn.classList.add('active');
 
-    // Reseta badges legados primeiro (perf + oport)
-    const setBadge = (containerId, val) => {
-      const container = document.getElementById(containerId);
+    _activePreset = (target === 'all') ? null : target;
+
+    // Garante que badges legados de perf/oport não conflitam com nosso preset
+    // (Reset visual + estado real)
+    ['f-perf', 'f-oport'].forEach(gid => {
+      const container = document.getElementById(gid);
       if (!container) return;
       container.querySelectorAll('.badge').forEach(b => b.classList.remove('active'));
-      const sel = container.querySelector(`.badge[data-v="${val}"]`);
-      if (sel) sel.classList.add('active');
-    };
+      const all = container.querySelector('.badge[data-v=""]');
+      if (all) all.classList.add('active');
+    });
 
-    switch (target) {
-      case 'all':
-        setBadge('f-perf', '');
-        setBadge('f-oport', '');
-        break;
-      case 'oport':
-        setBadge('f-perf', 'acima');
-        setBadge('f-oport', 'alta');
-        break;
-      case 'white':
-        setBadge('f-perf', 'sem_presenca');
-        setBadge('f-oport', '');
-        break;
-      case 'domain':
-        setBadge('f-perf', 'acima');
-        setBadge('f-oport', '');
-        break;
-      case 'risk':
-        setBadge('f-perf', 'abaixo');
-        setBadge('f-oport', '');
-        break;
-    }
-    // Dispara apply
+    // Dispara apply — nosso hook (instalado abaixo) vai filtrar pelo preset
     try { window.applyFilters && window.applyFilters(); } catch (e) {}
   };
+
+  // Expor pra outros módulos / smoke tests
+  window._v360GetActivePreset = function() { return _activePreset; };
 
   // ─── Busca global ────────────────────────────────────────────────────────
   // Filtra allData por bandeira/CNPJ/cidade. Implementa client-side simples;
@@ -134,13 +155,22 @@
     try { window.applyFilters && window.applyFilters(); } catch (e) {}
   };
 
-  // Hook em applyFilters: pós-filtro, aplicamos busca global
+  // Hook em applyFilters: pós-filtro, aplicamos lens preset + busca global
   function installSearchHook() {
     if (window._v360SidebarSearchHook) return;
     const orig = window.applyFilters;
     if (typeof orig !== 'function') return;
     window.applyFilters = function() {
       const r = orig.apply(this, arguments);
+      let needsRerender = false;
+
+      // 1) Lens preset (whitespace, oport, domain, risk)
+      if (_activePreset && Array.isArray(window.filteredData)) {
+        window.filteredData = window.filteredData.filter(row => _passesPreset(row, _activePreset));
+        needsRerender = true;
+      }
+
+      // 2) Busca global
       if (_searchTerm && Array.isArray(window.filteredData)) {
         window.filteredData = window.filteredData.filter(row => {
           const b = (row.bandeira || '').toLowerCase();
@@ -148,7 +178,11 @@
           const city = (row.geo_address || row.municipio || '').toLowerCase();
           return b.includes(_searchTerm) || c.includes(_searchTerm) || city.includes(_searchTerm);
         });
-        // re-render dependentes
+        needsRerender = true;
+      }
+
+      // Re-render dependentes se algum post-filter foi aplicado
+      if (needsRerender) {
         try { window.renderMarkers && window.renderMarkers(); } catch (e) {}
         try { window.updatePanels && window.updatePanels(); } catch (e) {}
       }
