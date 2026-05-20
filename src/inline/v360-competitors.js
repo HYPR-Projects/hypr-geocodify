@@ -134,9 +134,9 @@
     const modal = document.createElement('div');
     modal.id = 'v360-comp-modal';
     modal.className = 'v360-comp-modal';
-    modal.style.cssText = 'display:none;position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,0.55);align-items:center;justify-content:center;';
+    modal.style.cssText = 'display:none;position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,0.45);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);align-items:center;justify-content:center;';
     modal.innerHTML = `
-      <div class="v360-comp-modal-box" style="background:var(--bg-elev,#fff);color:var(--text,#111);border-radius:14px;width:560px;max-width:92vw;max-height:88vh;overflow:auto;box-shadow:0 24px 80px rgba(0,0,0,0.4);font-family:'Urbanist',system-ui,sans-serif;">
+      <div class="v360-comp-modal-box" style="background:var(--glass-bg-strong);backdrop-filter:blur(40px) saturate(1.6);-webkit-backdrop-filter:blur(40px) saturate(1.6);border:1px solid var(--glass-border);color:var(--text);border-radius:16px;width:560px;max-width:92vw;max-height:88vh;overflow:auto;box-shadow:var(--glass-shadow),var(--glass-edge);font-family:'Urbanist',system-ui,sans-serif;">
         <div style="padding:18px 22px 14px;border-bottom:1px solid var(--border,#e5e7eb);display:flex;align-items:center;justify-content:space-between;">
           <div>
             <div style="font-size:16px;font-weight:600;letter-spacing:-0.01em;">Adicionar marca concorrente</div>
