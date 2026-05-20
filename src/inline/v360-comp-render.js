@@ -110,14 +110,26 @@
   }
 
   function buildColorMap() {
-    // Mapa marca -> cor (base + competitors)
+    // Mapa marca -> cor (base + competitors).
+    // (Fase 10) Base ganha cor da paleta HYPR (não mais #111827 fixo).
+    //   1. Cor persistida em saved_maps.payload.base_brand_color (se existe)
+    //   2. pickBrandColor do nome (preset HYPR ou fallback rotativo)
     const map = {};
     const baseBrand = getBaseBrand();
-    if (baseBrand) map[baseBrand] = '#111827'; // base sempre preta/cinza escuro
+    if (baseBrand) {
+      const persisted = window._savedMapPayload?.base_brand_color;
+      if (persisted) {
+        map[baseBrand] = persisted;
+      } else if (window.V360Comp?.pickBrandColor) {
+        map[baseBrand] = window.V360Comp.pickBrandColor(baseBrand);
+      } else {
+        map[baseBrand] = 'var(--accent)';
+      }
+    }
     const st = window.V360Comp?.getState();
     if (st) {
       for (const c of st.competitors) {
-        map[c.brand_name] = c.brand_color || '#6b7280';
+        map[c.brand_name] = c.brand_color || 'var(--absent)';
       }
     }
     return map;
@@ -638,32 +650,33 @@
       }
     }
 
-    let html = `<div style="font-size:10px;text-transform:uppercase;letter-spacing:0.06em;color:var(--text-muted);font-weight:600;margin-bottom:8px;">Matriz cabeça a cabeça</div>`;
-    html += `<div style="overflow-x:auto;border-radius:8px;border:1px solid var(--border,#e5e7eb);">`;
-    html += `<table style="width:100%;border-collapse:collapse;font-size:11px;">`;
-    html += `<thead><tr><th style="text-align:left;padding:6px 8px;font-weight:500;color:var(--text-muted);font-size:10px;background:var(--bg-subtle,#f9fafb);">Vence ↓ / Perde →</th>`;
+    let html = `<div class="h2h-title">Matriz cabeça a cabeça</div>`;
+    html += `<div class="h2h-wrap">`;
+    html += `<table class="h2h-table">`;
+    html += `<thead><tr><th class="h2h-th h2h-th-corner">Vence ↓ / Perde →</th>`;
     for (const b of brands) {
-      html += `<th style="text-align:center;padding:6px 8px;font-weight:600;color:${colorMap[b] || '#111'};background:var(--bg-subtle,#f9fafb);font-size:10px;">${b}</th>`;
+      html += `<th class="h2h-th" style="color:${colorMap[b] || 'var(--text)'};">${b}</th>`;
     }
     html += `</tr></thead><tbody>`;
     for (let i = 0; i < n; i++) {
-      html += `<tr><td style="padding:6px 8px;font-weight:600;color:${colorMap[brands[i]] || '#111'};background:var(--bg-subtle,#f9fafb);font-size:10px;">${brands[i]}</td>`;
+      html += `<tr><th class="h2h-th h2h-th-row" style="color:${colorMap[brands[i]] || 'var(--text)'};">${brands[i]}</th>`;
       for (let j = 0; j < n; j++) {
         if (i === j) {
-          html += `<td style="padding:6px 8px;text-align:center;color:var(--text-muted);">—</td>`;
+          html += `<td class="h2h-cell h2h-cell-diag">—</td>`;
         } else {
           const v = matrix[i][j];
           const total = matrix[i][j] + matrix[j][i];
           const pct = total > 0 ? (v / total * 100).toFixed(0) : '0';
-          const bg = v > matrix[j][i] ? '#16a34a15' : v < matrix[j][i] ? '#dc262615' : '#eab30815';
-          const color = v > matrix[j][i] ? '#15803d' : v < matrix[j][i] ? '#991b1b' : '#854d0e';
-          html += `<td style="padding:6px 8px;text-align:center;background:${bg};color:${color};font-variant-numeric:tabular-nums;"><div style="font-weight:600;">${v.toLocaleString('pt-BR')}</div><div style="font-size:9px;opacity:0.7;">${pct}%</div></td>`;
+          const klass = v > matrix[j][i] ? 'h2h-cell-win'
+            : v < matrix[j][i] ? 'h2h-cell-lose'
+            : 'h2h-cell-tie';
+          html += `<td class="h2h-cell ${klass}"><div class="h2h-cell-val">${v.toLocaleString('pt-BR')}</div><div class="h2h-cell-pct">${pct}%</div></td>`;
         }
       }
       html += `</tr>`;
     }
     html += `</tbody></table></div>`;
-    html += `<div style="font-size:10px;color:var(--text-muted);margin-top:6px;">Cada célula: nº de PDVs onde a marca da linha vence a marca da coluna (% do total entre ambas).</div>`;
+    html += `<div class="h2h-foot">Cada célula: nº de PDVs onde a marca da linha vence a marca da coluna (% do total entre ambas).</div>`;
     container.innerHTML = html;
   }
 
@@ -744,7 +757,15 @@
     _classifyCache.clear();
     _classifyCacheKey = '';
     try {
-      if (typeof window.renderMarkers === 'function') window.renderMarkers();
+      // (Fase 10 fix) Dispara applyFilters em vez de renderMarkers direto.
+      // applyFilters chama _v360FilterByPreset que aplica hide whitespace +
+      // lens preset. Antes chamava renderMarkers direto, fazendo whitespace
+      // aparecer ao trocar Solo→Comp (race).
+      if (typeof window.applyFilters === 'function') {
+        window.applyFilters();
+      } else if (typeof window.renderMarkers === 'function') {
+        window.renderMarkers();
+      }
     } catch(_) {}
   }
 
