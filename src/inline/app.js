@@ -559,11 +559,45 @@ function _renderClusterDonuts() {
     seen.add(cid);
 
     var total = p.point_count || 0;
-    var sig, svgHtml;
 
-    if (currentMapType === 'places_discovery' ||
-        currentMapType === 'geocoder' ||
-        currentMapType === 'reverse_geocoder') {
+    // Sig PRIMEIRO (concat barato). Só monta SVG se cache miss — evita 50–200ms
+    // por moveend em mapas estáveis onde o pool já está aquecido.
+    var sig;
+    var winC = 0, loseC = 0, neuC = 0, absC = 0;        // solo/duelo
+    var brandCounts = null;                              // categoria
+    var isSingleColorMode = currentMapType === 'places_discovery' ||
+                            currentMapType === 'geocoder' ||
+                            currentMapType === 'reverse_geocoder';
+
+    if (isSingleColorMode) {
+      sig = total + '|' + currentMapType;
+    } else if (isCategoria && brandColors) {
+      brandCounts = new Array(brandCount);
+      var sigParts = [String(total)];
+      for (var b = 0; b < brandCount; b++) {
+        var count = p['c_b' + b] || 0;
+        brandCounts[b] = count;
+        sigParts.push(String(count));
+      }
+      sig = sigParts.join('|');
+    } else {
+      winC = p.c_win || 0; loseC = p.c_lose || 0; neuC = p.c_neutral || 0; absC = p.c_absent || 0;
+      sig = total + '|' + winC + '|' + loseC + '|' + neuC + '|' + absC;
+    }
+
+    var entry = _clusterMarkerPool.get(cid);
+    var coords = f.geometry && f.geometry.coordinates;
+    if (!coords) continue;
+
+    // Cache hit: só reposiciona o marker e segue.
+    if (entry && entry.sig === sig) {
+      try { entry.marker.setLngLat(coords); } catch(_) {}
+      continue;
+    }
+
+    // Cache miss: monta o SVG.
+    var svgHtml;
+    if (isSingleColorMode) {
       // Modos sem categoria competitiva: anel único na cor de assinatura da
       // marca do modo. Sem esse caminho, todos os c_* ficam em 0 e o donut
       // renderiza só o miolo, deixando o cluster invisível no modo dark.
@@ -574,31 +608,19 @@ function _renderClusterDonuts() {
       var modeColor = currentMapType === 'places_discovery' ? _pinColors.purple
                     : currentMapType === 'geocoder'         ? _pinColors.accent
                                                             : _pinColors.sky;
-      sig = total + '|' + currentMapType;
       svgHtml = _buildDonutSVGFromSegments(total, [
         { color: modeColor, count: total }
       ]);
-    } else if (isCategoria && brandColors) {
+    } else if (brandCounts) {
       // Modo Categoria: 1 segmento por marca
-      var brandSegs = [];
-      var sigParts = [String(total)];
-      for (var b = 0; b < brandCount; b++) {
-        var count = p['c_b' + b] || 0;
-        brandSegs.push({ color: brandColors[b], count: count });
-        sigParts.push(String(count));
+      var brandSegs = new Array(brandCount);
+      for (var bb = 0; bb < brandCount; bb++) {
+        brandSegs[bb] = { color: brandColors[bb], count: brandCounts[bb] };
       }
-      sig = sigParts.join('|');
       svgHtml = _buildDonutSVGFromSegments(total, brandSegs);
     } else {
-      // Solo/Duelo: schema fixo win/lose/neutral/absent
-      var win = p.c_win || 0, lose = p.c_lose || 0, neu = p.c_neutral || 0, abs = p.c_absent || 0;
-      sig = total + '|' + win + '|' + lose + '|' + neu + '|' + abs;
-      svgHtml = _buildDonutSVG(total, win, lose, neu, abs);
+      svgHtml = _buildDonutSVG(total, winC, loseC, neuC, absC);
     }
-
-    var entry = _clusterMarkerPool.get(cid);
-    var coords = f.geometry && f.geometry.coordinates;
-    if (!coords) continue;
 
     if (!entry) {
       var el = document.createElement('div');
@@ -611,10 +633,8 @@ function _renderClusterDonuts() {
         .addTo(map);
       _clusterMarkerPool.set(cid, { marker: marker, el: el, sig: sig });
     } else {
-      if (entry.sig !== sig) {
-        entry.el.innerHTML = svgHtml;
-        entry.sig = sig;
-      }
+      entry.el.innerHTML = svgHtml;
+      entry.sig = sig;
       try { entry.marker.setLngLat(coords); } catch(_) {}
     }
   }
@@ -670,18 +690,22 @@ function _buildDonutSVGFromSegments(total, segments) {
   var label = total >= 1000 ? (Math.floor(total / 100) / 10).toFixed(1).replace(/\.0$/, '') + 'k' : String(total);
   var fontSize = R >= 28 ? 12 : R >= 22 ? 11 : 10;
 
-  // Fundo central preenchido (assenta o número e cobre o "miolo" do donut)
-  var bgFill = _cssVar('--map-bg') || (document.documentElement.getAttribute('data-theme') === 'light' ? '#ffffff' : '#0d1117');
+  // Tokens lidos do cache _pinColors (populado 1×/render pass em
+  // _refreshPinColors). Antes eram 3 chamadas getComputedStyle por marker.
+  if (!_pinColors) _refreshPinColors();
+  var bgFill = _pinColors.mapBg;
+  var haloStroke = _pinColors.circleStroke;
+  var textFill = _pinColors.textCanvas;
 
   return '<svg width="' + size + '" height="' + size + '" viewBox="0 0 ' + size + ' ' + size + '" style="display:block;overflow:visible">' +
     // Halo externo sutil
-    '<circle cx="' + cx + '" cy="' + cy + '" r="' + (R + 0.5) + '" fill="none" stroke="' + (_cssVar('--circle-stroke') || 'rgba(255,255,255,0.4)') + '" stroke-width="0.5"/>' +
+    '<circle cx="' + cx + '" cy="' + cy + '" r="' + (R + 0.5) + '" fill="none" stroke="' + haloStroke + '" stroke-width="0.5"/>' +
     // Preenchimento interno (cobre o "miolo" do donut)
     '<circle cx="' + cx + '" cy="' + cy + '" r="' + (ringR - sw / 2 + 0.5) + '" fill="' + bgFill + '"/>' +
     // Segmentos do donut (rotação -90° para começar no topo)
     '<g transform="rotate(-90 ' + cx + ' ' + cy + ')">' + segs + '</g>' +
     // Número central
-    '<text x="' + cx + '" y="' + cy + '" text-anchor="middle" dominant-baseline="central" font-size="' + fontSize + '" font-weight="600" font-family="Urbanist, sans-serif" fill="' + (_cssVar('--text-canvas') || '#ffffff') + '">' + label + '</text>' +
+    '<text x="' + cx + '" y="' + cy + '" text-anchor="middle" dominant-baseline="central" font-size="' + fontSize + '" font-weight="600" font-family="Urbanist, sans-serif" fill="' + textFill + '">' + label + '</text>' +
     '</svg>';
 }
 
@@ -1126,6 +1150,12 @@ function _refreshPinColors() {
     // distinta a Lat/Lon Generator e Address Generator.
     accent: _cssVar('--accent') || '#3397B9',
     sky: _cssVar('--sky') || '#03A9F5',
+    // Tokens lidos pelo SVG do donut. Cacheados aqui pra evitar 3 chamadas
+    // getComputedStyle() por marker — em mapas com ~100 clusters visíveis isso
+    // significava ~300 reflows síncronos por moveend/zoomend.
+    mapBg: _cssVar('--map-bg') || (document.documentElement.getAttribute('data-theme') === 'light' ? '#ffffff' : '#0d1117'),
+    circleStroke: _cssVar('--circle-stroke') || 'rgba(255,255,255,0.4)',
+    textCanvas: _cssVar('--text-canvas') || '#ffffff',
   };
 }
 
@@ -5819,6 +5849,35 @@ async function openSavedMap(mapId, name, mapType) {
   } catch(_) {}
   try { if (typeof _clearClusterDonuts === 'function') _clearClusterDonuts(); } catch(_) {}
   try { if (window.V360Comp && typeof window.V360Comp.reset === 'function') window.V360Comp.reset(); } catch(_) {}
+  // Reset do estado de minimize do painel Places: a flag e os estilos inline
+  // que togglePlacesPanel deixa no nó persistem entre mapas (DOM é o mesmo).
+  // Sem isso, abrir um Places novo depois de ter minimizado outro volta com
+  // pill em vez do painel completo.
+  try {
+    if (_placesPanelMinimized) {
+      _placesPanelMinimized = false;
+      var _pp = document.getElementById('places-panel');
+      var _ppBody = document.getElementById('places-panel-body');
+      var _ppTitle = document.getElementById('places-panel-title');
+      var _ppBtn = document.getElementById('btn-minimize-panel');
+      var _ppHeader = _pp ? _pp.firstElementChild : null;
+      if (_ppBody) _ppBody.style.display = '';
+      if (_pp) {
+        _pp.style.width = '340px';
+        _pp.style.bottom = 'var(--gap-edge)';
+        _pp.style.padding = '20px';
+        _pp.style.borderRadius = 'var(--r-xl)';
+      }
+      if (_ppHeader) {
+        _ppHeader.style.marginBottom = '14px';
+        _ppHeader.style.paddingBottom = '10px';
+        _ppHeader.style.borderBottom = '1px solid var(--glass-border)';
+        _ppHeader.style.gap = '8px';
+      }
+      if (_ppTitle) { _ppTitle.textContent = '🔎 Places Discovery'; _ppTitle.style.fontSize = '13px'; }
+      if (_ppBtn) { _ppBtn.textContent = '‹'; _ppBtn.title = 'Minimizar painel'; }
+    }
+  } catch(_) {}
   try { if (map) map.jumpTo({ center: [-47.93, -15.78], zoom: 4 }); } catch(_) {}
 
   const overlay = document.getElementById('geocoding-overlay');
@@ -5856,7 +5915,14 @@ async function openSavedMap(mapId, name, mapType) {
       const batch = [];
       for (let i = 0; i < CONCURRENCY; i++) {
         const p = page + i;
-        batch.push(sbFetch(`map_pdvs?map_id=eq.${mapId}&select=*&offset=${p*PAGE}&limit=${PAGE}`));
+        // .catch(() => null): se uma página falha por rede flaky, não derruba
+        // o batch inteiro. Null vira "página vazia" no loop abaixo e seguimos
+        // — melhor PDVs parciais do que alert('Erro ao carregar') com tudo OK
+        // nas outras 3. initSharedMode (~6242) já usa o mesmo padrão.
+        batch.push(
+          sbFetch(`map_pdvs?map_id=eq.${mapId}&select=*&offset=${p*PAGE}&limit=${PAGE}`)
+            .catch(() => null)
+        );
       }
       const results = await Promise.all(batch);
       for (const rows of results) {
