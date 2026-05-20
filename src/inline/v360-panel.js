@@ -46,8 +46,11 @@
     const brands = _selectedBrands();
     const filtered = window.filteredData || [];
 
-    // Esconde card em não-V360 ou sem dados
-    if (!_isV360() || !brands || !brands.length || !filtered.length) {
+    // (Fase 9) Esconde em não-V360, sem dados, OU em modo Solo (legados cobrem).
+    const hasComp = window.V360CompRender
+      && window.V360CompRender.getMode
+      && window.V360CompRender.getMode() !== 'solo';
+    if (!_isV360() || !hasComp || !brands || !brands.length || !filtered.length) {
       card.style.display = 'none';
       return;
     }
@@ -125,7 +128,11 @@
     const brands = _selectedBrands();
     const filtered = window.filteredData || [];
 
-    if (!_isV360() || !brands || !brands.length || !filtered.length) {
+    // (Fase 9) Só em Comp; em Solo o "PDVs por Bandeira" legado cobre.
+    const hasComp = window.V360CompRender
+      && window.V360CompRender.getMode
+      && window.V360CompRender.getMode() !== 'solo';
+    if (!_isV360() || !hasComp || !brands || !brands.length || !filtered.length) {
       card.style.display = 'none';
       return;
     }
@@ -189,10 +196,16 @@
   }
 
   // ─── Esconde blocos legados ─────────────────────────────────────────────
-  // Em V360 (mesmo Solo) os blocos pesados ficam escondidos: os novos cards
-  // já cobrem Share por tipo e Top redes. Charts Chart.js antigos ficam off.
+  // (Fase 9) Só esconde legados em modo Comp (Duelo + Categoria), onde o
+  // hero card + h2hCard + sbt/topredes substituem a info.
+  // Em modo Solo, os legados (mini-stats, share-geral, distribuição,
+  // chart bandeiras) CONTINUAM visíveis — Solo não tem hero pra cobrir
+  // e Distribuição é interativa (clique no bin filtra share bucket).
   function syncLegacyVisibility() {
-    if (_isV360() && (window.filteredData || []).length > 0) {
+    const hasComp = window.V360CompRender
+      && window.V360CompRender.getMode
+      && window.V360CompRender.getMode() !== 'solo';
+    if (_isV360() && hasComp && (window.filteredData || []).length > 0) {
       document.body.setAttribute('data-v360-panel', 'active');
     } else {
       document.body.removeAttribute('data-v360-panel');
