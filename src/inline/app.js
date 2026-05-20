@@ -6232,18 +6232,26 @@ async function initSharedMode() {
     if (!maps || !maps.length) throw new Error('Link inválido ou expirado');
     var mapMeta = maps[0];
 
-    // Buscar PDVs
+    // Buscar PDVs — 4 páginas em paralelo por batch (~4x mais rápido que sequencial)
     var pdvs = [];
-    var PAGE = 1000, page = 0;
-    while (true) {
-      var pdvUrl = SUPABASE_URL + '/rest/v1/map_pdvs?map_id=eq.' + mapMeta.id + '&select=*&offset=' + (page * PAGE) + '&limit=' + PAGE;
-      var pResp = await fetch(pdvUrl, { headers: { 'apikey': SUPABASE_ANON, 'Accept': 'application/json' } });
-      if (!pResp.ok) break;
-      var batch = await pResp.json();
-      if (!batch || !batch.length) break;
-      pdvs = pdvs.concat(batch);
-      if (batch.length < PAGE) break;
-      page++;
+    var PAGE = 1000, CONCURRENCY = 4, page = 0, done = false;
+    var fetchPage = function(p) {
+      var pdvUrl = SUPABASE_URL + '/rest/v1/map_pdvs?map_id=eq.' + mapMeta.id + '&select=*&offset=' + (p * PAGE) + '&limit=' + PAGE;
+      return fetch(pdvUrl, { headers: { 'apikey': SUPABASE_ANON, 'Accept': 'application/json' } })
+        .then(function(r) { return r.ok ? r.json() : []; })
+        .catch(function() { return []; });
+    };
+    while (!done) {
+      var batchPromises = [];
+      for (var i = 0; i < CONCURRENCY; i++) batchPromises.push(fetchPage(page + i));
+      var results = await Promise.all(batchPromises);
+      for (var j = 0; j < results.length; j++) {
+        var batch = results[j];
+        if (!batch || !batch.length) { done = true; continue; }
+        pdvs = pdvs.concat(batch);
+        if (batch.length < PAGE) done = true;
+      }
+      page += CONCURRENCY;
     }
 
     // Montar app em modo read-only
@@ -6923,27 +6931,39 @@ function togglePlacesPanel() {
   var header = panel ? panel.firstElementChild : null; // the header row div
   _placesPanelMinimized = !_placesPanelMinimized;
   if (_placesPanelMinimized) {
+    // Minimizado: vira pill compacto (header só com ícone + chevron). Resetar
+    // bottom é o que evita o painel virar uma coluna alta e vazia — sem isso
+    // o `bottom: var(--gap-edge)` herdado força altura full-height mesmo com
+    // o body escondido.
     body.style.display = 'none';
     panel.style.width = 'auto';
-    panel.style.padding = '12px 16px';
+    panel.style.bottom = 'auto';
+    panel.style.padding = '8px 10px 8px 14px';
+    panel.style.borderRadius = 'var(--r-pill)';
     if (header) {
       header.style.marginBottom = '0';
       header.style.paddingBottom = '0';
       header.style.borderBottom = 'none';
+      header.style.gap = '10px';
     }
     title.textContent = '🔎';
+    title.style.fontSize = '14px';
     btn.textContent = '›';
     btn.title = 'Expandir painel';
   } else {
     body.style.display = '';
     panel.style.width = '340px';
+    panel.style.bottom = 'var(--gap-edge)';
     panel.style.padding = '20px';
+    panel.style.borderRadius = 'var(--r-xl)';
     if (header) {
       header.style.marginBottom = '14px';
       header.style.paddingBottom = '10px';
       header.style.borderBottom = '1px solid var(--glass-border)';
+      header.style.gap = '8px';
     }
     title.textContent = '🔎 Places Discovery';
+    title.style.fontSize = '13px';
     btn.textContent = '‹';
     btn.title = 'Minimizar painel';
   }
