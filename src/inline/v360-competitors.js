@@ -31,24 +31,35 @@
     loadedForMapId: null,     // pra evitar reload redundante
   };
 
-  // Paleta padrão de cores por marca (case-insensitive match no nome)
+  // Paleta padrão de cores por marca (case-insensitive match no nome).
+  // (Fase 10) Realinhada com paleta HYPR semântica. Antes usava hex
+  // arbitrários (#16a34a Heineken vs --win #018376 HYPR) e tinha colisão
+  // (BUDWEISER=AMSTEL=#dc2626). Agora cada marca tem cor única HYPR.
   const BRAND_COLOR_PRESETS = {
-    'BUDWEISER': '#dc2626',
-    'HEINEKEN':  '#16a34a',
-    'STELLA':    '#eab308',
-    'STELLA ARTOIS': '#eab308',
-    'BRAHMA':    '#3b82f6',
-    'SKOL':      '#f59e0b',
-    'AMSTEL':    '#dc2626',
-    'CORONA':    '#fbbf24',
-    'ANTARCTICA':'#1e40af',
-    'EISENBAHN': '#7c2d12',
-    'PETRA':     '#991b1b',
-    'ITAIPAVA':  '#facc15',
+    'HEINEKEN':      '#018376', // --win (verde HYPR)
+    'BUDWEISER':     '#F5272B', // --lose (vermelho HYPR)
+    'AMSTEL':        '#FF5528', // --lose-hi (laranja-vermelho HYPR)
+    'STELLA':        '#E89A28', // warm orange
+    'STELLA ARTOIS': '#E89A28',
+    'BRAHMA':        '#3397B9', // --accent (teal HYPR)
+    'SKOL':          '#FFB347', // warm yellow
+    'CORONA':        '#FFD24A', // amarelo claro
+    'ANTARCTICA':    '#246C84', // teal escuro
+    'EISENBAHN':     '#7C2D12', // marrom (mantém)
+    'PETRA':         '#B11C1F', // vermelho escuro
+    'ITAIPAVA':      '#FACC15', // amarelo
   };
 
-  // Paleta fallback (rodízio quando não tem preset)
-  const FALLBACK_COLORS = ['#7c3aed','#0891b2','#db2777','#65a30d','#ea580c','#0284c7'];
+  // Paleta fallback HYPR (rodízio quando não tem preset).
+  // Cores distintas o suficiente pra não confundir entre si.
+  const FALLBACK_COLORS = [
+    '#5F25FF', // --purple (índigo HYPR)
+    '#3397B9', // --accent (teal)
+    '#018376', // --win
+    '#E89A28', // warm orange
+    '#5DD6E6', // accent-hi (cyan claro)
+    '#4CB050', // win-hi (verde brilhante)
+  ];
   let _fallbackIdx = 0;
 
   function pickBrandColor(brandName) {
@@ -146,7 +157,7 @@
           <div id="v360-comp-preview" style="display:none;margin-top:18px;"></div>
 
           <!-- Error area -->
-          <div id="v360-comp-error" style="display:none;margin-top:14px;padding:10px 12px;border-radius:8px;background:rgba(220,38,38,0.08);color:#dc2626;font-size:12px;"></div>
+          <div id="v360-comp-error" style="display:none;margin-top:14px;padding:10px 12px;border-radius:8px;background:var(--lose-bg);color:var(--lose-hi);font-size:12px;"></div>
         </div>
 
         <div style="padding:14px 22px 18px;border-top:1px solid var(--border,#e5e7eb);display:flex;gap:8px;justify-content:flex-end;">
@@ -387,7 +398,7 @@
 
     let warning = '';
     if (alreadyLoaded) {
-      warning = `<div style="margin-top:10px;padding:8px 10px;background:rgba(245,158,11,0.1);color:#92400e;border-radius:6px;font-size:11.5px;">⚠️ A marca <b>${brandName}</b> já está carregada nesse mapa. Confirmar irá substituir os dados existentes.</div>`;
+      warning = `<div style="margin-top:10px;padding:8px 10px;background:var(--neutral-bg);color:var(--neutral);border-radius:6px;font-size:11.5px;">⚠️ A marca <b>${brandName}</b> já está carregada nesse mapa. Confirmar irá substituir os dados existentes.</div>`;
     } else if (isBaseBrand) {
       warning = `<div style="margin-top:10px;padding:8px 10px;background:rgba(220,38,38,0.1);color:#991b1b;border-radius:6px;font-size:11.5px;">⚠️ A marca <b>${brandName}</b> é a marca base desse mapa. Não é possível adicioná-la como concorrente.</div>`;
     }
@@ -647,20 +658,30 @@
     const lens = state.perspectiveBrand || baseBrand;
     const canEdit = !isSharedMode();
 
+    // (Fase 10) Resolve cor da base: persistida em payload OU pickBrandColor.
+    function _baseColor(bname) {
+      if (!bname) return 'var(--absent)';
+      const persisted = window._savedMapPayload?.base_brand_color;
+      if (persisted) return persisted;
+      return pickBrandColor(bname);
+    }
+
     // Lista ordenada: lente primeiro, depois os outros (base + competitors, sem duplicar lente)
     const others = [];
     if (baseBrand && baseBrand !== lens) {
-      others.push({ name: baseBrand, color: BRAND_COLOR_PRESETS[baseBrand.toUpperCase()] || '#94a3b8', isBase: true, compId: null, matched: null });
+      others.push({ name: baseBrand, color: _baseColor(baseBrand), isBase: true, compId: null, matched: null });
     }
     for (const c of state.competitors) {
       if (c.brand_name === lens) continue; // pula se for a lente
-      others.push({ name: c.brand_name, color: c.brand_color || '#94a3b8', isBase: false, compId: c.id, matched: c.matched_count });
+      others.push({ name: c.brand_name, color: c.brand_color || pickBrandColor(c.brand_name), isBase: false, compId: c.id, matched: c.matched_count });
     }
 
     // Contagem da lente:
     //   - se é a base: total de PDVs do mapa (allData.length, fallback a window._allDataLength)
     //   - se é um concorrente: matched_count
-    let lensColor = BRAND_COLOR_PRESETS[String(lens).toUpperCase()] || '#94a3b8';
+    let lensColor = (lens === baseBrand)
+      ? _baseColor(lens)
+      : pickBrandColor(lens);
     let lensCount = null;
     if (lens === baseBrand) {
       lensCount = (window.allData && window.allData.length) || null;
@@ -723,6 +744,48 @@
     });
     const addBtn = bar.querySelector('[data-persp-add="1"]');
     if (addBtn) addBtn.onclick = (e) => { e.stopPropagation(); openModal(); };
+
+    // (Fase 10) Click na bolinha persp-dot abre color picker.
+    // Não propaga: clicando no dot, NÃO abre menu da lente nem deleta competitor.
+    if (canEdit) {
+      bar.querySelectorAll('.persp-chip .persp-dot').forEach(dot => {
+        dot.style.cursor = 'pointer';
+        dot.title = 'Clique pra mudar a cor';
+        dot.onclick = (e) => {
+          e.stopPropagation();
+          e.preventDefault();
+          const chip = dot.closest('.persp-chip');
+          if (!chip) return;
+          // Resolve brand: lente ou data-brand
+          let brand;
+          if (chip.dataset.lensChip === '1') {
+            brand = lens;
+          } else {
+            brand = chip.dataset.brand;
+          }
+          if (!brand) return;
+          // Cor atual do chip (cor inline ou cor calculada)
+          const currentColor = chip.style.color || lensColor;
+          // Normaliza pra hex (style.color pode vir como rgb())
+          const m = /^#[0-9a-fA-F]{6}$/.exec(currentColor)
+            ? currentColor
+            : (function() {
+                const rgb = /rgb\((\d+),\s*(\d+),\s*(\d+)\)/.exec(currentColor);
+                if (rgb) {
+                  return '#' + [rgb[1], rgb[2], rgb[3]]
+                    .map(x => parseInt(x, 10).toString(16).padStart(2, '0'))
+                    .join('').toUpperCase();
+                }
+                return '#3397B9';
+              })();
+          if (window.V360ColorPicker) {
+            window.V360ColorPicker.open(dot, m, (newHex) => {
+              updateBrandColor(brand, newHex);
+            });
+          }
+        };
+      });
+    }
   }
 
   // ─── Dropdown da lente (trocar perspectiva) ─────────────────────────────
@@ -734,11 +797,13 @@
     const current = state.perspectiveBrand || baseBrand;
     const all = [];
     if (baseBrand) {
-      all.push({ name: baseBrand, color: BRAND_COLOR_PRESETS[baseBrand.toUpperCase()] || '#94a3b8', isBase: true });
+      const persisted = window._savedMapPayload?.base_brand_color;
+      const baseCol = persisted || pickBrandColor(baseBrand);
+      all.push({ name: baseBrand, color: baseCol, isBase: true });
     }
     for (const c of state.competitors) {
       if (c.brand_name === baseBrand) continue;
-      all.push({ name: c.brand_name, color: c.brand_color || '#94a3b8', isBase: false });
+      all.push({ name: c.brand_name, color: c.brand_color || pickBrandColor(c.brand_name), isBase: false });
     }
 
     const menu = document.createElement('div');
@@ -991,12 +1056,62 @@
     _removeLegacyHeaderEls();
   }
 
+  // ─── Color picker handlers ──────────────────────────────────────────────
+  // Atualiza cor de uma marca (base ou competitor). Persiste no Supabase.
+  //   brand: nome da marca
+  //   color: hex novo
+  // Para base: salva em saved_maps.payload.base_brand_color
+  // Para competitor: PATCH em v360_competitors.brand_color
+  async function updateBrandColor(brand, color) {
+    const baseBrand = (window.V360Comp?.getState()?.perspectiveBrand) || '';
+    // Identifica como base se brand matchear o baseBrand atual OU se nenhum
+    // competitor tem esse nome (significa que é a base).
+    const comp = state.competitors.find(c =>
+      c.brand_name.toUpperCase() === String(brand).toUpperCase()
+    );
+
+    if (comp) {
+      // É competitor — PATCH
+      comp.brand_color = color;
+      try {
+        await window.sbFetch(`v360_competitors?id=eq.${comp.id}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
+          body: JSON.stringify({ brand_color: color }),
+        });
+      } catch(e) { console.warn('[v360-comp] PATCH competitor color failed:', e); }
+    } else {
+      // É base — persiste em saved_maps.payload.base_brand_color
+      const mapId = window._currentOpenMapId || window._savedMapId;
+      if (!mapId) return;
+      try {
+        const payload = window._savedMapPayload || {};
+        payload.base_brand_color = color;
+        window._savedMapPayload = payload;
+        await window.sbFetch(`saved_maps?id=eq.${mapId}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
+          body: JSON.stringify({ payload }),
+        });
+      } catch(e) { console.warn('[v360-comp] PATCH base color failed:', e); }
+    }
+
+    // Dispara re-render
+    try {
+      window.dispatchEvent(new CustomEvent('v360:competitors-loaded', {
+        detail: { count: state.competitors.length, colorChanged: true },
+      }));
+    } catch(_) {}
+  }
+
   // ─── API pública ────────────────────────────────────────────────────────
   window.V360Comp = {
     loadForMap,
     reset,
     renderHeaderUI,
     openModal,
+    pickBrandColor,
+    updateBrandColor,
     getState: () => ({
       competitors: state.competitors.slice(),
       perspectiveBrand: state.perspectiveBrand,
