@@ -119,19 +119,35 @@
 <!-- Galeria de Mapas Salvos -->
 <div id="gallery-screen" class="hidden">
   <div class="gallery-header">
+   <div class="gallery-header-inner">
     <div class="gallery-header-left">
       <svg class="gallery-logo" aria-label="HYPR Geocodify"><use href="#logo-geocodify"/></svg>
       <div class="gallery-sub" id="gallery-user-sub">Seus mapas geocodificados</div>
     </div>
-    <div style="display:flex;gap:10px;align-items:center;">
-      <span id="gallery-user-email" style="font-size:12px;color:var(--text-muted);"></span>
-      <button onclick="toggleTheme()" style="background:transparent;border:1px solid var(--glass-border);color:var(--text-muted);padding:8px 12px;border-radius:10px;font-size:14px;cursor:pointer;transition:all 0.2s ease;line-height:1;" title="Alternar tema claro/escuro"><span id="theme-toggle-icon-gallery">☀️</span></button>
+    <div class="gallery-actions">
+      <span id="gallery-user-email"></span>
+      <span class="gallery-actions-divider" aria-hidden="true"></span>
+      <button class="gallery-icon-btn" onclick="toggleTheme()" title="Alternar tema" aria-label="Alternar tema">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" class="theme-toggle-svg">
+          <path class="icon-moon" d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/>
+          <g class="icon-sun">
+            <circle cx="12" cy="12" r="4"/>
+            <path d="M12 2v2"/><path d="M12 20v2"/>
+            <path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/>
+            <path d="M2 12h2"/><path d="M20 12h2"/>
+            <path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/>
+          </g>
+        </svg>
+      </button>
       <button class="gallery-btn-new" onclick="openMapTypeModal()">
-        <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M6 1v10M1 6h10" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
         Novo mapa
       </button>
-      <button onclick="supaLogout()" id="btn-logout" style="background:transparent;border:1px solid var(--glass-border);color:var(--text-muted);padding:8px 14px;border-radius:10px;font-size:12px;font-family:var(--font);cursor:pointer;transition:all 0.2s ease;" onmouseover="this.style.color='var(--lose)';this.style.borderColor='var(--lose)'" onmouseout="this.style.color='var(--text-muted)';this.style.borderColor='var(--glass-border)'">Sair</button>
+      <button class="gallery-icon-btn gallery-icon-btn--danger" onclick="supaLogout()" id="btn-logout" title="Sair" aria-label="Sair">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/><polyline points="10 17 15 12 10 7"/><line x1="15" y1="12" x2="3" y2="12"/></svg>
+      </button>
     </div>
+   </div>
   </div>
   <div class="gallery-body">
    <div class="gallery-body-inner">

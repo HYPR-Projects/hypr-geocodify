@@ -39,10 +39,8 @@ function toggleTheme() {
   html.setAttribute('data-theme', next);
   localStorage.setItem('geocodify-theme', next);
   setTimeout(function(){ html.classList.remove('theme-switching'); }, 300);
-  // Fase 6 fix: SVG do header (#theme-toggle-btn) é controlado por CSS
-  // [data-theme] — não tocar no DOM dele. Apenas o span da gallery usa emoji.
-  var galleryIcon = document.getElementById('theme-toggle-icon-gallery');
-  if (galleryIcon) galleryIcon.textContent = next === 'dark' ? '☀️' : '🌙';
+  // Theme toggle SVG (header + gallery) é controlado por CSS [data-theme]
+  // — não tocar no DOM dele.
   // Rebuild map style if map is loaded
   if (typeof _onThemeChange === 'function') _onThemeChange(next);
   // Re-render charts with new colors
@@ -5320,12 +5318,14 @@ function buildMapCard(m) {
       <div class="map-card-name">${escHtml(m.name)}</div>
       <div class="map-card-desc">${escHtml(m.description||'Sem descrição')}</div>
       <div class="map-card-meta">
-        <div>
+        <div class="map-card-meta-info">
           <div class="map-card-date">${date}${periodoStr}</div>
           <div class="map-card-user">${escHtml(m.created_by)}</div>
         </div>
-        <button class="map-card-share" title="Compartilhar" onclick="event.stopPropagation();openShareModalFromCard('${m.id}')">🔗</button>
-        <button class="map-card-del" title="Excluir" onclick="event.stopPropagation();deleteMap('${m.id}',this)">🗑</button>
+        <div class="map-card-actions">
+          <button class="map-card-share" title="Compartilhar" aria-label="Compartilhar" onclick="event.stopPropagation();openShareModalFromCard('${m.id}')"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg></button>
+          <button class="map-card-del" title="Excluir" aria-label="Excluir" onclick="event.stopPropagation();deleteMap('${m.id}',this)"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-2 14a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2L5 6"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg></button>
+        </div>
       </div>
     </div>`;
   card.addEventListener('click', () => {
