@@ -6022,23 +6022,15 @@ async function openSavedMap(mapId, name, mapType) {
 
   const overlay = document.getElementById('geocoding-overlay');
   _resetPlacesOverlayFields();
-  // Estado de loading minimalista: skeleton shimmer no right-panel + dot pulsante
-  // no header. Nada de overlay pesado — esse é o fluxo de "abrir mapa salvo",
-  // não há geocoding acontecendo, é só fetch.
   const _rightPanelEl = document.getElementById('right-panel');
   const _headerNameEl = document.getElementById('header-map-name');
-  if (_rightPanelEl) _rightPanelEl.classList.add('panel-loading');
-  if (_headerNameEl) _headerNameEl.classList.add('loading');
-  // Mantém referências para limpeza posterior; campos do overlay seguem
-  // sendo escritos durante o load mas o overlay nunca fica visível.
-  document.getElementById('geo-current').textContent = `Carregando "${name}"...`;
-  document.getElementById('geo-fill').style.width = '0%';
-  document.getElementById('geo-pct').textContent = '';
-  document.getElementById('geo-ok').textContent = '';
-  document.getElementById('geo-fail').textContent = '';
-  document.getElementById('geo-eta').textContent = '';
 
-  // ─── Cache hit: reabriu o mesmo mapa? Pula todos os fetches. ────────────
+  // ─── Cache hit (fast path): reabriu o mesmo mapa? Pula skeleton e fetches.
+  // Tentar restore ANTES de adicionar .panel-loading — senão o user vê um flash
+  // de skeleton mesmo no cache hit (~50-150ms). E usar finally pra GARANTIR
+  // que a classe nunca fica presa caso populateFilters/updatePanels jogue
+  // exception (caso anterior: panel-loading ficava preso → painéis em skeleton
+  // permanente apesar de allData estar populado).
   if (_tryRestoreOpenedMapFromCache(mapId)) {
     try {
       if (allData.length > 0) {
@@ -6049,23 +6041,35 @@ async function openSavedMap(mapId, name, mapType) {
           map.fitBounds(bounds, { padding:[40,40], animate: false });
         }
       }
-      populateFilters(); updatePanels(); updateOverlay();
-      if (_rightPanelEl) _rightPanelEl.classList.remove('panel-loading');
-      if (_headerNameEl) _headerNameEl.classList.remove('loading');
-      checkReenrichBar();
-      // SEMPRE força renderMarkers no cache hit. A limpeza forte (~6001) zerou
-      // o source 'pdvs' do MapLibre, então independente do tipo precisamos
-      // repopular. O listener de v360:competitors-loaded em ~app.js:62 só
-      // dispara renderMarkers quando colorChanged=true; restoreCompetitors
-      // emite com source='cache-restore' (sem colorChanged), então o listener
-      // não cobre esse caso — daí o force aqui. Sem isso, V360 reabria sem
-      // pins no mapa apesar dos painéis estarem corretos.
+      // Granular try/catch: uma falha não trava o resto.
+      try { populateFilters(); } catch(e) { console.warn('[cache-restore] populateFilters:', e); }
+      try { updatePanels(); }   catch(e) { console.warn('[cache-restore] updatePanels:', e); }
+      try { updateOverlay(); }  catch(e) { console.warn('[cache-restore] updateOverlay:', e); }
+      try { checkReenrichBar(); } catch(_) {}
+      // SEMPRE força renderMarkers — a limpeza forte zerou o source 'pdvs'.
       if (typeof renderMarkers === 'function') {
         try { renderMarkers(); } catch(_) {}
       }
-    } catch(_) {}
+    } finally {
+      // GARANTIA: limpa qualquer estado de loading legado (mesmo que não tenha
+      // sido adicionado nesta chamada — defesa contra estado herdado de
+      // navegação anterior, e contra ordens de operação que adicionem antes).
+      if (_rightPanelEl) _rightPanelEl.classList.remove('panel-loading');
+      if (_headerNameEl) _headerNameEl.classList.remove('loading');
+    }
     return;
   }
+
+  // ─── Cache miss: vai fazer fetch, então mostra skeleton minimalista ──────
+  // Não adicionar isso ANTES do cache check evita o flash em reabertura.
+  if (_rightPanelEl) _rightPanelEl.classList.add('panel-loading');
+  if (_headerNameEl) _headerNameEl.classList.add('loading');
+  document.getElementById('geo-current').textContent = `Carregando "${name}"...`;
+  document.getElementById('geo-fill').style.width = '0%';
+  document.getElementById('geo-pct').textContent = '';
+  document.getElementById('geo-ok').textContent = '';
+  document.getElementById('geo-fail').textContent = '';
+  document.getElementById('geo-eta').textContent = '';
 
   try {
     // Load map metadata (payload + base_brand + tickets_floor numa só request).
