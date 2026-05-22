@@ -5261,6 +5261,15 @@ function showGallery() {
   window._pendingPeriodo = null;
   window._pendingMapName = null;
   window._pendingMapDesc = null;
+  // CRITICAL: reset open-map state. Sem isso, iniciar uma busca nova depois
+  // (Places Discovery, Varejo 360, etc.) reaproveitava o registro saved_maps
+  // anterior porque saveMapToSupabase tem guard "if (_currentOpenMapId) return".
+  // Resultado: PDVs da nova busca vazavam para o mapa antigo via map_pdvs.
+  window._currentOpenMapId = null;
+  window._currentOpenMapName = null;
+  window._savedMapId = null;
+  window._appendToMapId = null;
+  window._appendMode = false;
   rawCSVData = [];
   currentView = 'map';
   const listEl = document.getElementById('geocoder-list-view');
@@ -6513,12 +6522,24 @@ async function saveMapToSupabase() {
   const btn = document.getElementById('save-btn');
   const status = document.getElementById('save-status');
 
-  // Guard: se mapa já foi salvo nesta sessão, não criar duplicata em saved_maps
+  // Guard: se mapa já foi salvo nesta sessão, não criar duplicata em saved_maps.
+  // PORÉM: se o nome atual difere do nome do mapa aberto, é uma busca nova com
+  // estado leftover (bug anterior). Nesse caso, força criação de novo registro
+  // limpando o ID antigo para evitar vazamento de PDVs entre mapas.
   if (window._currentOpenMapId) {
-    status.innerHTML = '<span style="color:var(--win)">✓ Mapa já está salvo</span>';
-    btn.disabled = false;
-    setTimeout(closeSaveModal, 1500);
-    return;
+    var openName = (window._currentOpenMapName || '').trim();
+    if (openName && openName !== name) {
+      console.warn('[save] state leak detectado: _currentOpenMapId=' + window._currentOpenMapId +
+        ' (nome aberto: "' + openName + '") mas salvando como "' + name + '". Forçando novo registro.');
+      window._currentOpenMapId = null;
+      window._currentOpenMapName = null;
+      window._savedMapId = null;
+    } else {
+      status.innerHTML = '<span style="color:var(--win)">✓ Mapa já está salvo</span>';
+      btn.disabled = false;
+      setTimeout(closeSaveModal, 1500);
+      return;
+    }
   }
 
   btn.disabled = true;
@@ -8066,6 +8087,12 @@ async function startPlacesDiscovery() {
     window._pendingMapName = mapName;
     window._pendingMapDesc = 'Places Discovery: "' + query + '"';
     window._pendingMapType = 'places_discovery';
+    // Defense-in-depth: garantir que estado de mapa anterior não vaze.
+    // goToGallery() já reseta isso, mas pode haver paths que pulam a gallery
+    // (ex: clicar "Novo mapa" sem voltar pra galeria, ou bugs de UI).
+    window._currentOpenMapId = null;
+    window._currentOpenMapName = null;
+    window._savedMapId = null;
     allData = []; filteredData = [];
     if (map && map.getSource('pdvs')) map.getSource('pdvs').setData({ type: 'FeatureCollection', features: [] });
   }
