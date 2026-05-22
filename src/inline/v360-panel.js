@@ -106,11 +106,18 @@
       const segsHtml = segments.map(s => {
         const wNum = s.avg * 100;
         const w = wNum.toFixed(1);
-        // Mostra a % dentro do segmento só se houver largura suficiente (≥8%).
-        // Abaixo disso, segmento fica só com a cor — o nome+valor da marca
-        // aparece no tooltip custom ao passar o mouse (data-brand / data-pct).
-        const label = wNum >= 8 ? `${wNum.toFixed(0)}%` : '';
-        return `<div class="sbt-seg" style="background:${s.color};width:${w}%" data-brand="${_esc(s.brand)}" data-color="${s.color}" data-pct="${w}">${label}</div>`;
+        // (Fix) Padding e label só em segmentos >=8% — abaixo disso o padding
+        // (16px) sobrepunha a largura calculada e marcas microscópicas (ex:
+        // 0.1%) ocupavam ~10% visual, mentindo sobre proporção. Agora:
+        //   - >=8%: padding 0 8px, label "X%" inline
+        //   - <8% e >=1%: sem padding, sem label, fica só barra de cor
+        //   - <1%: força min-width via CSS pra continuar visível/hoverable,
+        //          sem distorcer proporção (continua hover-able com tooltip
+        //          mostrando o valor exato)
+        const isWide = wNum >= 8;
+        const label = isWide ? `${wNum.toFixed(0)}%` : '';
+        const padStyle = isWide ? '' : 'padding:0;';
+        return `<div class="sbt-seg${isWide ? '' : ' sbt-seg-thin'}" style="background:${s.color};width:${w}%;${padStyle}" data-brand="${_esc(s.brand)}" data-color="${s.color}" data-pct="${w}">${label}</div>`;
       }).join('');
 
       const restPctExact = (rest * 100).toFixed(1);
