@@ -69,7 +69,14 @@ window.addEventListener('v360:competitors-loaded', function(e) {
 
 function _onThemeChange(theme) {
   if (typeof map === 'undefined' || !map) return;
-  var style = theme === 'light' ? _buildLightMapStyle() : _buildDarkStyle();
+  // Se o fallback HERE está ativo, troca de tema usa o estilo HERE correspondente
+  // para manter consistência. Sem isso, theme-toggle voltaria pro vector e quebraria de novo.
+  var style;
+  if (_fallbackActive) {
+    style = _buildHereRasterStyle(theme === 'light' ? 'light' : 'dark');
+  } else {
+    style = theme === 'light' ? _buildLightMapStyle() : _buildDarkStyle();
+  }
   var center = map.getCenter();
   var zoom = map.getZoom();
   map.setStyle(style);
@@ -84,7 +91,7 @@ function _onThemeChange(theme) {
 function _buildLightMapStyle() {
   return {
     version: 8,
-    glyphs: 'https://tiles.openfreemap.org/fonts/{fontstack}/{range}.pbf',
+    glyphs: '/fonts/{fontstack}/{range}.pbf',
     sources: { 'ofm': { type: 'vector', url: 'https://tiles.openfreemap.org/planet' } },
     layers: [
       { id: 'background', type: 'background', paint: { 'background-color': '#f0f4f8' } },
@@ -215,7 +222,7 @@ function _buildDarkStyle() {
   // Background alinhado com --bg #1C262F (canvas HYPR) ao invés de #0d1117.
   return {
     version: 8,
-    glyphs: 'https://tiles.openfreemap.org/fonts/{fontstack}/{range}.pbf',
+    glyphs: '/fonts/{fontstack}/{range}.pbf',
     sources: {
       'ofm': {
         type: 'vector',
@@ -285,7 +292,7 @@ function _buildSatelliteStyle() {
   const H = _HERE_SAT_KEY;
   return {
     version: 8,
-    glyphs: 'https://tiles.openfreemap.org/fonts/{fontstack}/{range}.pbf',
+    glyphs: '/fonts/{fontstack}/{range}.pbf',
     sources: {
       'here-sat': {
         type: 'raster',
@@ -299,6 +306,118 @@ function _buildSatelliteStyle() {
       { id: 'satellite', type: 'raster', source: 'here-sat', paint: { 'raster-opacity': 1 } }
     ]
   };
+}
+
+// ─── HERE raster fallback (acionado quando OpenFreeMap fica indisponível) ────
+// Não usa vector tiles; usa HERE Map Tile API v3 (mesma key do satellite).
+// `explore.night` para dark, `lite.day` para light. Visual difere do vector
+// (sem custom paint HYPR), mas mantém o app funcional. Sem dependência de glyphs
+// externos: o HERE renderiza labels server-side direto no raster.
+function _buildHereRasterStyle(theme) {
+  const H = _HERE_SAT_KEY;
+  const style = theme === 'light' ? 'lite.day' : 'explore.night';
+  return {
+    version: 8,
+    glyphs: '/fonts/{fontstack}/{range}.pbf',
+    sources: {
+      'here-raster': {
+        type: 'raster',
+        tiles: [`https://maps.hereapi.com/v3/base/mc/{z}/{x}/{y}/png?style=${style}&size=512&apiKey=${H}`],
+        tileSize: 512,
+        maxzoom: 20,
+        attribution: '© HERE Maps'
+      }
+    },
+    layers: [
+      { id: 'background', type: 'background', paint: { 'background-color': theme === 'light' ? '#f0f4f8' : '#1C262F' } },
+      { id: 'here-raster-layer', type: 'raster', source: 'here-raster', paint: { 'raster-opacity': 1 } }
+    ]
+  };
+}
+
+// ─── Tile circuit breaker ────────────────────────────────────────────────────
+// Monitora falhas de fetch nos tiles do OpenFreeMap. Se 3+ erros em 10s,
+// faz setStyle() pro fallback HERE raster e mostra banner discreto no mapa.
+// `_tileErrorCount` reseta a cada janela de 10s; só dispara fallback uma vez por sessão.
+var _tileFailures = [];      // timestamps (ms) das falhas recentes
+var _fallbackActive = false; // já fez switch pro HERE nesta sessão?
+var _NETWORK_BLOCK_HINT = false; // detectou padrão de ERR_CONNECTION_CLOSED?
+
+function _trackTileFailure(errorMessage) {
+  var now = Date.now();
+  _tileFailures = _tileFailures.filter(function(t) { return now - t < 10000; });
+  _tileFailures.push(now);
+
+  // Heurística: ERR_CONNECTION_CLOSED / Failed to fetch sem CORS sugere
+  // bloqueio de rede local (firewall corporativo, extensão de inspeção TLS).
+  var msg = String(errorMessage || '').toLowerCase();
+  if (msg.indexOf('failed to fetch') !== -1 || msg.indexOf('connection_closed') !== -1 || msg.indexOf('err_network') !== -1) {
+    _NETWORK_BLOCK_HINT = true;
+  }
+
+  if (_tileFailures.length >= 3 && !_fallbackActive) {
+    _activateTileFallback();
+  }
+}
+
+function _activateTileFallback() {
+  if (_fallbackActive || !map) return;
+  _fallbackActive = true;
+  console.warn('[Geocodify][tiles] OpenFreeMap indisponível — alternando para HERE raster fallback');
+
+  try {
+    var theme = document.documentElement.getAttribute('data-theme') === 'light' ? 'light' : 'dark';
+    var center = map.getCenter();
+    var zoom = map.getZoom();
+    var bearing = map.getBearing();
+    var pitch = map.getPitch();
+
+    map.setStyle(_buildHereRasterStyle(theme));
+    map.once('styledata', function() {
+      map.jumpTo({ center: center, zoom: zoom, bearing: bearing, pitch: pitch });
+      try { _setupMapSources(); } catch(_) {}
+      try { _setupMapInteractions(); } catch(_) {}
+      if (filteredData.length > 0) {
+        try { renderMarkers(); } catch(_) {}
+      }
+    });
+
+    _showTileBanner(_NETWORK_BLOCK_HINT);
+  } catch (e) {
+    console.error('[Geocodify][tiles] fallback failed:', e);
+  }
+}
+
+function _showTileBanner(networkHint) {
+  // Remove banner existente
+  var existing = document.getElementById('tile-fallback-banner');
+  if (existing) existing.remove();
+
+  var banner = document.createElement('div');
+  banner.id = 'tile-fallback-banner';
+  banner.style.cssText = 'position:absolute;top:14px;left:50%;transform:translateX(-50%);' +
+    'background:rgba(28,38,47,0.92);backdrop-filter:blur(16px) saturate(1.6);-webkit-backdrop-filter:blur(16px) saturate(1.6);' +
+    'border:1px solid rgba(255,255,255,0.08);border-radius:10px;padding:10px 14px;' +
+    'color:#E5EBF2;font-family:Urbanist,sans-serif;font-size:12px;line-height:1.4;' +
+    'box-shadow:0 8px 24px rgba(0,0,0,0.32);z-index:5;max-width:520px;display:flex;align-items:center;gap:10px;';
+
+  var msg = networkHint
+    ? '<strong style="color:#FF5528;">Mapa em modo fallback (HERE)</strong> · OpenFreeMap inacess&iacute;vel — poss&iacute;vel bloqueio de rede local ou extens&atilde;o de inspe&ccedil;&atilde;o TLS no Chrome.'
+    : '<strong style="color:#EDD900;">Mapa em modo fallback (HERE)</strong> · OpenFreeMap indispon&iacute;vel — usando provedor alternativo.';
+
+  banner.innerHTML =
+    '<span style="font-size:14px;">⚠</span>' +
+    '<span style="flex:1;">' + msg + '</span>' +
+    '<button id="tile-banner-close" style="background:transparent;border:0;color:#78909C;cursor:pointer;padding:0 4px;font-size:16px;line-height:1;">×</button>';
+
+  var container = document.getElementById('map');
+  if (container) {
+    container.appendChild(banner);
+    var closeBtn = document.getElementById('tile-banner-close');
+    if (closeBtn) closeBtn.addEventListener('click', function() { banner.remove(); });
+    // Auto-dismiss em 30s
+    setTimeout(function() { if (banner.parentNode) banner.remove(); }, 30000);
+  }
 }
 
 // MAP_STYLES — inicializado aqui pois _buildDarkStyle e _buildSatelliteStyle já existem
@@ -327,6 +446,25 @@ function initMap() {
 
   // Zoom controls customizados
   map.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'top-left');
+
+  // ─── Tile error tracking ────────────────────────────────────────────────
+  // MapLibre dispara `error` para falhas de fetch de tiles e sources.
+  // Detectamos especificamente erros em openfreemap.org e disparamos circuit breaker.
+  map.on('error', function(e) {
+    if (!e || !e.error) return;
+    var msg = e.error.message || e.error.toString() || '';
+    var src = (e.source && e.source.url) || (e.tile && e.tile.tileID) || '';
+    // Filtra apenas erros relacionados ao OpenFreeMap (não estoura fallback por erro de pdv-source etc.)
+    var isOFM = msg.indexOf('openfreemap') !== -1 || String(src).indexOf('openfreemap') !== -1
+      || (e.sourceId === 'ofm');
+    // Erros de fetch sem source identificado também contam (CORS/network failures não anexam sourceId)
+    var isNetworkErr = msg.indexOf('Failed to fetch') !== -1
+      || msg.indexOf('CONNECTION_CLOSED') !== -1
+      || msg.indexOf('ERR_NETWORK') !== -1;
+    if (isOFM || (isNetworkErr && !_fallbackActive)) {
+      _trackTileFailure(msg);
+    }
+  });
 
   map.on('load', () => {
     _setupMapSources();
