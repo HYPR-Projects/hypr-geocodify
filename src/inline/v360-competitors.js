@@ -60,7 +60,21 @@
     '#5DD6E6', // accent-hi (cyan claro)
     '#4CB050', // win-hi (verde brilhante)
   ];
-  let _fallbackIdx = 0;
+
+  // (Fix bug crítico) Hash determinístico do nome da marca → índice estável no
+  // FALLBACK_COLORS. Antes usávamos `_fallbackIdx++` mutável, o que fazia a
+  // mesma marca receber cores diferentes em chamadas sucessivas (qualquer
+  // re-render embaralhava as cores de marcas sem preset). Agora a cor é
+  // função pura do nome: pickBrandColor('LOREAL') sempre retorna o mesmo hex.
+  function _hashBrandToIdx(name) {
+    const norm = String(name || '').toUpperCase().trim();
+    let h = 5381;
+    for (let i = 0; i < norm.length; i++) {
+      h = ((h << 5) + h) + norm.charCodeAt(i); // djb2
+      h = h | 0; // força int32
+    }
+    return Math.abs(h) % FALLBACK_COLORS.length;
+  }
 
   function pickBrandColor(brandName) {
     const norm = String(brandName || '').toUpperCase().trim();
@@ -68,9 +82,7 @@
     for (const key in BRAND_COLOR_PRESETS) {
       if (norm.includes(key) || key.includes(norm)) return BRAND_COLOR_PRESETS[key];
     }
-    const c = FALLBACK_COLORS[_fallbackIdx % FALLBACK_COLORS.length];
-    _fallbackIdx++;
-    return c;
+    return FALLBACK_COLORS[_hashBrandToIdx(norm)];
   }
 
   // ─── Util ───────────────────────────────────────────────────────────────
@@ -573,6 +585,9 @@
       await ensureBaseBrandPersisted();
 
       closeModal();
+      // (Fix #3) Re-render pós-adição pode levar 1-3s (recálculo de markers,
+      // hero, share por tipo, top redes). Banner discreto durante esse processo.
+      _showColorUpdateBanner('Recalculando mapa com nova marca…');
       // Cache do mapa atual fica stale com novo competitor — invalida
       try { window._invalidateOpenedMapCache && window._invalidateOpenedMapCache(mapId); } catch(_) {}
       renderHeaderUI();
@@ -584,6 +599,9 @@
           detail: { count: state.competitors.length, source: 'add' }
         }));
       } catch(_) {}
+      // Esconde banner após o ciclo de re-render assentar (next tick + 600ms
+      // dá tempo do MapLibre repintar markers e do hero recalcular)
+      setTimeout(_hideColorUpdateBanner, 800);
       showToast(`Concorrente "${pending.brandName}" adicionado · ${pending.matchedCount.toLocaleString('pt-BR')} PDVs com match`);
     } catch(e) {
       console.error('[v360-comp] save error:', e);
@@ -769,9 +787,28 @@
             brand = chip.dataset.brand;
           }
           if (!brand) return;
-          // Cor atual do chip (cor inline ou cor calculada)
-          const currentColor = chip.style.color || lensColor;
-          // Normaliza pra hex (style.color pode vir como rgb())
+
+          // (Fix) Cor atual do chip. Antes usávamos `chip.style.color || lensColor`,
+          // o que caía no `lensColor` quando o inline style ainda não estava
+          // resolvido no DOM (timing entre render e click handler em alguns
+          // browsers). Resultado: picker abria com cor da lente em vez da cor
+          // do chip clicado, gerando confusão visual.
+          // Solução: derivar cor diretamente do estado canônico (state.competitors
+          // ou _baseColor), com fallback final em `getComputedStyle`.
+          let currentColor;
+          if (chip.dataset.lensChip === '1') {
+            currentColor = lensColor;
+          } else {
+            const compRow = state.competitors.find(c => c.brand_name === brand);
+            if (compRow && compRow.brand_color) {
+              currentColor = compRow.brand_color;
+            } else if (brand === baseBrand) {
+              currentColor = _baseColor(brand);
+            } else {
+              currentColor = pickBrandColor(brand);
+            }
+          }
+          // Normaliza pra hex (currentColor pode vir como rgb() em alguns edge cases)
           const m = /^#[0-9a-fA-F]{6}$/.exec(currentColor)
             ? currentColor
             : (function() {
@@ -784,8 +821,17 @@
                 return '#3397B9';
               })();
           if (window.V360ColorPicker) {
-            window.V360ColorPicker.open(dot, m, (newHex) => {
-              updateBrandColor(brand, newHex);
+            // (Fix #3) Loading state: dot ganha spinner, chip fica não-clicável,
+            // banner discreto aparece. Restaurado no fim do updateBrandColor (sucesso ou erro).
+            window.V360ColorPicker.open(dot, m, async (newHex) => {
+              _setChipLoading(chip, true);
+              _showColorUpdateBanner();
+              try {
+                await updateBrandColor(brand, newHex);
+              } finally {
+                _setChipLoading(chip, false);
+                _hideColorUpdateBanner();
+              }
             });
           }
         };
@@ -1205,7 +1251,7 @@
     state.perspectiveBrand = null;
     state.loadedForMapId = null;
     state.ticketsFloor = 5;
-    _fallbackIdx = 0;
+    // (Removido _fallbackIdx — agora pickBrandColor é puro/determinístico via hash)
     // Limpa também o base_brand global pra não vazar entre mapas
     window._currentMapBaseBrand = null;
     // limpa UI: esconde perspective bar + remove qualquer dropdown da lente aberto
@@ -1217,13 +1263,63 @@
   }
 
   // ─── Color picker handlers ──────────────────────────────────────────────
+
+  // (Fix #3) Loading state helpers — feedback visual durante PATCH + re-render.
+  // Sem isso, usuário clica em "Aplicar" no picker e fica sem saber se travou.
+  function _setChipLoading(chip, loading) {
+    if (!chip) return;
+    if (loading) {
+      chip.classList.add('persp-chip-loading');
+      chip.style.pointerEvents = 'none';
+      chip.style.opacity = '0.6';
+    } else {
+      chip.classList.remove('persp-chip-loading');
+      chip.style.pointerEvents = '';
+      chip.style.opacity = '';
+    }
+  }
+
+  function _showColorUpdateBanner(message) {
+    let banner = document.getElementById('v360-update-banner');
+    if (banner) banner.remove();
+    banner = document.createElement('div');
+    banner.id = 'v360-update-banner';
+    banner.style.cssText = 'position:fixed;top:64px;left:50%;transform:translateX(-50%);' +
+      'background:rgba(28,38,47,0.95);backdrop-filter:blur(16px) saturate(1.6);' +
+      '-webkit-backdrop-filter:blur(16px) saturate(1.6);' +
+      'border:1px solid rgba(255,255,255,0.08);border-radius:10px;padding:8px 14px;' +
+      'color:#E5EBF2;font-family:Urbanist,sans-serif;font-size:12px;line-height:1.4;' +
+      'box-shadow:0 8px 24px rgba(0,0,0,0.32);z-index:10000;display:flex;align-items:center;gap:10px;';
+    banner.innerHTML =
+      '<span class="v360-spinner" style="display:inline-block;width:12px;height:12px;' +
+      'border:2px solid rgba(51,151,185,0.25);border-top-color:#3397B9;border-radius:50%;' +
+      'animation:v360spin 0.8s linear infinite;"></span>' +
+      '<span>' + (message || 'Atualizando…') + '</span>';
+    // Injeta keyframes do spinner (uma vez)
+    if (!document.getElementById('v360-spinner-style')) {
+      const st = document.createElement('style');
+      st.id = 'v360-spinner-style';
+      st.textContent = '@keyframes v360spin{to{transform:rotate(360deg)}}';
+      document.head.appendChild(st);
+    }
+    document.body.appendChild(banner);
+  }
+
+  function _hideColorUpdateBanner() {
+    const banner = document.getElementById('v360-update-banner');
+    if (banner) banner.remove();
+  }
+
+  // Expõe pra uso externo (ex: onConfirm de adição de marca)
+  window._v360ShowUpdateBanner = _showColorUpdateBanner;
+  window._v360HideUpdateBanner = _hideColorUpdateBanner;
+
   // Atualiza cor de uma marca (base ou competitor). Persiste no Supabase.
   //   brand: nome da marca
   //   color: hex novo
   // Para base: salva em saved_maps.payload.base_brand_color
   // Para competitor: PATCH em map_competitors.brand_color
   async function updateBrandColor(brand, color) {
-    const baseBrand = (window.V360Comp?.getState()?.perspectiveBrand) || '';
     // Identifica como base se brand matchear o baseBrand atual OU se nenhum
     // competitor tem esse nome (significa que é a base).
     const comp = state.competitors.find(c =>
@@ -1239,7 +1335,17 @@
           headers: { 'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
           body: JSON.stringify({ brand_color: color }),
         });
-      } catch(e) { console.warn('[v360-comp] PATCH competitor color failed:', e); }
+      } catch(e) {
+        console.warn('[v360-comp] PATCH competitor color failed:', e);
+        // (Fix) Em caso de erro, reverte cor local pra não enganar usuário.
+        // O catch silencioso anterior deixava state local diferente do Supabase.
+        const reverted = await window.sbFetch(`map_competitors?id=eq.${comp.id}&select=brand_color`)
+          .catch(() => null);
+        if (reverted && reverted[0]) {
+          comp.brand_color = reverted[0].brand_color;
+        }
+        alert('Falha ao salvar a nova cor. A cor anterior foi restaurada.');
+      }
     } else {
       // É base — persiste em saved_maps.payload.base_brand_color
       const mapId = window._currentOpenMapId || window._savedMapId;
@@ -1253,15 +1359,17 @@
           headers: { 'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
           body: JSON.stringify({ payload }),
         });
-      } catch(e) { console.warn('[v360-comp] PATCH base color failed:', e); }
+      } catch(e) {
+        console.warn('[v360-comp] PATCH base color failed:', e);
+        alert('Falha ao salvar a nova cor da marca base.');
+      }
     }
 
     // Cache stale com cor antiga — invalida
     try { window._invalidateOpenedMapCache && window._invalidateOpenedMapCache(window._currentOpenMapId); } catch(_) {}
-    // Dispara re-render
-    // (Fase 11) Re-renderiza perspBar localmente — o evento abaixo é escutado
-    // pelo hero/comp-render mas não pelo perspBar, então sem isso o chip do
-    // header fica com a cor antiga até reload. Idempotente.
+    // Dispara re-render APÓS o PATCH (ou catch) ter concluído.
+    // (Fix) Antes o renderPerspBar() rodava antes do await resolver, então
+    // se o PATCH falhasse o estado local ficava certo mas Supabase errado.
     try { renderPerspBar(); } catch(_) {}
     try {
       window.dispatchEvent(new CustomEvent('v360:competitors-loaded', {
