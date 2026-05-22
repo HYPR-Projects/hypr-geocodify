@@ -336,16 +336,25 @@ function _buildHereRasterStyle(theme) {
 }
 
 // ─── Tile circuit breaker ────────────────────────────────────────────────────
-// Monitora falhas de fetch nos tiles do OpenFreeMap. Se 3+ erros em 10s,
+// Monitora falhas de fetch nos tiles do OpenFreeMap. Se 6+ erros em 15s,
 // faz setStyle() pro fallback HERE raster e mostra banner discreto no mapa.
-// `_tileErrorCount` reseta a cada janela de 10s; só dispara fallback uma vez por sessão.
-var _tileFailures = [];      // timestamps (ms) das falhas recentes
-var _fallbackActive = false; // já fez switch pro HERE nesta sessão?
+// Threshold tolerante porque tiles individuais podem falhar por rate-limit
+// momentâneo sem que o serviço inteiro esteja indisponível.
+// A cada 60s tenta voltar pro OpenFreeMap automaticamente via _attemptOFMRecovery.
+var _tileFailures = [];          // timestamps (ms) das falhas recentes
+var _fallbackActive = false;     // está usando HERE raster agora?
 var _NETWORK_BLOCK_HINT = false; // detectou padrão de ERR_CONNECTION_CLOSED?
+var _recoveryTimer = null;       // setInterval handle da tentativa de retorno ao OFM
+var _recoveryAttempts = 0;       // contador de tentativas de recovery (cap em 10)
+
+var TILE_FAIL_THRESHOLD = 6;     // erros para disparar fallback
+var TILE_FAIL_WINDOW_MS = 15000; // janela de contagem
+var RECOVERY_INTERVAL_MS = 60000;// tenta voltar pro OFM a cada 60s
+var RECOVERY_MAX_ATTEMPTS = 10;  // ~10min de tentativas, depois desiste
 
 function _trackTileFailure(errorMessage) {
   var now = Date.now();
-  _tileFailures = _tileFailures.filter(function(t) { return now - t < 10000; });
+  _tileFailures = _tileFailures.filter(function(t) { return now - t < TILE_FAIL_WINDOW_MS; });
   _tileFailures.push(now);
 
   // Heurística: ERR_CONNECTION_CLOSED / Failed to fetch sem CORS sugere
@@ -355,7 +364,7 @@ function _trackTileFailure(errorMessage) {
     _NETWORK_BLOCK_HINT = true;
   }
 
-  if (_tileFailures.length >= 3 && !_fallbackActive) {
+  if (_tileFailures.length >= TILE_FAIL_THRESHOLD && !_fallbackActive) {
     _activateTileFallback();
   }
 }
@@ -383,10 +392,90 @@ function _activateTileFallback() {
     });
 
     _showTileBanner(_NETWORK_BLOCK_HINT);
+    _startRecoveryTimer();
   } catch (e) {
     console.error('[Geocodify][tiles] fallback failed:', e);
   }
 }
+
+// ─── Auto-recovery ──────────────────────────────────────────────────────────
+// A cada 60s testa se o OpenFreeMap voltou. Se sim, faz setStyle() de volta
+// pro Positron silenciosamente. Para após RECOVERY_MAX_ATTEMPTS tentativas
+// (~10min) pra evitar loop infinito em rede genuinamente bloqueada.
+function _startRecoveryTimer() {
+  if (_recoveryTimer) return;
+  _recoveryAttempts = 0;
+  _recoveryTimer = setInterval(_attemptOFMRecovery, RECOVERY_INTERVAL_MS);
+}
+
+function _stopRecoveryTimer() {
+  if (_recoveryTimer) {
+    clearInterval(_recoveryTimer);
+    _recoveryTimer = null;
+  }
+}
+
+function _attemptOFMRecovery() {
+  if (!_fallbackActive) { _stopRecoveryTimer(); return; }
+  _recoveryAttempts++;
+  if (_recoveryAttempts > RECOVERY_MAX_ATTEMPTS) {
+    console.info('[Geocodify][tiles] recovery: max attempts reached, dando up');
+    _stopRecoveryTimer();
+    return;
+  }
+
+  // Testa um tile leve com timeout curto. AbortController evita ficar pendurado.
+  var controller = new AbortController();
+  var timeout = setTimeout(function() { controller.abort(); }, 4000);
+
+  fetch('https://tiles.openfreemap.org/planet/0/0/0.pbf', { signal: controller.signal, cache: 'no-store' })
+    .then(function(r) {
+      clearTimeout(timeout);
+      if (r.ok) {
+        console.info('[Geocodify][tiles] recovery: OpenFreeMap voltou, restaurando Positron');
+        _restoreOFMStyle();
+      }
+    })
+    .catch(function() { clearTimeout(timeout); /* silencioso: mantém fallback */ });
+}
+
+function _restoreOFMStyle() {
+  if (!_fallbackActive || !map) return;
+  try {
+    var theme = document.documentElement.getAttribute('data-theme') === 'light' ? 'light' : 'dark';
+    var center = map.getCenter();
+    var zoom = map.getZoom();
+    var bearing = map.getBearing();
+    var pitch = map.getPitch();
+
+    var newStyle = theme === 'light' ? _buildLightMapStyle() : MAP_STYLES.dark;
+    map.setStyle(newStyle);
+    map.once('styledata', function() {
+      map.jumpTo({ center: center, zoom: zoom, bearing: bearing, pitch: pitch });
+      try { _setupMapSources(); } catch(_) {}
+      try { _setupMapInteractions(); } catch(_) {}
+      if (filteredData.length > 0) {
+        try { renderMarkers(); } catch(_) {}
+      }
+    });
+
+    // Reset state — permite que o circuit breaker rearme se cair de novo
+    _fallbackActive = false;
+    _tileFailures = [];
+    _NETWORK_BLOCK_HINT = false;
+    _stopRecoveryTimer();
+    var banner = document.getElementById('tile-fallback-banner');
+    if (banner) banner.remove();
+  } catch (e) {
+    console.error('[Geocodify][tiles] restore failed:', e);
+  }
+}
+
+// Expõe pra UI poder forçar retry manual (botão do banner)
+window._geocodifyForceMapRetry = function() {
+  _recoveryAttempts = 0;
+  _attemptOFMRecovery();
+};
 
 function _showTileBanner(networkHint) {
   // Remove banner existente
@@ -408,6 +497,7 @@ function _showTileBanner(networkHint) {
   banner.innerHTML =
     '<span style="font-size:14px;">⚠</span>' +
     '<span style="flex:1;">' + msg + '</span>' +
+    '<button id="tile-banner-retry" style="background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.14);color:#E5EBF2;cursor:pointer;padding:4px 10px;font-size:11px;font-family:inherit;border-radius:6px;line-height:1;">Tentar novamente</button>' +
     '<button id="tile-banner-close" style="background:transparent;border:0;color:#78909C;cursor:pointer;padding:0 4px;font-size:16px;line-height:1;">×</button>';
 
   var container = document.getElementById('map');
@@ -415,6 +505,19 @@ function _showTileBanner(networkHint) {
     container.appendChild(banner);
     var closeBtn = document.getElementById('tile-banner-close');
     if (closeBtn) closeBtn.addEventListener('click', function() { banner.remove(); });
+    var retryBtn = document.getElementById('tile-banner-retry');
+    if (retryBtn) retryBtn.addEventListener('click', function() {
+      retryBtn.textContent = 'Testando…';
+      retryBtn.disabled = true;
+      try { window._geocodifyForceMapRetry && window._geocodifyForceMapRetry(); } catch(_) {}
+      // Se o restore funcionou, o banner é removido sozinho. Se não, reabilita o botão.
+      setTimeout(function() {
+        if (banner.parentNode && retryBtn) {
+          retryBtn.textContent = 'Tentar novamente';
+          retryBtn.disabled = false;
+        }
+      }, 5000);
+    });
     // Auto-dismiss em 30s
     setTimeout(function() { if (banner.parentNode) banner.remove(); }, 30000);
   }
