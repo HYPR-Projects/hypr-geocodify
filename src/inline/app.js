@@ -887,9 +887,19 @@ function _attachDonutInteractions(el, clusterId, coords) {
         var brandName = _categoryBrandIdxCache.ordered[b];
         var color = _categoryBrandIdxCache.colorMap[brandName] || '#94a3b8';
         var count = p['c_b' + b] || 0;
-        if (count > 0) brandRows.push({ label: brandName, n: count, c: color });
+        // (Fix UX) Inclui marcas com 0 lideranças no tooltip. No modo Categoria,
+        // o donut só mostra quem lidera cada PDV — uma marca com share baixo
+        // (ex: 0.1%) nunca lidera, então sumia do tooltip mesmo aparecendo no
+        // header. Causava confusão ("a marca existe ou não?"). Agora marcas
+        // declaradas no mapa sempre aparecem; quem nunca lidera ganha label
+        // "0 lideranças" pra deixar explícito.
+        brandRows.push({ label: brandName, n: count, c: color });
       }
-      contentEl = _buildClusterTooltipRows(total, brandRows);
+      // Passa `keepZeros=true` pra _buildClusterTooltipRows não filtrar marcas
+      // com count 0. Solo/Duelo continuam usando o caminho legado (sem keepZeros)
+      // porque lá "0 sem presença" é ruído puro, enquanto em Categoria a
+      // ausência de lideranças é informação útil.
+      contentEl = _buildClusterTooltipRows(total, brandRows, { keepZeros: true });
     } else {
       var win = p.c_win || 0, lose = p.c_lose || 0, neu = p.c_neutral || 0, abs = p.c_absent || 0;
       contentEl = _buildClusterTooltip(total, win, lose, neu, abs);
@@ -946,11 +956,19 @@ function _attachDonutInteractions(el, clusterId, coords) {
 
 // Tooltip genérico — recebe linhas arbitrárias [{label, n, c}, ...].
 // Linhas com n<=0 são filtradas e ordenadas por contagem decrescente.
-function _buildClusterTooltipRows(total, rows) {
+function _buildClusterTooltipRows(total, rows, opts) {
   var el = document.createElement('div');
   el.className = 'cluster-tooltip';
-  rows = (rows || []).filter(function(r) { return r && r.n > 0; })
-                     .sort(function(a, b) { return b.n - a.n; });
+  var keepZeros = !!(opts && opts.keepZeros);
+
+  // (Fix UX) keepZeros mantém marcas com count=0 no fim da lista (modo Categoria),
+  // pra revelar que a marca existe mas não lidera em nenhum PDV deste cluster.
+  // Sem keepZeros (default, usado em Solo/Duelo), filtra count=0 como antes —
+  // mostrar "0 sem presença" / "0 disputa" não agrega.
+  rows = (rows || []).filter(function(r) {
+    if (!r) return false;
+    return keepZeros ? true : r.n > 0;
+  }).sort(function(a, b) { return b.n - a.n; });
 
   var totalFmt = total.toLocaleString('pt-BR');
   var html = '<div class="cluster-tt-header">' + totalFmt + ' PDV' + (total !== 1 ? 's' : '') + '</div>';
@@ -960,10 +978,21 @@ function _buildClusterTooltipRows(total, rows) {
     var labelSafe = String(r.label).replace(/[<>&"]/g, function(m){
       return { '<':'&lt;', '>':'&gt;', '&':'&amp;', '"':'&quot;' }[m];
     });
-    html += '<div class="cluster-tt-row">' +
+    // (Fix UX) Estado visual diferenciado pra marcas com 0 lideranças:
+    // dot esmaecido + label dim + texto explícito "0 lideranças".
+    var isZero = r.n === 0;
+    var rowCls = 'cluster-tt-row' + (isZero ? ' cluster-tt-row-zero' : '');
+    var valHtml;
+    if (isZero) {
+      valHtml = '<span class="cluster-tt-val cluster-tt-val-zero">0 lideranças</span>';
+    } else {
+      valHtml = '<span class="cluster-tt-val">' + r.n.toLocaleString('pt-BR') +
+                ' <span class="cluster-tt-pct">· ' + pct + '%</span></span>';
+    }
+    html += '<div class="' + rowCls + '">' +
       '<span class="cluster-tt-dot" style="background:' + r.c + '"></span>' +
       '<span class="cluster-tt-label">' + labelSafe + '</span>' +
-      '<span class="cluster-tt-val">' + r.n.toLocaleString('pt-BR') + ' <span class="cluster-tt-pct">· ' + pct + '%</span></span>' +
+      valHtml +
       '</div>';
   });
   html += '</div>';

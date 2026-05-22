@@ -1712,6 +1712,13 @@ input[type="range"]:hover::-webkit-slider-thumb {
   letter-spacing: 0;
   font-variant-numeric: tabular-nums;
 }
+/* (Fix) Segmentos finos (<8%) mantêm proporção real sem sumir.
+   min-width 3px garante visibilidade/hoverability para marcas com
+   share microscópico (ex: 0.1% = pixel único antes deste guard). */
+.sbt-seg-thin {
+  min-width: 3px;
+  padding: 0;
+}
 .sbt-seg:last-of-type { border-right: none; }
 .sbt-seg, .sbt-rest { cursor: default; }
 .sbt-seg:hover, .sbt-rest:hover { filter: brightness(1.08); }
@@ -1881,6 +1888,19 @@ body[data-v360-panel="active"] #ov-bandeiras-section {
 .cluster-tt-label { color: var(--text-dim); flex: 1; }
 .cluster-tt-val { color: var(--text); font-variant-numeric: tabular-nums; font-weight: 500; }
 .cluster-tt-pct { color: var(--text-muted); font-weight: 400; }
+
+/* (Fix UX) Marca declarada mas sem lideranças nesse cluster — visual atenuado
+   pra deixar claro que a marca existe (declarada no mapa) mas não vence nesse
+   agrupamento. Sem isso, marcas de share baixo (ex: 0.1%) sumiam do tooltip
+   mesmo aparecendo no header, gerando dúvida sobre se a marca foi processada. */
+.cluster-tt-row-zero { opacity: 0.55; }
+.cluster-tt-row-zero .cluster-tt-dot { opacity: 0.6; }
+.cluster-tt-val-zero {
+  color: var(--text-faint, var(--text-muted));
+  font-style: italic;
+  font-size: 10.5px;
+  font-weight: 400;
+}
 
 /* ─── Map Overlay Stats ─────────────────────────────────────────────────── */
 #map-overlay {
