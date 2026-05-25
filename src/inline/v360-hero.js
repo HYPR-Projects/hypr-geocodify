@@ -26,11 +26,29 @@
     return cm[brandName] || '#94a3b8';
   }
 
-  // Helper: nome "curto" da marca (max 12 chars) pra cabeçalhos da matriz
-  function _short(name) {
-    const n = String(name || '');
-    if (n.length <= 12) return n;
-    return n.slice(0, 11) + '…';
+  // Helper: nome "curto" da marca pra cabeçalhos da matriz.
+  // Estratégia: nomes compostos viram "First L." quando a primeira palavra
+  // cabe; quando não, trunca a primeira palavra mantendo a última inteira
+  // ("CATHARINE HILL" → "CATH. HILL"). Mantém harmonia com nomes curtos
+  // como "L OREAL", "OCEANE", "MAC".
+  function _short(name, max = 10) {
+    const n = String(name || '').trim();
+    if (n.length <= max) return n;
+    const parts = n.split(/\s+/);
+    if (parts.length >= 2) {
+      const first = parts[0];
+      const last = parts[parts.length - 1];
+      // A: "First L." — só abrevia a última palavra
+      if (first.length + 3 <= max) return first + ' ' + last[0] + '.';
+      // B: "FirstTrunc. Last" — trunca a primeira pra caber junto da última
+      const firstBudget = max - last.length - 2; // -2 = ". "
+      if (firstBudget >= 2 && last.length + 2 < max) {
+        return first.slice(0, firstBudget) + '. ' + last;
+      }
+      // C: só a primeira palavra
+      if (first.length <= max) return first;
+    }
+    return n.slice(0, max - 1) + '…';
   }
 
   // Helper: escape HTML
@@ -53,9 +71,10 @@
     return [b.perspective].concat((b.others || []).filter(x => x && x !== b.perspective));
   }
 
-  // Calcula share médio (em decimal 0-1) de uma marca em allData
-  // usando V360CompRender.getShareForBrand. Marcas concorrentes que não
-  // têm PDV mapeado contam como 0 (mesma lógica do protótipo).
+  // Calcula share médio (em decimal 0-1) de uma marca no universo passado
+  // (tipicamente filteredData — respeitando filtros ativos).
+  // Marcas sem amostra no PDV contam como 0 (ausência = derrota competitiva,
+  // não dado faltando — share total reflete o universo, não só onde compete).
   function _avgShareForBrand(allRows, brand) {
     const fn = window.V360CompRender?.getShareForBrand;
     if (!fn) return { avg: 0, coverage: 0, nzShares: [] };
@@ -83,7 +102,9 @@
     if (!el || !section) return;
 
     const brands = _selectedBrands();
-    const all = (window.allData || []);
+    // Usa filteredData (respeitando filtros ativos) — share "real" reflete o
+    // recorte visível. Fallback pra allData quando filtro ainda não inicializou.
+    const all = (window.filteredData && window.filteredData.length ? window.filteredData : window.allData) || [];
 
     // Sem V360, sem mapa aberto, ou sem dados → esconde hero e mostra blocos legados
     if (!_isV360() || !brands || !brands.length || !all.length) {
@@ -224,7 +245,9 @@
     if (!titleEl || !content) return;
 
     const brands = _selectedBrands();
-    const all = (window.allData || []);
+    // Matriz H2H também respeita filtros — wins refletem o recorte visível,
+    // alinhando com hero e pill do mapa ("L OREAL vence: X (Y%)").
+    const all = (window.filteredData && window.filteredData.length ? window.filteredData : window.allData) || [];
 
     if (!_isV360() || !brands || brands.length < 2 || !all.length) {
       card.style.display = 'none';
@@ -289,11 +312,11 @@
       html += `<div class="h2h-cell h2h-corner">Vence ↓<br>Perde →</div>`;
       brands.forEach(b => {
         const color = _getBrandColor(b);
-        html += `<div class="h2h-cell h2h-head" style="color:${color}"><span class="dot"></span>${_esc(_short(b))}</div>`;
+        html += `<div class="h2h-cell h2h-head" style="color:${color}" title="${_esc(b)}"><span class="dot"></span>${_esc(_short(b))}</div>`;
       });
       brands.forEach(rowB => {
         const rowColor = _getBrandColor(rowB);
-        html += `<div class="h2h-cell h2h-rowhead" style="color:${rowColor}"><span class="dot"></span>${_esc(_short(rowB))}</div>`;
+        html += `<div class="h2h-cell h2h-rowhead" style="color:${rowColor}" title="${_esc(rowB)}"><span class="dot"></span>${_esc(_short(rowB))}</div>`;
         brands.forEach(colB => {
           if (rowB === colB) {
             html += `<div class="h2h-cell h2h-data same"><span class="num">—</span></div>`;
