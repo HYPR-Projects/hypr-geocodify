@@ -937,16 +937,18 @@
   </div>
   </div><!-- /places-panel-body -->
 </div>
-      <!-- Lista view (geocoder/reverse) -->
-      <div id="geocoder-list-view" style="position:absolute;inset:0;background:var(--bg);z-index:50;padding:16px;display:none;overflow-y:auto;">
-        <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px;">
-          <div style="font-size:14px;font-weight:600;" id="list-title">Lista geocodificada</div>
-          <div style="font-size:11px;color:var(--text-muted);" id="list-count"></div>
+      <!-- Lista view (geocoder/reverse) — spatial floating card -->
+      <div id="geocoder-list-view">
+        <div class="geo-list-header">
+          <div class="geo-list-title" id="list-title">Lista geocodificada</div>
+          <div class="geo-list-count" id="list-count"></div>
         </div>
-        <table style="width:100%;border-collapse:collapse;font-size:12px;">
-          <thead><tr id="geocoder-thead" style="position:sticky;top:0;background:var(--bg);"></tr></thead>
-          <tbody id="geocoder-tbody"></tbody>
-        </table>
+        <div class="geo-list-body">
+          <table class="geo-list-table">
+            <thead><tr id="geocoder-thead"></tr></thead>
+            <tbody id="geocoder-tbody"></tbody>
+          </table>
+        </div>
       </div>
       <div id="map"></div>
 

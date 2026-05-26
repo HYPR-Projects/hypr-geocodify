@@ -3258,14 +3258,7 @@ function setMapView(view) {
 
   if (view === 'list') {
     if (listEl) {
-      listEl.style.display = 'block';
-      // Garantir que a lista está ACIMA do mapa (z-index)
-      listEl.style.zIndex = '50';
-      listEl.style.position = 'absolute';
-      listEl.style.inset = '0';
-      listEl.style.background = 'var(--bg)';
-      listEl.style.overflowY = 'auto';
-      listEl.style.padding = '16px';
+      listEl.classList.add('is-open');
     }
     // Places Discovery panel sits at z-index:500 and would overlap the list.
     // Remember its visibility and hide it while list is open.
@@ -3275,7 +3268,7 @@ function setMapView(view) {
     }
     renderGeocoderList();
   } else {
-    if (listEl) listEl.style.display = 'none';
+    if (listEl) listEl.classList.remove('is-open');
     // Restore places-panel when returning to the map.
     if (placesPanel && currentMapType === 'places_discovery' && placesPanel._wasVisibleBeforeList) {
       placesPanel.style.display = 'block';
