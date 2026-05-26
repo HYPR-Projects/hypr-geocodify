@@ -750,8 +750,14 @@ function _bindClusterDonutEvents() {
   // re-rodar queryRenderedFeatures + setLngLat a cada frame causa "flutuação"
   // porque supercluster pode fundir/desfundir clusters durante o gesto.
   // Reconciliamos apenas quando o usuário PARA de mover/zoomar.
-  var onGestureStart = function() {
+  //
+  // Dim (pointer-events:none) só durante gesto do USUÁRIO (drag/wheel/touch).
+  // Pular pra easeTo programático — senão o donut fica inclicável durante seu
+  // próprio zoom-in (400ms), bloqueando o usuário de drillar em sequência.
+  // MapLibre só seta e.originalEvent em camera changes iniciadas por DOM events.
+  var onGestureStart = function(e) {
     _hideClusterTooltip();
+    if (!e || !e.originalEvent) return;
     var c = map.getContainer(); if (c) c.classList.add('cluster-donuts-dim');
   };
   var onGestureEnd = function() {
