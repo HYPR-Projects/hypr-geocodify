@@ -6644,6 +6644,19 @@ async function saveMapToSupabase() {
     window._savedMapId = mapId;
     // Mostrar nome do mapa no header (substitui a antiga aparição do botão Compartilhar separado)
     try { setHeaderMapName(name); } catch(e) {}
+    // V360: hidratar concorrentes + marca base igual ao openSavedMap. Sem isto, o
+    // fluxo "criar mapa" terminava sem a barra de marca no header (e sem os pins de
+    // share renderizados com contexto V360) — só aparecia após um refresh manual,
+    // que caía no openSavedMap. Aqui espelhamos aquela sequência.
+    if (effectiveMapType === 'varejo360') {
+      // Registro recém-criado não tem base_brand ainda; zerar o meta cacheado
+      // força loadForMap a buscar/auto-detectar a marca dominante de allData.
+      window._savedMapMeta = null;
+      window._savedMapPayload = null;
+      try { await _loadCompetitorsAndWait(mapId, false); } catch(e) {}
+      try { populateFilters(); updatePanels(); updateOverlay(); } catch(e) {}
+      try { if (map && map.getSource && map.getSource('pdvs')) renderMarkers(); } catch(e) {}
+    }
     // Limpar estado pendente — auto-save já consumiu
     window._pendingMapName = null;
     window._pendingMapDesc = null;
@@ -6828,6 +6841,12 @@ async function initSharedMode() {
 
     // V360 Competitors: carrega ANTES de renderizar pra evitar flash Solo→Duelo
     window._currentOpenMapId = mapMeta.id;
+    // Hidratar o payload do mapa (igual ao openSavedMap). buildColorMap() e a
+    // barra de marca lêem window._savedMapPayload.base_brand_color pra pintar a
+    // marca base; sem isto o link compartilhado caía no fallback pickBrandColor()
+    // e ignorava a cor customizada salva.
+    window._savedMapMeta = mapMeta;
+    window._savedMapPayload = mapMeta.payload || null;
     if (mapMeta.map_type === 'varejo360') {
       try { await _loadCompetitorsAndWait(mapMeta.id, true); } catch(_) {}
     }
