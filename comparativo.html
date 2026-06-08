@@ -475,13 +475,19 @@ function parseFile(buf){
   // Read data from Dados sheet, or first sheet as fallback (CSV)
   var dataSheet=wb.Sheets['Dados']||wb.Sheets[wb.SheetNames[0]];
   if(!dataSheet)return{meta:meta,summary:null,bandeiras:[]};
-  var dados=XLSX.utils.sheet_to_json(dataSheet),sum=dados.find(function(r){return r.bandeira==='TODAS AS BANDEIRAS FILTRADAS';}),band=dados.filter(function(r){return r.bandeira!=='TODAS AS BANDEIRAS FILTRADAS';});
-  // Detect dimension: marca vs fornecedor
+  var dados=XLSX.utils.sheet_to_json(dataSheet);
+  // Auto-detect row-key column + totalizer row (bandeira, cnpj, fornecedor, rede, pdv...)
+  var dimKey='bandeira',sumText='TODAS AS BANDEIRAS FILTRADAS',totRe=/^TOD[OA]S\b[\s\S]*FILTRAD[OA]S$/i,found=false;
+  for(var di=0;di<dados.length&&!found;di++){for(var dk in dados[di]){var dv=dados[di][dk];if(typeof dv==='string'&&totRe.test(dv.trim())){dimKey=dk;sumText=dv.trim();found=true;break;}}}
+  if(!found&&dados.length){var hdr0=Object.keys(dados[0]),pref=['bandeira','cnpj','fornecedor','rede','pdv','nome'];sumText=null;for(var pi=0;pi<pref.length;pi++){if(hdr0.indexOf(pref[pi])!==-1){dimKey=pref[pi];break;}}}
+  var sum=sumText!=null?dados.find(function(r){return String(r[dimKey]).trim()===sumText;}):null,
+      band=dados.filter(function(r){return sumText==null||String(r[dimKey]).trim()!==sumText;});
+  // Detect share dimension: marca vs fornecedor
   var shareKey='percentual_marca_dimensao';
   if(sum&&sum.percentual_marca_dimensao==null&&sum.percentual_fornecedor_dimensao!=null){
     shareKey='percentual_fornecedor_dimensao';meta.dimensao='fornecedor';
   }
-  return{meta:meta,summary:sum?{shareMarca:sum[shareKey]!=null?+sum[shareKey]:null,tickets:sum.tickets_amostra}:null,bandeiras:band.map(function(b){return{bandeira:b.bandeira,percDim:b.percentual_dimensao!=null?+b.percentual_dimensao:null,shareMarca:b[shareKey]!=null?+b[shareKey]:null,tickets:b.tickets_amostra};})};
+  return{meta:meta,summary:sum?{shareMarca:sum[shareKey]!=null?+sum[shareKey]:null,tickets:sum.tickets_amostra}:null,bandeiras:band.map(function(b){return{bandeira:b[dimKey],percDim:b.percentual_dimensao!=null?+b.percentual_dimensao:null,shareMarca:b[shareKey]!=null?+b[shareKey]:null,tickets:b.tickets_amostra};})};
 }
 
 // ─── Month picker (chip grid) ───────────────────────────────────────────────
