@@ -3414,6 +3414,11 @@ function setMapView(view) {
 
   if (view === 'list') {
     if (listEl) {
+      // showGallery deixa display:none INLINE no elemento (style inline vence
+      // a classe .is-open do stylesheet). Sem limpar aqui, a sequência
+      // galeria → abrir mapa → Lista ativava o botão mas o painel ficava
+      // invisível.
+      listEl.style.display = '';
       listEl.classList.add('is-open');
     }
     // Places Discovery panel sits at z-index:500 and would overlap the list.
@@ -5470,7 +5475,9 @@ function showGallery() {
   rawCSVData = [];
   currentView = 'map';
   const listEl = document.getElementById('geocoder-list-view');
-  if (listEl) listEl.style.display = 'none';
+  // Esconder via remoção da classe (base CSS é display:none) — display:none
+  // INLINE aqui era o que deixava a lista invisível ao reabrir um mapa.
+  if (listEl) { listEl.classList.remove('is-open'); listEl.style.display = ''; }
   const vtBtns = document.getElementById('view-toggle-btns');
   if (vtBtns) vtBtns.style.display = 'none';
   // Resetar modo visual
