@@ -1387,6 +1387,10 @@ input[type="range"]:hover::-webkit-slider-thumb {
   color: var(--accent-light); margin-bottom: 6px;
 }
 .popup-address { font-size: 13px; color: var(--text); line-height: 1.5; font-weight: 500; }
+.popup-meta { margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--border); display: flex; flex-direction: column; gap: 3px; }
+.popup-meta-row { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; font-size: 10.5px; line-height: 1.4; }
+.popup-meta-k { color: var(--text-muted); white-space: nowrap; flex-shrink: 0; }
+.popup-meta-v { color: var(--text); text-align: right; word-break: break-word; min-width: 0; }
 .popup-fantasia {
   font-size: 11px; color: var(--text-dim); margin-top: 2px;
   text-transform: uppercase; letter-spacing: 0.4px;
