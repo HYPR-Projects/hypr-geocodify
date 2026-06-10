@@ -1145,6 +1145,14 @@ function _positionTooltipNearEl(tooltipEl, anchorEl) {
 }
 
 function _setupMapInteractions() {
+  // Idempotência: handlers de layer (map.on com layerId) e o mousedown no
+  // canvas SOBREVIVEM ao setStyle — re-chamar esta função a cada troca de
+  // tema/estilo/fallback de tile empilhava sets duplicados de handlers
+  // (N popups por clique, N easeTo por cluster). Flag no próprio objeto map:
+  // se o mapa for recriado, o flag morre junto e os bindings refazem.
+  if (map._hyprInteractionsBound) return;
+  map._hyprInteractionsBound = true;
+
   // Expandir cluster ao clicar — ou selecionar leaves se Cmd/Ctrl+click (V360)
   map.on('click', 'clusters', (e) => {
     const features = map.queryRenderedFeatures(e.point, { layers: ['clusters'] });
@@ -2520,7 +2528,17 @@ function updatePanels() {
   if (_panelRafId) cancelAnimationFrame(_panelRafId);
   _panelRafId = requestAnimationFrame(() => {
     updateHeader();
-    updateOverview();
+    // Quando body[data-v360-panel="active"], TODAS as seções que o
+    // updateOverview alimenta (mini-stats, ov-share, ov-dist, ov-sharetype,
+    // ov-bandeiras) estão escondidas via CSS — pular evita ~10 passadas no
+    // array + 3 charts reconstruídos em DOM invisível a cada filtro.
+    // Hash zerado no skip: na transição Categoria→Solo o próximo
+    // updatePanels re-renderiza tudo do zero.
+    if (document.body.getAttribute('data-v360-panel') === 'active') {
+      _lastFilteredHash = '';
+    } else {
+      updateOverview();
+    }
     // Atualizar ranking e análise com pequeno delay para priorizar o mapa
     setTimeout(() => { updateRanking(); updateAnalysis(); }, 50);
     _panelRafId = null;
@@ -2586,12 +2604,16 @@ function updateOverview() {
   updateBandeiraChartChip(activeBand);
 
   // Chart: distribuição de share — bins fixos (em decimal: 0.02 = 2%)
+  // Passada ÚNICA: o map+filter anterior varria filteredData 8x (1x por bin).
   var bins = [0, 0.02, 0.05, 0.10, 0.15, 0.20, 0.30, 0.50, 1.00];
   var distLabels = bins.slice(0,-1).map(function(v,i) { return Math.round(v*100) + '–' + Math.round(bins[i+1]*100) + '%'; });
-  var distCounts = bins.slice(0,-1).map(function(v,i) { return filteredData.filter(function(r) {
-    var s = parseFloat(r.share_reais_sku_dimensao||0);
-    return s >= v && s < bins[i+1];
-  }).length; });
+  var distCounts = new Array(bins.length - 1).fill(0);
+  for (var di = 0; di < filteredData.length; di++) {
+    var dshare = parseFloat(filteredData[di].share_reais_sku_dimensao || 0);
+    for (var bj = 0; bj < bins.length - 1; bj++) {
+      if (dshare >= bins[bj] && dshare < bins[bj+1]) { distCounts[bj]++; break; }
+    }
+  }
   // Detecta bin ativo
   var activeBinIdx = -1;
   if (_activeShareBucket) {
@@ -3342,7 +3364,7 @@ function downloadTemplate(e) {
   tpl.rows.forEach(function(row) {
     csvRows.push(row.map(function(v) { return '"' + String(v).replace(/"/g, '""') + '"'; }).join(','));
   });
-  var blob = new Blob([csvRows.join('\r\n')], { type: 'text/csv;charset=utf-8;' });
+  var blob = new Blob(['\uFEFF' + csvRows.join('\r\n')], { type: 'text/csv;charset=utf-8;' });
   var url = URL.createObjectURL(blob);
   var a = document.createElement('a');
   a.href = url; a.download = tpl.filename; a.click();
@@ -3412,6 +3434,18 @@ function setMapView(view) {
   }
 }
 
+// Resolve o valor de uma coluna da lista/export com fallback: mapas salvos
+// não persistem input_lat/input_lon (só existem na sessão de geocoding), então
+// ao reabrir um mapa salvo essas colunas caem para lat/lon — a coordenada é a
+// mesma, só muda a origem do dado.
+function _colValue(r, c) {
+  var v = r[c];
+  if (v != null && v !== '') return v;
+  if (c === 'input_lat') return r.lat;
+  if (c === 'input_lon') return r.lon;
+  return v;
+}
+
 function renderGeocoderList() {
   const thead = document.getElementById('geocoder-thead');
   const tbody = document.getElementById('geocoder-tbody');
@@ -3474,7 +3508,8 @@ function renderGeocoderList() {
           var display = inputName ? inputName + (inputAddr ? ' — ' + inputAddr : '') : inputAddr;
           return `<td style="padding:7px 10px;color:${isFail ? 'var(--lose)' : 'var(--text-dim)'};font-size:12px;" title="${display ? _escForHtml(display) : ''}">${display ? _escForHtml(String(display).slice(0,80)) : '—'}</td>`;
         }
-        return `<td style="padding:7px 10px;color:${isFail ? 'var(--lose)' : 'var(--text-dim)'};font-size:12px;">${r[c] != null && r[c] !== '' ? _escForHtml(String(r[c]).slice(0,60)) : '—'}</td>`;
+        const cv = _colValue(r, c);
+        return `<td style="padding:7px 10px;color:${isFail ? 'var(--lose)' : 'var(--text-dim)'};font-size:12px;">${cv != null && cv !== '' ? _escForHtml(String(cv).slice(0,60)) : '—'}</td>`;
       }).join('')}
     </tr>`;
   }).join('');
@@ -3525,9 +3560,12 @@ function downloadGeocoderCSV() {
     if (c === '_share_unidades') return esc(fmtPct(r.share_unidades_sku_dimensao));
     if (c === '_diff_media')  return esc(fmtPp(r.percentual_diff_media_dimensao));
     if (c === '_performance') return esc(classifyPerformance(r));
-    return esc(r[c]);
+    return esc(_colValue(r, c));
   }).join(','))];
-  const blob = new Blob([rows.join('\r\n')], { type: 'text/csv;charset=utf-8;' });
+  // BOM UTF-8: sem ele o Excel (especialmente no Mac) abre o CSV assumindo
+  // encoding legado e quebra acentos ("São" → "S√£o"). O parseCSV já remove
+  // o BOM no re-upload, então o round-trip é seguro.
+  const blob = new Blob(['\uFEFF' + rows.join('\r\n')], { type: 'text/csv;charset=utf-8;' });
   const url  = URL.createObjectURL(blob);
   const a    = Object.assign(document.createElement('a'), { href: url, download: `geocodify_${currentMapType}_${Date.now()}.csv` });
   a.click();
