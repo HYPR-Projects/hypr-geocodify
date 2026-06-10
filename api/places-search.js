@@ -1,6 +1,14 @@
 // Vercel Serverless Function — Google Places API (New) proxy
 // Adaptado da Netlify Function original. Mesma lógica, formato Vercel.
-// Actions: textSearch (IDs grátis) e details (Pro SKU)
+// Actions:
+//   textSearch — Text Search Pro SKU ($32/1000 requisições, até 20 places por
+//     página). Retorna nome, endereço, coords e types direto na busca — sem
+//     necessidade de Place Details subsequente. Modelo migrado do antigo
+//     "IDs-Only grátis + Details Pro $0.017/place", que custava ~10x mais em
+//     buscas exploratórias porque pagava Details por place ANTES do filtro
+//     por nome no front (ex.: 10.605 places detalhados, 127 usados).
+//   details — Place Details Pro SKU ($17/1000). Mantido para retry de sessões
+//     antigas e como fallback; o fluxo principal de Discovery não o usa mais.
 
 const API_KEY = process.env.GOOGLE_PLACES_API_KEY;
 
@@ -67,7 +75,13 @@ export default async function handler(req, res) {
   }
 }
 
-// ─── Text Search (IDs Only) — FREE ──────────────────────────────────────────
+// ─── Text Search Pro ────────────────────────────────────────────────────────
+// Field mask requests displayName/formattedAddress/location/types, which
+// triggers the Text Search Pro SKU ($32/1000 requests). Each request returns
+// up to 20 complete places — name filtering happens on the client at zero
+// cost, instead of paying Place Details Pro ($0.017/place) for every ID
+// before filtering. Results are upserted to places_cache (fire-and-forget)
+// so the proprietary base keeps growing at no extra cost.
 async function handleTextSearch(body) {
   const { query, lat, lon, radius, bbox, pageToken } = body;
 
@@ -120,7 +134,9 @@ async function handleTextSearch(body) {
     headers: {
       'Content-Type': 'application/json',
       'X-Goog-Api-Key': API_KEY,
-      'X-Goog-FieldMask': 'places.id',
+      // Pro-tier mask: id + displayName + formattedAddress + location + types.
+      // nextPageToken is an Essentials field — including it does not raise the SKU.
+      'X-Goog-FieldMask': 'places.id,places.displayName,places.formattedAddress,places.location,places.types,nextPageToken',
     },
     body: JSON.stringify(payload),
   });
@@ -132,8 +148,47 @@ async function handleTextSearch(body) {
     throw new Error(data.error?.message || 'Google API error');
   }
 
+  const places = (data.places || []).map(p => ({
+    place_id: p.id,
+    name: p.displayName?.text || (p.formattedAddress || '').split(',')[0] || '',
+    address: p.formattedAddress || '',
+    lat: p.location?.latitude ?? null,
+    lon: p.location?.longitude ?? null,
+    types: p.types || [],
+    status: '',
+  }));
+
+  // Upsert to places_cache (fire-and-forget). The data is already paid for by
+  // the Text Search Pro request — persisting it keeps the proprietary base
+  // growing and keeps the details/expand flows cheap.
+  const cacheEntries = places
+    .filter(p => p.place_id && p.lat != null && p.lon != null)
+    .map(p => ({
+      place_id: p.place_id,
+      name: p.name || null,
+      address: p.address || null,
+      lat: p.lat,
+      lon: p.lon,
+      types: (Array.isArray(p.types) && p.types.length) ? p.types : null,
+      refreshed_at: new Date().toISOString(),
+    }));
+  if (cacheEntries.length > 0) {
+    fetch(`${SUPABASE_URL}/rest/v1/places_cache`, {
+      method: 'POST',
+      headers: {
+        'apikey': SUPABASE_KEY,
+        'Authorization': `Bearer ${SUPABASE_KEY}`,
+        'Content-Type': 'application/json',
+        'Prefer': 'resolution=merge-duplicates,return=minimal',
+      },
+      body: JSON.stringify(cacheEntries),
+    }).catch(() => {});
+  }
+
   return {
-    placeIds: (data.places || []).map(p => p.id),
+    places,
+    // Kept for backward compatibility with any client still reading IDs.
+    placeIds: places.map(p => p.place_id),
     nextPageToken: data.nextPageToken || null,
   };
 }

@@ -7622,41 +7622,8 @@ function matchesNameFilter(placeName, tokens) {
   return true;
 }
 
-// ─── Phase 1.5: Bulk cache lookup helpers ────────────────────────────────
-// Read places_cache directly from Supabase before invoking the serverless
-// proxy. The proxy still runs its own cache check as defense-in-depth, so
-// any failure here degrades gracefully — we just lose the optimization
-// for that request, never break the flow.
-async function bulkCacheLookup(placeIds) {
-  var hits = new Map();
-  if (!placeIds || !placeIds.length) return hits;
-  // URL safety: each place_id ~30 chars + comma. 200 IDs ~6.4k — well below
-  // typical 8-16k URL limits at proxies/CDNs. Chunk to be safe.
-  var CHUNK = 200;
-  for (var i = 0; i < placeIds.length; i += CHUNK) {
-    var slice = placeIds.slice(i, i + CHUNK);
-    var idList = slice.map(encodeURIComponent).join(',');
-    var url = SUPABASE_URL + '/rest/v1/places_cache?place_id=in.(' + idList + ')&select=place_id,name,address,lat,lon,types';
-    try {
-      var resp = await fetch(url, {
-        headers: { 'apikey': SUPABASE_ANON, 'Accept': 'application/json' },
-        signal: AbortSignal.timeout(4000)
-      });
-      if (!resp.ok) continue;
-      var rows = await resp.json();
-      for (var r = 0; r < rows.length; r++) {
-        var row = rows[r];
-        if (row && row.place_id) hits.set(row.place_id, row);
-      }
-    } catch (e) {
-      // Network error / timeout — proxy cache check covers as fallback.
-      console.warn('[bulk-cache] chunk failed:', e && e.message);
-    }
-  }
-  return hits;
-}
-
-// Apply the same filters Phase 2 applies before pushing a place to allData.
+// Apply discovery filters (radius/UF/strict name) before pushing a place to
+// allData. Used by ingestPlaces() on Text Search Pro results.
 // Returns { accepted, reason } where reason ∈ 'coords'|'radius'|'uf'|'name'|null.
 // Caller decides how to increment counters based on reason.
 function applyCachedPlaceFilters(row, allowedUFs, pinCircles, strictName, nameTokens) {
@@ -8253,8 +8220,9 @@ async function startDeepSearch() {
       }
     });
   });
-  // Confirmation with cost estimate. Place Details Pro = $0.017/req; cache hit
-  // rate is unknown at this point so we present an upper bound only.
+  // Confirmation with cost estimate. Text Search Pro = $0.032/request (page of
+  // up to 20 places); each sub-search runs at most 3 pages. Cost no longer
+  // scales with the number of places found — only with sub-search count.
   var totalCalls = subAreas.length;
   // Empirical per-pin yields (SP centro, parent radius 20km, single query):
   //   3x3 → ~180, 5x5 → ~470, 7x7 → ~830, 9x9 → ~1350 unique IDs
@@ -8263,7 +8231,9 @@ async function startDeepSearch() {
   var basePerPin = preset.estPerPin;
   var multiQueryBonus = hasVariations ? 1 + 0.4 * (queryVariations.length - 1) : 1;
   var estimateNewPlaces = Math.round(basePerPin * multiQueryBonus * sourcePins.length);
-  var estimateMaxCostUSD = (estimateNewPlaces * 0.017).toFixed(2);
+  var TEXT_SEARCH_PRO_COST_USD = 0.032; // per request (page of up to 20 places)
+  var MAX_PAGES_PER_SEARCH = 3;
+  var estimateMaxCostUSD = (totalCalls * MAX_PAGES_PER_SEARCH * TEXT_SEARCH_PRO_COST_USD).toFixed(2);
   var msg = 'Aprofundar busca\n\n';
   msg += '• Profundidade: ' + preset.label + ' (grid ' + gridN + 'x' + gridN + ', ' + (gridN * gridN) + ' sub-pins por pin)\n';
   msg += '• Pins originais: ' + sourcePins.length + '\n';
@@ -8272,8 +8242,8 @@ async function startDeepSearch() {
   }
   msg += '• Sub-buscas totais: ' + totalCalls + '\n';
   msg += '• Estimativa: ~' + estimateNewPlaces + ' places novos\n';
-  msg += '• Custo máximo estimado: ~$' + estimateMaxCostUSD + ' (Place Details $0.017/req)\n';
-  msg += '• Custo real costuma ser bem menor pelo cache permanente\n\n';
+  msg += '• Custo máximo estimado: ~$' + estimateMaxCostUSD + ' (Text Search Pro $0,032/pág, até ' + MAX_PAGES_PER_SEARCH + ' págs por sub-busca)\n';
+  msg += '• Custo real costuma ser menor: nem toda sub-área rende 3 páginas\n\n';
   msg += 'Continuar?';
   if (!confirm(msg)) return;
   // Wire append mode and inject sub-grid. _deepSearchSubAreas is consumed by
@@ -8341,7 +8311,7 @@ async function startPlacesDiscovery() {
   window._unloadHandler = function(e) { if (geocodingActive) { e.preventDefault(); return e.returnValue = 'Busca em andamento.'; } };
   window.addEventListener('beforeunload', window._unloadHandler);
   
-  // Build set of existing place_ids to skip in Phase 2 (saves API credits)
+  // Build set of existing place_ids so append mode skips places already on the map
   var seenIds = {};
   var existingCount = 0;
   if (_appendMode) {
@@ -8350,8 +8320,8 @@ async function startPlacesDiscovery() {
   var found = 0, errors = 0, filtered = 0, skippedDupes = 0;
   var filteredByRadius = 0; // Pin mode: places returned outside the requested radius
   var filteredByName = 0; // Opt-in: places whose name didn't match the query tokens
-  // places_cache transparency counters (aggregated from proxy responses during Phase 2)
-  var cacheHits = 0, apiFetched = 0;
+  // apiFetched = unique places returned by the paid Text Search Pro requests.
+  var apiFetched = 0;
   var startTime = Date.now(), allPlaceIds = [];
   // Store allowed UFs for Phase 2 filtering (only for city/state mode)
   var allowedUFs = null;
@@ -8377,6 +8347,47 @@ async function startPlacesDiscovery() {
   if (strictName && !nameTokens.length) strictName = false;
   window._strictNameTokens = nameTokens;
 
+  // Text Search Pro returns complete places (name/address/coords/types) in the
+  // search response itself. Ingest = dedupe by place_id + apply all filters
+  // (radius/UF/strictName) immediately + push straight to allData. This
+  // replaces the old Phase 1.5 (cache hydration) and Phase 2 (Details Pro
+  // enrichment) — there is no longer a paid per-place Details step.
+  function ingestPlaces(places) {
+    var added = 0;
+    for (var pi = 0; pi < places.length; pi++) {
+      var p = places[pi];
+      if (!p || !p.place_id) continue;
+      if (seenIds[p.place_id]) { skippedDupes++; continue; }
+      seenIds[p.place_id] = true;
+      allPlaceIds.push(p.place_id);
+      apiFetched++;
+      var fr = applyCachedPlaceFilters(
+        { name: p.name, address: p.address, lat: p.lat, lon: p.lon, types: p.types },
+        allowedUFs, pinCircles, strictName, nameTokens
+      );
+      if (!fr.accepted) {
+        if (fr.reason === 'radius') filteredByRadius++;
+        else if (fr.reason === 'name') filteredByName++;
+        else if (fr.reason === 'uf') filtered++;
+        // 'coords' = silently skipped (no usable lat/lon)
+        continue;
+      }
+      var typesArr = Array.isArray(p.types) ? p.types : [];
+      allData.push({
+        nome: p.name || '',
+        bandeira: p.name || '',
+        geo_address: p.address || '',
+        lat: p.lat, lon: p.lon,
+        place_id: p.place_id,
+        place_types: typesArr.slice(0, 3).join(', '),
+        place_status: p.status || '',
+        _mapId: allData.length
+      });
+      found++; added++;
+    }
+    return added;
+  }
+
   if (searchConfig.mode === 'pin') {
     // PIN MODE: search each pin area
     var areas = searchConfig.areas;
@@ -8392,7 +8403,7 @@ async function startPlacesDiscovery() {
         try {
           var resp = await fetch('/api/places-search', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ action:'textSearch', query: areaQuery, lat:area.lat, lon:area.lon, radius:area.radiusM, pageToken:pageToken }) });
           var data = await resp.json();
-          if (resp.ok && data.placeIds) { for (var pi=0;pi<data.placeIds.length;pi++) { var pid=data.placeIds[pi]; if(!seenIds[pid]){seenIds[pid]=true;allPlaceIds.push(pid);}else{skippedDupes++;} } pageToken=data.nextPageToken; }
+          if (resp.ok && data.places) { ingestPlaces(data.places); pageToken=data.nextPageToken; }
           else {
             console.error('[places-search] textSearch failed (pin mode)', { status: resp.status, error: data && data.error, query: areaQuery, area: area });
             _placesApiErrors.push({ status: resp.status, error: (data && data.error) || 'unknown', phase: 'textSearch', mode: 'pin' });
@@ -8405,12 +8416,14 @@ async function startPlacesDiscovery() {
         }
         pages++;
       } while (pageToken && pages < 3 && !_placesDiscoveryCancelled);
-      var pv = Math.round((ai+1)/total*50);
+      var pv = Math.round((ai+1)/total*100);
       document.getElementById('geo-fill').style.width = pv+'%';
       document.getElementById('geo-pct').textContent = pv+'%';
-      document.getElementById('geo-ok').textContent = allPlaceIds.length+' novos';
+      document.getElementById('geo-ok').textContent = found+' \u2713';
       var dupLabel = _appendMode ? ' já no mapa' : ' dup';
-      document.getElementById('geo-current').textContent = 'Buscando: '+(ai+1)+'/'+total+' · '+allPlaceIds.length+' novos' + (skippedDupes > 0 ? ' · ' + skippedDupes + dupLabel : '');
+      document.getElementById('geo-current').textContent = 'Buscando: '+(ai+1)+'/'+total+' · '+found+' válidos de '+allPlaceIds.length + (skippedDupes > 0 ? ' · ' + skippedDupes + dupLabel : '');
+      // Progressive render so the map populates as areas complete
+      if (found > 0) { filteredData = allData.slice(); renderMarkers(); }
       await new Promise(function(r){setTimeout(r,50);});
     }
   } else {
@@ -8441,8 +8454,8 @@ async function startPlacesDiscovery() {
           try {
             var resp = await fetch('/api/places-search', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(searchBody) });
             var data = await resp.json();
-            if (resp.ok && data.placeIds) {
-              for (var pi=0;pi<data.placeIds.length;pi++) { var pid=data.placeIds[pi]; if(!seenIds[pid]){seenIds[pid]=true;allPlaceIds.push(pid);}else{skippedDupes++;} }
+            if (resp.ok && data.places) {
+              ingestPlaces(data.places);
               pageToken=data.nextPageToken; success=true;
             } else if (resp.status === 429 && attempt === 0) {
               await new Promise(function(r){setTimeout(r,1000);}); // Wait 1s and retry
@@ -8463,12 +8476,13 @@ async function startPlacesDiscovery() {
         pages++;
       } while (pageToken && pages < 3 && !_placesDiscoveryCancelled);
       completed++;
-      var pv = Math.round(completed/total*50);
+      var pv = Math.round(completed/total*100);
       document.getElementById('geo-fill').style.width = pv+'%';
       document.getElementById('geo-pct').textContent = pv+'%';
-      document.getElementById('geo-ok').textContent = allPlaceIds.length+' novos';
+      document.getElementById('geo-ok').textContent = found+' \u2713';
       var dupLabel = _appendMode ? ' já no mapa' : ' dup';
-      document.getElementById('geo-current').textContent = task.label+'/'+task.uf+' ('+completed+'/'+total+') · '+allPlaceIds.length+' novos' + (skippedDupes > 0 ? ' · ' + skippedDupes + dupLabel : '');
+      document.getElementById('geo-current').textContent = task.label+'/'+task.uf+' ('+completed+'/'+total+') · '+found+' válidos de '+allPlaceIds.length + (skippedDupes > 0 ? ' · ' + skippedDupes + dupLabel : '');
+      if (found > 0 && completed % 4 === 0) { filteredData = allData.slice(); renderMarkers(); }
     }
     
     // Process tasks in parallel batches of CONCURRENCY
@@ -8481,180 +8495,18 @@ async function startPlacesDiscovery() {
 
   if (_placesDiscoveryCancelled) { finishPlacesDiscovery(); return; }
 
-  // Phase 1.5: Bulk cache hydration
-  // Query places_cache once for all collected IDs. Hits are pushed to allData
-  // immediately (after applying the same filters Phase 2 applies), and only
-  // misses proceed to the serverless proxy. Reduces proxy invocations and
-  // round-trips drastically when cache hit rate is high.
-  // Failure modes (network, timeout, partial chunks) degrade gracefully —
-  // the proxy retains its own cache check as defense-in-depth.
-  if (allPlaceIds.length > 0) {
-    document.getElementById('geo-current').textContent = 'Verificando cache (' + allPlaceIds.length + ' places)...';
-    try {
-      var cacheMap = await bulkCacheLookup(allPlaceIds);
-      if (cacheMap.size > 0) {
-        var remaining = [];
-        var bulkCacheHydrated = 0;
-        for (var ip = 0; ip < allPlaceIds.length; ip++) {
-          var pid = allPlaceIds[ip];
-          var row = cacheMap.get(pid);
-          if (!row) { remaining.push(pid); continue; }
-          var fr = applyCachedPlaceFilters(row, allowedUFs, pinCircles, strictName, nameTokens);
-          if (!fr.accepted) {
-            if (fr.reason === 'radius') filteredByRadius++;
-            else if (fr.reason === 'name') filteredByName++;
-            else if (fr.reason === 'uf') filtered++;
-            // 'coords' = silently skipped (corrupt cache row); proxy would also skip
-            continue;
-          }
-          var typesArr = Array.isArray(row.types) ? row.types : [];
-          allData.push({
-            nome: row.name || '',
-            bandeira: row.name || '',
-            geo_address: row.address || '',
-            lat: row.lat, lon: row.lon,
-            place_id: row.place_id,
-            place_types: typesArr.slice(0, 3).join(', '),
-            place_status: '',
-            _mapId: allData.length
-          });
-          found++;
-          bulkCacheHydrated++;
-        }
-        allPlaceIds = remaining;
-        cacheHits += bulkCacheHydrated;
-        // Reflect bulk hits in the UI immediately so the user sees progress
-        // before Phase 2 even starts.
-        var cacheChipBulk = document.getElementById('geo-cache');
-        if (cacheChipBulk && cacheHits > 0) {
-          cacheChipBulk.style.display = '';
-          cacheChipBulk.textContent = '\ud83d\udcbe ' + cacheHits;
-        }
-        // Render cached pins early so the map populates progressively
-        if (bulkCacheHydrated > 0) { filteredData = allData.slice(); renderMarkers(); }
-      }
-    } catch (e) {
-      console.warn('[bulk-cache] lookup failed, falling back to proxy-only:', e && e.message);
-    }
-  }
-
-  if (_placesDiscoveryCancelled) { finishPlacesDiscovery(); return; }
-
-  // Phase 2: Enrich with Details — controlled pace to avoid rate limiting
-  document.getElementById('geo-current').textContent = 'Enriquecendo '+allPlaceIds.length+' places...';
-  var BATCH = 10, enriched = 0;
-  var failedIds = [];
-  var filtered = 0; // Collect failed IDs for retry
-  
-  async function enrichBatch(batch) {
-    try {
-      var resp2 = await fetch('/api/places-search', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ action:'details', placeIds:batch }) });
-      var data2 = await resp2.json();
-      if (resp2.ok && data2.places) {
-        // Aggregate cache transparency counters from proxy (places_cache hits vs Google API fetches)
-        if (typeof data2.cached === 'number') cacheHits += data2.cached;
-        if (typeof data2.fetched === 'number') apiFetched += data2.fetched;
-        // Track which IDs were successfully returned
-        var returnedIds = {};
-        for (var ri=0;ri<data2.places.length;ri++) {
-          var p=data2.places[ri]; 
-          if (p.place_id) returnedIds[p.place_id] = true;
-          if(!p.lat||!p.lon)continue;
-          // Pin mode: discard places that fell outside the requested radius
-          // (locationRestriction on the API already prevents this, but Google
-          // occasionally places a pin just outside the circle — this is the safety net).
-          if (pinCircles && !isInsideAnyPinCircle(p.lat, p.lon, pinCircles)) {
-            filteredByRadius++;
-            continue;
-          }
-          // Geographic filter: respect selected states, reject non-Brazil
-          if (allowedUFs) {
-            var addr = p.address || '';
-            // LAYER 1: Must be in Brazil
-            if (addr.indexOf('Brazil') === -1 && addr.indexOf('Brasil') === -1) { filtered++; continue; }
-            // LAYER 2: Extract UF from address (3 patterns + State of mapping)
-            var placeUF = null;
-            var m1 = addr.match(/- ([A-Z]{2}),/);
-            if (m1) placeUF = m1[1];
-            if (!placeUF) { var m2 = addr.match(/, ([A-Z]{2}),/); if (m2) placeUF = m2[1]; }
-            if (!placeUF) {
-              var _sn = STATE_NAME_TO_UF;
-              var m3 = addr.match(/State of ([^,]+)/);
-              if (m3 && _sn[m3[1]]) placeUF = _sn[m3[1]];
-            }
-            // LAYER 3: Check UF against allowed list
-            if (placeUF && !allowedUFs[placeUF]) { filtered++; continue; }
-            // LAYER 4: If no UF extracted and not full-Brasil mode, discard (can't verify)
-            if (!placeUF && Object.keys(allowedUFs).length < 27) { filtered++; continue; }
-          }
-          // Opt-in strict name filter (all meaningful tokens from the query must appear in the name).
-          if (strictName && !matchesNameFilter(p.name, nameTokens)) {
-            filteredByName++;
-            continue;
-          }
-          allData.push({ nome:p.name, bandeira:p.name, geo_address:p.address, lat:p.lat, lon:p.lon, place_id:p.place_id, place_types:(p.types||[]).slice(0,3).join(', '), place_status:p.status||'', _mapId:allData.length }); found++;
-        }
-        // IDs that were sent but not returned = failed (rate limited or error)
-        for (var fi=0;fi<batch.length;fi++) {
-          if (!returnedIds[batch[fi]]) failedIds.push(batch[fi]);
-        }
-      } else {
-        // Entire batch failed — add all to retry
-        console.error('[places-search] details batch failed (Phase 2)', { status: resp2.status, error: data2 && data2.error, batchSize: batch.length });
-        _placesApiErrors.push({ status: resp2.status, error: (data2 && data2.error) || 'unknown', phase: 'details', mode: 'enrich' });
-        for (var fi=0;fi<batch.length;fi++) failedIds.push(batch[fi]);
-        errors++;
-      }
-    } catch(e) {
-      console.error('[places-search] details network error (Phase 2)', e, { batchSize: batch.length });
-      _placesApiErrors.push({ status: 0, error: (e && e.message) || 'network', phase: 'details', mode: 'enrich' });
-      for (var fi=0;fi<batch.length;fi++) failedIds.push(batch[fi]);
-      errors++;
-    }
-    enriched += batch.length;
-  }
-  
-  // Process sequentially with 2 concurrent batches and delay between rounds
-  for (var bi = 0; bi < allPlaceIds.length; bi += BATCH * 2) {
-    if (_placesDiscoveryCancelled) break;
-    var parallelBatches = [];
-    for (var pb = 0; pb < 2; pb++) {
-      var start = bi + pb * BATCH;
-      if (start >= allPlaceIds.length) break;
-      parallelBatches.push(allPlaceIds.slice(start, start + BATCH));
-    }
-    await Promise.all(parallelBatches.map(enrichBatch));
-    await new Promise(function(r){setTimeout(r,250);});
-    // Segmented progress: Phase 1 (geo-fill) locked at 50%, Phase 2 splits cache vs API.
-    // Total = 50% + proportional cache and API contributions based on allPlaceIds.length.
-    var total2 = allPlaceIds.length || 1;
-    var cachePct = 50 * (cacheHits / total2);
-    var apiPct = 50 * (apiFetched / total2);
-    document.getElementById('geo-fill').style.width = '50%';
-    document.getElementById('geo-fill-cache').style.width = cachePct + '%';
-    document.getElementById('geo-fill-api').style.width = apiPct + '%';
-    var totalPct = Math.min(Math.round(50 + cachePct + apiPct), 99);
-    document.getElementById('geo-pct').textContent = totalPct+'%';
-    document.getElementById('geo-ok').textContent = found+' \u2713';
-    document.getElementById('geo-fail').textContent = failedIds.length>0?failedIds.length+' pendentes':'';
-    // Show cache chip once we have any hits
-    var cacheChipEl2 = document.getElementById('geo-cache');
-    if (cacheChipEl2) {
-      if (cacheHits > 0) { cacheChipEl2.style.display = ''; cacheChipEl2.textContent = '💾 ' + cacheHits; }
-      else { cacheChipEl2.style.display = 'none'; }
-    }
-    document.getElementById('geo-current').textContent = 'Detalhes: '+enriched+'/'+allPlaceIds.length+' \u00b7 \ud83d\udcbe '+cacheHits+' cache \u00b7 \ud83c\udf10 '+apiFetched+' API \u00b7 \u2713 '+found+' novos' + (failedIds.length > 0 ? ' \u00b7 ' + failedIds.length + ' retry' : '');
-    if (enriched%60===0||enriched>=allPlaceIds.length) { filteredData=allData.slice(); renderMarkers(); }
-    var elapsed=Date.now()-startTime, rate=enriched/(elapsed/1000), remaining=allPlaceIds.length-enriched;
-    var eta=remaining>0&&rate>0?Math.round(remaining/rate):0;
-    document.getElementById('geo-eta').textContent = eta>0?'~'+eta+'s':'';
-    await new Promise(function(r){setTimeout(r,200);});
-  }
-  
-  // Store failed IDs for optional retry later
-  window._pendingRetryIds = failedIds.length > 0 ? failedIds.slice() : [];
-  // Store search stats for finish screen
-  window._lastSearchStats = { newIds: allPlaceIds.length, skippedDupes: skippedDupes, found: found, errors: errors, existingCount: existingCount, filtered: filtered, filteredByRadius: filteredByRadius, filteredByName: filteredByName, cacheHits: cacheHits, apiFetched: apiFetched };
+  // Text Search Pro model: places arrive complete from the search itself —
+  // ingestPlaces() already deduped, filtered, and pushed them to allData.
+  // The old Phase 1.5 (places_cache hydration) and Phase 2 (Place Details Pro
+  // enrichment at $0.017/place) are gone: there is no per-place paid step, so
+  // there are no failed/pending IDs to retry either.
+  window._pendingRetryIds = [];
+  // Store search stats for finish screen. cacheHits is structurally 0 in this
+  // model (every result comes from the paid search request); apiFetched now
+  // counts unique places returned by the API.
+  window._lastSearchStats = { newIds: allPlaceIds.length, skippedDupes: skippedDupes, found: found, errors: errors, existingCount: existingCount, filtered: filtered, filteredByRadius: filteredByRadius, filteredByName: filteredByName, cacheHits: 0, apiFetched: apiFetched };
+  filteredData = allData.slice();
+  renderMarkers();
   finishPlacesDiscovery();
 }
 
@@ -9144,7 +8996,6 @@ function resetPlacesForNewSearch() {
   try { window.downloadGeocoderCSV = downloadGeocoderCSV; } catch(e) {}
   try { window.downloadTemplate = downloadTemplate; } catch(e) {}
   try { window.enablePinMode = enablePinMode; } catch(e) {}
-  try { window.enrichBatch = enrichBatch; } catch(e) {}
   try { window.enrichRow = enrichRow; } catch(e) {}
   try { window.escHtml = escHtml; } catch(e) {}
   try { window.extrairEndereco = extrairEndereco; } catch(e) {}
