@@ -1616,6 +1616,52 @@ function renderMarkers() {
 }
 
 // ─── Popup Builder ───────────────────────────────────────────────────────────
+// ─── Metadados extras da planilha ────────────────────────────────────────────
+// Colunas do CSV que não são campos conhecidos do sistema viram metadados:
+// aparecem no popup do pin e persistem em map_pdvs.meta (jsonb).
+var _META_EXCLUDE_KEYS = new Set([
+  'cnpj', 'cnpj_raiz', 'cnpj_completo', 'cnpj_14', 'nome', 'name', 'label', 'marca', 'brand',
+  'bandeira', 'lat', 'lon', 'lng', 'latitude', 'longitude', 'lat_input', 'lon_input',
+  'input_lat', 'input_lon', 'geo_address', 'geo_score', 'endereco', 'endereço', 'address',
+  'endereco_geocode', 'logradouro', 'rua', 'uf', 'estado', 'state', 'cep', 'cidade', 'city',
+  'municipio', 'bairro', 'neighborhood', 'razao_social', 'nome_fantasia', 'situacao',
+  'atividade', 'tickets_amostra', 'place_id', 'place_types', 'place_status',
+  'id', 'map_id', 'created_at', 'meta',
+]);
+
+function _extractRowMeta(row) {
+  var src = (row.meta && typeof row.meta === 'object') ? row.meta : row;
+  var out = {};
+  var count = 0;
+  for (var k in src) {
+    if (!Object.prototype.hasOwnProperty.call(src, k)) continue;
+    if (k.charAt(0) === '_') continue;
+    var kl = k.toLowerCase();
+    if (_META_EXCLUDE_KEYS.has(kl)) continue;
+    if (/^(share_|percentual_|oportunidade_|periodo_)/.test(kl)) continue;
+    var v = src[k];
+    if (v == null || typeof v === 'object') continue;
+    var vs = String(v).trim();
+    if (!vs) continue;
+    // Dedup: não repetir valores já exibidos no header do popup
+    if (vs === row.nome || vs === row.bandeira || vs === row.geo_address || vs === row.marca) continue;
+    out[k] = vs;
+    if (++count >= 12) break;
+  }
+  return count > 0 ? out : null;
+}
+
+function _extraMetaHTML(row) {
+  var meta = _extractRowMeta(row);
+  if (!meta) return '';
+  var rows = Object.keys(meta).slice(0, 8).map(function(k) {
+    var label = k.replace(/_/g, ' ').replace(/(^|\s)\S/g, function(c) { return c.toUpperCase(); });
+    return '<div class="popup-meta-row"><span class="popup-meta-k">' + escHtml(label) +
+      '</span><span class="popup-meta-v">' + escHtml(meta[k]) + '</span></div>';
+  });
+  return '<div class="popup-meta">' + rows.join('') + '</div>';
+}
+
 function pct(v) { return v != null ? (parseFloat(v) * 100).toFixed(1) + '%' : '—'; }
 function pctRaw(v) { return v != null ? parseFloat(v).toFixed(1) + '%' : '—'; }
 function buildPopup(row) {
@@ -1657,6 +1703,7 @@ function buildPopup(row) {
         ${cnpjDisplay ? `<div style="font-size:11px;color:var(--text-muted);font-family:var(--mono);margin-top:6px;">CNPJ ${cnpjDisplay}</div>` : ''}
         ${coords ? `<div style="font-size:10px;color:var(--text-muted);font-family:var(--mono);margin-top:4px;">${coords}</div>` : ''}
       </div>
+      ${_extraMetaHTML(row)}
     </div>`;
   }
 
@@ -1785,6 +1832,64 @@ function parseCSV(text) {
   return lines.slice(headerIdx + 1).filter(l => l.trim()).map(parseLine);
 }
 
+// ─── Coordenadas: parsing robusto + detecção de colunas invertidas ──────────
+// parseCoord aceita número, string com ponto ou string com vírgula decimal
+// ("-23,55" → -23.55). Exports BR com separador ';' usam vírgula decimal e
+// parseFloat truncaria para -23 (pin a ~60km do lugar certo).
+function parseCoord(v) {
+  if (v == null) return NaN;
+  if (typeof v === 'number') return v;
+  var s = String(v).trim();
+  if (!s) return NaN;
+  if (/^-?\d{1,3},\d+$/.test(s)) s = s.replace(',', '.');
+  return parseFloat(s);
+}
+
+// Retorna a primeira coordenada finita entre as chaves candidatas da row.
+function _firstCoord(row, keys) {
+  for (var i = 0; i < keys.length; i++) {
+    var v = parseCoord(row[keys[i]]);
+    if (Number.isFinite(v)) return v;
+  }
+  return NaN;
+}
+
+// Decide (voto majoritário, dataset inteiro) se as colunas lat/lng vieram
+// invertidas da origem. Duas regras:
+//   1. |lat| > 90 na maioria → só pode ser longitude (regra universal).
+//   2. Ambíguo (ambos em ±90): testa as duas interpretações contra o bbox do
+//      Brasil. Só inverte se a versão trocada coloca ≥80% dos pontos dentro
+//      do Brasil E a original < 20% — assimetria forte, nunca por linha.
+function _coordsLookSwapped(pairs) {
+  var sample = pairs.slice(0, 500);
+  var n = sample.length;
+  if (!n) return false;
+  var latOut = 0, lonOutIfSwapped = 0;
+  for (var i = 0; i < n; i++) {
+    if (Math.abs(sample[i].lat) > 90) latOut++;
+    if (Math.abs(sample[i].lon) > 90) lonOutIfSwapped++;
+  }
+  if (latOut / n > 0.5 && lonOutIfSwapped === 0) return true;
+  var inBR = function(lat, lon) {
+    return lat >= -34.1 && lat <= 5.6 && lon >= -74.2 && lon <= -28.6;
+  };
+  var asIs = 0, swapped = 0;
+  for (var j = 0; j < n; j++) {
+    if (inBR(sample[j].lat, sample[j].lon)) asIs++;
+    if (inBR(sample[j].lon, sample[j].lat)) swapped++;
+  }
+  return (swapped / n) >= 0.8 && (asIs / n) < 0.2;
+}
+
+// Aplica o swap em todas as rows, mantendo as chaves-alias coerentes.
+function _applyCoordSwap(rows) {
+  rows.forEach(function(r) {
+    var t = r.lat; r.lat = r.lon; r.lon = t;
+    ['latitude', 'lat_input', 'input_lat'].forEach(function(k) { if (k in r) r[k] = r.lat; });
+    ['longitude', 'lng', 'lon_input', 'input_lon'].forEach(function(k) { if (k in r) r[k] = r.lon; });
+  });
+}
+
 // Detectar formato e normalizar para estrutura interna
 function detectAndNormalize(rows) {
   if (!rows.length) return { rows: [], formato: 'vazio', info: 'Sem dados' };
@@ -1813,17 +1918,30 @@ function detectAndNormalize(rows) {
   }
 
   // Formato 1: lat/lon direto — plota sem geocodificar
-  if (latKey && lonKey && rows.some(r => parseFloat(r[latKey]) && parseFloat(r[lonKey]))) {
-    const norm = rows.map(r => ({
-      cnpj: r[cnpjKey] || '',
-      nome: r[nomeKey] || '',
-      marca: r[nomeKey] || '',
-      bandeira: r[nomeKey] || 'Desconhecido',
-      lat: parseFloat(r[latKey]), lon: parseFloat(r[lonKey]),
-      geo_address: r[endKey] || '',
-      ...r,
-    }));
-    return { rows: norm, formato: 'latlon', info: `${norm.length} pontos com coordenadas — plotando direto` };
+  if (latKey && lonKey && rows.some(r => Number.isFinite(parseCoord(r[latKey])) && Number.isFinite(parseCoord(r[lonKey])))) {
+    const norm = rows.map(r => {
+      const o = {
+        cnpj: r[cnpjKey] || '',
+        nome: r[nomeKey] || '',
+        marca: r[nomeKey] || '',
+        bandeira: r[nomeKey] || 'Desconhecido',
+        geo_address: r[endKey] || '',
+        ...r,
+      };
+      // lat/lon numéricos são autoritativos — o spread acima não pode
+      // sobrescrevê-los com a string original do CSV.
+      o.lat = parseCoord(r[latKey]);
+      o.lon = parseCoord(r[lonKey]);
+      return o;
+    });
+    // Auto-correção de colunas lat/lng invertidas na origem (dataset-level)
+    const validPairs = norm.filter(r => Number.isFinite(r.lat) && Number.isFinite(r.lon));
+    let swapNote = '';
+    if (_coordsLookSwapped(validPairs)) {
+      _applyCoordSwap(norm);
+      swapNote = ' · ⚠️ colunas lat/lng invertidas detectadas — corrigidas automaticamente';
+    }
+    return { rows: norm, formato: 'latlon', info: `${norm.length} pontos com coordenadas — plotando direto${swapNote}` };
   }
 
   // Formato 2: HYPR/Kantar — campo cnpj contém endereço embutido ("CNPJ - RUA - CIDADE/UF")
@@ -2897,10 +3015,11 @@ function setTab(name) {
 
 // ─── Load Data ───────────────────────────────────────────────────────────────
 async function loadData(data) {
-  // Remover linha de totais
-  data = data.filter(r => r.cnpj && !r.cnpj.toUpperCase().includes('TODOS OS CNPJS'));
+  // Remover só a linha de totais — linhas SEM cnpj são válidas (CSV lat/lon
+  // puro não tem essa coluna; o filtro antigo descartava o dataset inteiro).
+  data = data.filter(r => !(r.cnpj || '').toUpperCase().includes('TODOS OS CNPJS'));
 
-  allData = data.filter(r => r.lat && r.lon && parseFloat(r.lat) && parseFloat(r.lon));
+  allData = data.filter(r => Number.isFinite(parseCoord(r.lat)) && Number.isFinite(parseCoord(r.lon)));
   filteredData = allData.slice();
 
   document.getElementById('upload-zone').classList.add('hidden');
@@ -3416,10 +3535,16 @@ function downloadGeocoderCSV() {
 }
 
 // ─── Reverse Geocoding (lat/lon → endereço) ───────────────────────────────────
-async function reverseGeocodeHERE(lat, lon) {
+async function reverseGeocodeHERE(lat, lon, _isRetry) {
   const resp = await fetch(
     `/api/geocode?action=reverse&at=${lat},${lon}&lang=pt-BR&limit=1`
   );
+  // Rate limit / erro transitório: 1 retry com backoff antes de desistir.
+  // Sem isto, listas grandes acumulavam falhas silenciosas em bursts de 429.
+  if ((resp.status === 429 || resp.status >= 500) && !_isRetry) {
+    await new Promise(r => setTimeout(r, 1500));
+    return reverseGeocodeHERE(lat, lon, true);
+  }
   if (!resp.ok) return null;
   const d = await resp.json();
   const item = d.items?.[0];
@@ -4816,25 +4941,37 @@ async function startReverseGeocoding() {
   if (map) map.resize();
   geocodingCancelled = false; geocodingActive = true;
   window.addEventListener('beforeunload', window._unloadHandler);
+  // Paridade com startGeocoding: overlay reaparece ao voltar pra aba
+  window._visibilityHandler = () => {
+    if (document.hidden || !geocodingActive) return;
+    document.getElementById('geocoding-overlay')?.classList.add('active');
+    if (map) map.resize();
+  };
+  document.addEventListener('visibilitychange', window._visibilityHandler);
 
   const overlay = document.getElementById('geocoding-overlay');
+  // Overlay é compartilhado entre fluxos — resetar título e campos de
+  // Places E Varejo (chip 💾, barra de cache) pra não vazar estado anterior.
+  document.getElementById('geo-title-text').textContent = 'Gerando endereços';
   _resetPlacesOverlayFields();
+  _resetVarejoOverlayFields();
   overlay.classList.add('active');
   document.getElementById('geo-current').textContent = 'Iniciando reverse geocoding...';
   document.getElementById('geo-fill').style.width = '0%';
 
   const total = rawCSVData.length;
-  const BATCH = 5; const DELAY = 150;
+  const BATCH = 8; const DELAY = 100;
   let ok = 0, fail = 0;
+  let _lastPartialRender = 0;
 
   for (let i = 0; i < total; i += BATCH) {
     if (geocodingCancelled) break;
     const batch = rawCSVData.slice(i, Math.min(i + BATCH, total));
 
     await Promise.all(batch.map(async row => {
-      const lat = parseFloat(row.lat || row.latitude || row.lat_input || row.input_lat);
-      const lon = parseFloat(row.lon || row.longitude || row.lng || row.input_lon);
-      if (!lat || !lon) {
+      const lat = _firstCoord(row, ['lat', 'latitude', 'lat_input', 'input_lat']);
+      const lon = _firstCoord(row, ['lon', 'longitude', 'lng', 'input_lon']);
+      if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
         fail++;
         row._geocodeFailed = true;
         row.geo_address = '';
@@ -4870,7 +5007,9 @@ async function startReverseGeocoding() {
     document.getElementById('geo-fail').textContent = fail > 0 ? fail + ' ✗' : '';
     document.getElementById('geo-current').textContent = `${done.toLocaleString('pt-BR')} / ${total.toLocaleString('pt-BR')} pontos`;
 
-    if (done % 100 === 0) {
+    // Render parcial a cada ~100 pontos (independente do BATCH)
+    if (done - _lastPartialRender >= 100) {
+      _lastPartialRender = done;
       filteredData = allData.slice();
       renderMarkers();
     }
@@ -4884,6 +5023,15 @@ async function startReverseGeocoding() {
   filteredData = allData.slice();
   renderMarkers();
   updatePanels(); updateOverlay();
+
+  // Enquadrar os pontos no mapa — sem isto o usuário terminava o reverse
+  // geocoding olhando pro Brasil inteiro com os pins fora da viewport.
+  const _revPts = allData.filter(r => Number.isFinite(parseCoord(r.lat)) && Number.isFinite(parseCoord(r.lon)));
+  if (_revPts.length > 0 && map) {
+    const _revBounds = _revPts.reduce((b, r) => b.extend([parseCoord(r.lon), parseCoord(r.lat)]),
+      new maplibregl.LngLatBounds([parseCoord(_revPts[0].lon), parseCoord(_revPts[0].lat)], [parseCoord(_revPts[0].lon), parseCoord(_revPts[0].lat)]));
+    map.fitBounds(_revBounds, { padding: 60, animate: true, maxZoom: 15 });
+  }
 
   // Mostrar lista automaticamente no reverse geocoder
   setMapView('list');
@@ -5207,6 +5355,9 @@ async function handleCSVFile(file) {
 document.getElementById('file-input').addEventListener('change', e => {
   const file = e.target.files[0];
   if (file) handleCSVFile(file);
+  // Reset obrigatório: sem isto, selecionar o MESMO arquivo de novo não
+  // dispara 'change' (value não mudou) e o upload silenciosamente não acontece.
+  e.target.value = '';
 });
 
 var dropZone = document.getElementById('drop-zone');
@@ -6626,6 +6777,9 @@ async function saveMapToSupabase() {
         share_volume_sku_diff_media_dimensao: parseFloat(r.share_volume_sku_diff_media_dimensao)||null,
         share_unidades_sku_diff_media_dimensao: parseFloat(r.share_unidades_sku_diff_media_dimensao)||null,
         tickets_amostra: parseInt(r.tickets_amostra)||null,
+        // Metadados extras da planilha original (colunas não-mapeadas) —
+        // sobrevivem ao reload do mapa e alimentam o popup do pin.
+        meta: _extractRowMeta(r),
       }));
       await sbFetch('map_pdvs', { method:'POST', headers:{'Prefer':'return=minimal'}, body: JSON.stringify(chunk) });
       const pct = Math.round((i+chunk.length)/saveable.length*100);
