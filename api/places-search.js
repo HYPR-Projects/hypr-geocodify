@@ -65,6 +65,14 @@ async function checkRateLimit(req) {
   return { limited: false };
 }
 
+function getCorsOrigin(req) {
+  const origin = req.headers?.origin || '';
+  if (ALLOWED_ORIGINS.some(o => origin === o)) return origin;
+  if (/^https:\/\/hypr-geocodify[a-z0-9-]*\.vercel\.app$/.test(origin)) return origin;
+  if (/^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin)) return origin;
+  return ALLOWED_ORIGINS[0];
+}
+
 export default async function handler(req, res) {
   const corsOrigin = getCorsOrigin(req);
   res.setHeader('Access-Control-Allow-Origin', corsOrigin);
