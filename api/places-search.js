@@ -28,6 +28,37 @@ const ALLOWED_ORIGINS = [
   'https://hypr-geocodify.vercel.app',
 ];
 
+// ─── Rate limiting (best-effort, in-memory per container) ──────────────────
+// Vercel functions are stateless across cold starts but containers are reused,
+// so a module-scoped sliding window catches the realistic failure modes:
+// runaway pagination bugs and compulsive re-searching from a single client.
+// 150 req/min comfortably clears legitimate heavy use (deep search 5x5 peaks
+// around ~100/min) while capping runaway loops. This is cost protection, not
+// security — a distributed attacker lands on different containers, but also
+// can't trigger paid Google calls without passing CORS origin checks first.
+const RATE_LIMIT_PER_MIN = 150;
+const _rateWindows = new Map(); // ip → array of timestamps (ms)
+
+function checkRateLimit(req) {
+  const ip = (req.headers['x-forwarded-for'] || '').split(',')[0].trim() || 'unknown';
+  const now = Date.now();
+  let win = _rateWindows.get(ip);
+  if (!win) { win = []; _rateWindows.set(ip, win); }
+  // Drop entries older than 60s
+  while (win.length && now - win[0] > 60000) win.shift();
+  if (win.length >= RATE_LIMIT_PER_MIN) {
+    return { limited: true, retryAfterSec: Math.ceil((60000 - (now - win[0])) / 1000) };
+  }
+  win.push(now);
+  // Opportunistic GC so the map doesn't grow unbounded on long-lived containers
+  if (_rateWindows.size > 500) {
+    for (const [k, v] of _rateWindows) {
+      if (!v.length || now - v[v.length - 1] > 120000) _rateWindows.delete(k);
+    }
+  }
+  return { limited: false };
+}
+
 function getCorsOrigin(req) {
   const origin = req.headers?.origin || '';
   if (ALLOWED_ORIGINS.some(o => origin === o)) return origin;
@@ -61,6 +92,13 @@ export default async function handler(req, res) {
   }
 
   const { action } = body;
+
+  // Rate limit applies to both actions — every dispatch can trigger paid Google calls.
+  const rl = checkRateLimit(req);
+  if (rl.limited) {
+    res.setHeader('Retry-After', String(rl.retryAfterSec));
+    return res.status(429).json({ error: 'Rate limit: muitas requisições deste cliente. Aguarde ' + rl.retryAfterSec + 's.' });
+  }
 
   try {
     if (action === 'textSearch') {

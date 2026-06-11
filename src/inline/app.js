@@ -7676,8 +7676,11 @@ function _computeAreaKey(unit) {
 
 // Batch coverage lookup. groups = [{ queryNorm, areaKeys: [...] }].
 // Returns Map keyed "queryNorm||areaKey" → array of place_ids.
+// ignoreTtl=true returns coverage of ANY age — used as fallback when the paid
+// API fails for an area (stale data beats no data; the area stays unregistered
+// so the next search retries the API normally).
 // Failures degrade gracefully to an empty map (worst case: search is paid).
-async function _coverageLookup(groups) {
+async function _coverageLookup(groups, ignoreTtl) {
   var hits = new Map();
   var cutoff = new Date(Date.now() - COVERAGE_TTL_DAYS * 86400 * 1000).toISOString();
   for (var g = 0; g < groups.length; g++) {
@@ -7688,7 +7691,7 @@ async function _coverageLookup(groups) {
       var url = SUPABASE_URL + '/rest/v1/search_coverage'
         + '?query_norm=eq.' + encodeURIComponent(grp.queryNorm)
         + '&area_key=in.(' + encodeURIComponent(keys) + ')'
-        + '&searched_at=gte.' + encodeURIComponent(cutoff)
+        + (ignoreTtl ? '' : '&searched_at=gte.' + encodeURIComponent(cutoff))
         + '&select=area_key,place_ids';
       try {
         var resp = await fetch(url, {
@@ -8381,6 +8384,22 @@ async function startPlacesDiscovery() {
   var searchConfig = await getSearchAreas();
   if (searchConfig.mode === 'pin' && searchConfig.areas.length === 0) { errEl.textContent = 'Adicione pins no mapa.'; errEl.style.display = 'block'; return; }
   if (searchConfig.mode === 'cities' && searchConfig.tasks.length === 0) { errEl.textContent = 'Selecione pelo menos um estado.'; errEl.style.display = 'block'; return; }
+  // Anti-repeat guard: identical search fired within 60s asks for confirmation.
+  // Covered areas would come free anyway, but pin-mode coords rarely repeat
+  // exactly and double-paying out of an impatient double-click is pure waste.
+  var searchFingerprint = searchConfig.mode + '|' + normalizeText(query) + '|' + (
+    searchConfig.mode === 'pin'
+      ? searchConfig.areas.map(_computeAreaKey).join(';')
+      : (searchConfig.states || []).join(';')
+  );
+  if (window._lastSearchFingerprint === searchFingerprint && (Date.now() - (window._lastSearchFingerprintAt || 0)) < 60000) {
+    if (!confirm('Você executou exatamente esta busca há menos de 1 minuto. Repetir agora pode gerar custo de API desnecessário.\n\nExecutar mesmo assim?')) {
+      document.getElementById('places-panel').style.display = 'block';
+      return;
+    }
+  }
+  window._lastSearchFingerprint = searchFingerprint;
+  window._lastSearchFingerprintAt = Date.now();
   document.getElementById('places-panel').style.display = 'none';
   disablePinMode();
   // Snapshot search context for save payload
@@ -8435,6 +8454,12 @@ async function startPlacesDiscovery() {
   // savedRequests = estimated paid requests avoided (pages of 20)
   var cacheHits = 0, apiFetched = 0;
   var areasCovered = 0, areasPaid = 0, savedRequests = 0;
+  // paidRequests = actual Text Search Pro requests made ($0.032 each).
+  // failedUnits  = areas whose paid search errored — candidates for stale-coverage fallback.
+  // staleServed  = areas served from expired coverage after an API failure.
+  var paidRequests = 0;
+  var failedUnits = [];
+  var staleServed = 0;
   var startTime = Date.now(), allPlaceIds = [];
   // Store allowed UFs for Phase 2 filtering (only for city/state mode)
   var allowedUFs = null;
@@ -8585,6 +8610,7 @@ async function startPlacesDiscovery() {
           var resp = await fetch('/api/places-search', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ action:'textSearch', query: areaQuery, lat:area.lat, lon:area.lon, radius:area.radiusM, pageToken:pageToken }) });
           var data = await resp.json();
           if (resp.ok && data.places) {
+            paidRequests++;
             for (var api = 0; api < data.places.length; api++) { if (data.places[api] && data.places[api].place_id) areaPids.push(data.places[api].place_id); }
             ingestPlaces(data.places); pageToken=data.nextPageToken;
           }
@@ -8605,6 +8631,8 @@ async function startPlacesDiscovery() {
       if (areaComplete && !_placesDiscoveryCancelled) {
         areasPaid++;
         _registerCoverage(normalizeText(areaQuery), _computeAreaKey(area), areaPids);
+      } else if (!areaComplete) {
+        failedUnits.push({ queryNorm: normalizeText(areaQuery), areaKey: _computeAreaKey(area) });
       }
       var pv = Math.round((ai+1)/total*100);
       document.getElementById('geo-fill').style.width = pv+'%';
@@ -8648,6 +8676,7 @@ async function startPlacesDiscovery() {
             var resp = await fetch('/api/places-search', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(searchBody) });
             var data = await resp.json();
             if (resp.ok && data.places) {
+              paidRequests++;
               for (var tpi = 0; tpi < data.places.length; tpi++) { if (data.places[tpi] && data.places[tpi].place_id) taskPids.push(data.places[tpi].place_id); }
               ingestPlaces(data.places);
               pageToken=data.nextPageToken; success=true;
@@ -8673,6 +8702,8 @@ async function startPlacesDiscovery() {
       if (taskComplete && !_placesDiscoveryCancelled) {
         areasPaid++;
         _registerCoverage(normalizeText(query), _computeAreaKey(task), taskPids);
+      } else if (!taskComplete) {
+        failedUnits.push({ queryNorm: normalizeText(query), areaKey: _computeAreaKey(task) });
       }
       completed++;
       var pv = Math.round(completed/total*100);
@@ -8694,11 +8725,73 @@ async function startPlacesDiscovery() {
 
   if (_placesDiscoveryCancelled) { finishPlacesDiscovery(); return; }
 
+  // ─── Fallback: serve failed areas from expired coverage ────────────────────
+  // If the paid API errored for some areas, stale data (older than the TTL)
+  // beats showing nothing. These areas stay UNREGISTERED in coverage, so the
+  // next run retries the API normally — the fallback never masks the failure.
+  if (failedUnits.length > 0 && !_placesDiscoveryCancelled) {
+    try {
+      var fbGroupsByQ = {};
+      for (var fu = 0; fu < failedUnits.length; fu++) {
+        var f = failedUnits[fu];
+        (fbGroupsByQ[f.queryNorm] = fbGroupsByQ[f.queryNorm] || []).push(f.areaKey);
+      }
+      var fbGroups = Object.keys(fbGroupsByQ).map(function(qn){ return { queryNorm: qn, areaKeys: fbGroupsByQ[qn] }; });
+      var staleMap = await _coverageLookup(fbGroups, true);
+      if (staleMap.size > 0) {
+        var stalePidSet = {};
+        var stalePids = [];
+        for (var fu2 = 0; fu2 < failedUnits.length; fu2++) {
+          var pidsStale = staleMap.get(failedUnits[fu2].queryNorm + '||' + failedUnits[fu2].areaKey);
+          if (!pidsStale) continue;
+          staleServed++;
+          for (var sp = 0; sp < pidsStale.length; sp++) {
+            if (!stalePidSet[pidsStale[sp]]) { stalePidSet[pidsStale[sp]] = true; stalePids.push(pidsStale[sp]); }
+          }
+        }
+        if (stalePids.length > 0) {
+          document.getElementById('geo-current').textContent = 'API falhou em ' + staleServed + ' área(s) — recuperando da base própria...';
+          var staleHydrated = await _hydratePlacesFromCache(stalePids);
+          if (staleHydrated.size > 0) {
+            var staleRows = [];
+            staleHydrated.forEach(function(row) {
+              staleRows.push({ place_id: row.place_id, name: row.name || '', address: row.address || '', lat: row.lat, lon: row.lon, types: Array.isArray(row.types) ? row.types : [], status: '' });
+            });
+            ingestPlaces(staleRows, true);
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('[coverage] stale fallback failed:', e && e.message);
+    }
+  }
+
   // Text Search Pro hybrid model: places arrive complete from the search (paid
   // areas) or from places_cache via search_coverage (covered areas, $0).
   // ingestPlaces() already deduped, filtered, and pushed everything to allData.
   window._pendingRetryIds = [];
-  window._lastSearchStats = { newIds: allPlaceIds.length, skippedDupes: skippedDupes, found: found, errors: errors, existingCount: existingCount, filtered: filtered, filteredByRadius: filteredByRadius, filteredByName: filteredByName, cacheHits: cacheHits, apiFetched: apiFetched, areasCovered: areasCovered, areasPaid: areasPaid, savedRequests: savedRequests };
+  window._lastSearchStats = { newIds: allPlaceIds.length, skippedDupes: skippedDupes, found: found, errors: errors, existingCount: existingCount, filtered: filtered, filteredByRadius: filteredByRadius, filteredByName: filteredByName, cacheHits: cacheHits, apiFetched: apiFetched, areasCovered: areasCovered, areasPaid: areasPaid, savedRequests: savedRequests, paidRequests: paidRequests, staleServed: staleServed };
+
+  // Usage log (fire-and-forget): who searched what, how much came from the
+  // base vs the paid API, and the real estimated cost of this run.
+  try {
+    fetch(SUPABASE_URL + '/rest/v1/search_log', {
+      method: 'POST',
+      headers: { 'apikey': SUPABASE_ANON, 'Authorization': 'Bearer ' + SUPABASE_ANON, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
+      body: JSON.stringify([{
+        user_email: (window.currentUser && window.currentUser.email) || null,
+        query: query,
+        mode: searchConfig.mode,
+        areas_total: areasCovered + areasPaid + failedUnits.length,
+        areas_covered: areasCovered,
+        areas_paid: areasPaid,
+        places_from_base: cacheHits,
+        places_from_api: apiFetched,
+        est_cost_usd: +(paidRequests * 0.032).toFixed(4),
+        errors: errors,
+      }]),
+    }).catch(function(){});
+  } catch (e) { /* logging must never break the search */ }
   filteredData = allData.slice();
   renderMarkers();
   finishPlacesDiscovery();
@@ -8778,6 +8871,10 @@ function finishPlacesDiscovery() {
     var nameFiltered = (stats.filteredByName || 0);
     if (nameFiltered > 0) {
       summaryParts.push('<span style="color:var(--text-muted);">' + nameFiltered + ' fora do nome</span>');
+    }
+    var staleServed = (stats.staleServed || 0);
+    if (staleServed > 0) {
+      summaryParts.push('<span style="color:var(--warn-bright,#FFF047);">' + staleServed + ' área' + (staleServed !== 1 ? 's' : '') + ' da base própria (API falhou — dados podem estar desatualizados)</span>');
     }
     document.getElementById('places-results-summary').innerHTML = summaryParts.join(' · ');
     
