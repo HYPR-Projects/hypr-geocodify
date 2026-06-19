@@ -331,8 +331,19 @@
       const matchPct = total ? (matched / total * 100) : 0;
 
       // Verifica se essa marca já está carregada
-      const alreadyLoaded = state.competitors.some(c => c.brand_name === detectedBrand);
+      const existingComp = state.competitors.find(c => c.brand_name === detectedBrand);
+      const alreadyLoaded = !!existingComp;
       const isBaseBrand = (window._currentMapBaseBrand || '').toUpperCase() === detectedBrand;
+
+      // Quando a marca já existe: quantos CNPJs do arquivo são NOVOS vs já
+      // presentes (estes seriam apenas atualizados pelo upsert, não somam).
+      let newInBrand = 0, dupInBrand = 0;
+      if (existingComp && existingComp.pdvs) {
+        for (const r of normalizedRows) {
+          if (existingComp.pdvs.has(r.cnpj_14)) dupInBrand++;
+          else newInBrand++;
+        }
+      }
 
       const suggestedColor = pickBrandColor(detectedBrand);
 
@@ -345,6 +356,8 @@
         matchedCount: matched,
         unmatchedCount: unmatched,
         withShareCount: withShare,
+        newInBrand,
+        dupInBrand,
       };
 
       renderPreview({
@@ -357,6 +370,8 @@
         matchPct,
         withShare,
         alreadyLoaded,
+        newInBrand,
+        dupInBrand,
         isBaseBrand,
       });
     } catch(e) {
@@ -408,14 +423,18 @@
     });
   }
 
-  function renderPreview({ brandName, color, filename, total, matched, unmatched, matchPct, withShare, alreadyLoaded, isBaseBrand }) {
+  function renderPreview({ brandName, color, filename, total, matched, unmatched, matchPct, withShare, alreadyLoaded, newInBrand, dupInBrand, isBaseBrand }) {
     const preview = document.getElementById('v360-comp-preview');
     const confirm = document.getElementById('v360-comp-confirm');
     const matchColor = matchPct >= 90 ? '#16a34a' : matchPct >= 60 ? '#f59e0b' : '#dc2626';
 
     let warning = '';
     if (alreadyLoaded) {
-      warning = `<div style="margin-top:10px;padding:8px 10px;background:var(--neutral-bg);color:var(--neutral);border-radius:6px;font-size:11.5px;line-height:1.5;">A marca <b>${brandName}</b> já está nesse mapa. <b>Adicionar aos dados</b> mantém os PDVs atuais e inclui os deste arquivo (merge por CNPJ). <b>Substituir tudo</b> apaga os atuais e usa só este arquivo.</div>`;
+      const nothingNew = (newInBrand === 0);
+      const breakdown = nothingNew
+        ? `<div style="margin-top:6px;color:#b45309;"><b>Nenhum CNPJ novo neste arquivo</b> — os ${dupInBrand.toLocaleString('pt-BR')} CNPJs já estão em ${brandName}. Adicionar só atualizaria os valores; o total de PDVs não muda. Se queria incluir outra praça (ex.: outro estado), confira se o arquivo é o certo.</div>`
+        : `<div style="margin-top:6px;color:var(--text);"><b>${newInBrand.toLocaleString('pt-BR')}</b> CNPJ${newInBrand===1?'':'s'} novo${newInBrand===1?'':'s'} serão somados${dupInBrand>0?` · ${dupInBrand.toLocaleString('pt-BR')} já existentes serão atualizados`:''}.</div>`;
+      warning = `<div style="margin-top:10px;padding:8px 10px;background:var(--neutral-bg);color:var(--neutral);border-radius:6px;font-size:11.5px;line-height:1.5;">A marca <b>${brandName}</b> já está nesse mapa. <b>Adicionar aos dados</b> faz merge por CNPJ; <b>Substituir tudo</b> apaga os atuais e usa só este arquivo.${breakdown}</div>`;
     } else if (isBaseBrand) {
       warning = `<div style="margin-top:10px;padding:8px 10px;background:rgba(220,38,38,0.1);color:#991b1b;border-radius:6px;font-size:11.5px;">⚠️ A marca <b>${brandName}</b> é a marca base desse mapa. Não é possível adicioná-la como concorrente.</div>`;
     }
@@ -651,8 +670,17 @@
         }));
       } catch(_) {}
       setTimeout(_hideColorUpdateBanner, 800);
-      const verb = isAppend ? 'atualizado' : (mode === 'replace' ? 'substituído' : 'adicionado');
-      showToast(`Concorrente "${pending.brandName}" ${verb} · ${resultMatched.toLocaleString('pt-BR')} PDVs com match`);
+      if (isAppend) {
+        const nv = pending.newInBrand || 0;
+        const dp = pending.dupInBrand || 0;
+        const msg = nv > 0
+          ? `${pending.brandName}: +${nv.toLocaleString('pt-BR')} PDV${nv===1?'':'s'} novo${nv===1?'':'s'}${dp>0?` · ${dp.toLocaleString('pt-BR')} atualizados`:''}`
+          : `${pending.brandName}: 0 novos — ${dp.toLocaleString('pt-BR')} CNPJs já existiam (só atualizados). Verifique se o arquivo é o da praça certa.`;
+        showToast(msg);
+      } else {
+        const verb = (mode === 'replace') ? 'substituído' : 'adicionado';
+        showToast(`Concorrente "${pending.brandName}" ${verb} · ${resultMatched.toLocaleString('pt-BR')} PDVs com match`);
+      }
     } catch(e) {
       console.error('[v360-comp] save error:', e);
       showError('Erro ao salvar: ' + (e.message || e));
