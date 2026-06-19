@@ -174,6 +174,7 @@
 
         <div style="padding:14px 22px 18px;border-top:1px solid var(--border,#e5e7eb);display:flex;gap:8px;justify-content:flex-end;">
           <button id="v360-comp-cancel" style="padding:8px 14px;border-radius:8px;border:1px solid var(--border,#d1d5db);background:transparent;color:var(--text,#111);font-size:12.5px;cursor:pointer;">Cancelar</button>
+          <button id="v360-comp-confirm-replace" style="display:none;padding:8px 16px;border-radius:8px;border:1px solid var(--lose,#dc2626);background:transparent;color:var(--lose,#dc2626);font-size:12.5px;font-weight:500;cursor:pointer;">Substituir tudo</button>
           <button id="v360-comp-confirm" disabled style="padding:8px 16px;border-radius:8px;border:none;background:var(--accent,#2563eb);color:#fff;font-size:12.5px;font-weight:500;cursor:pointer;opacity:0.5;">Adicionar ao mapa</button>
         </div>
       </div>
@@ -198,7 +199,9 @@
     };
     fileInput.onchange = (e) => { if (e.target.files[0]) handleFile(e.target.files[0]); };
 
-    modal.querySelector('#v360-comp-confirm').onclick = onConfirm;
+    modal.querySelector('#v360-comp-confirm').onclick = () => onConfirm('auto');
+    const _replaceBtn = modal.querySelector('#v360-comp-confirm-replace');
+    if (_replaceBtn) _replaceBtn.onclick = () => onConfirm('replace');
   }
 
   function openModal() {
@@ -216,10 +219,12 @@
     const preview = document.getElementById('v360-comp-preview');
     const err = document.getElementById('v360-comp-error');
     const confirm = document.getElementById('v360-comp-confirm');
+    const replaceBtn = document.getElementById('v360-comp-confirm-replace');
     const fileInput = document.getElementById('v360-comp-file');
     if (preview) { preview.style.display = 'none'; preview.innerHTML = ''; }
     if (err) { err.style.display = 'none'; err.textContent = ''; }
-    if (confirm) { confirm.disabled = true; confirm.style.opacity = '0.5'; }
+    if (confirm) { confirm.disabled = true; confirm.style.opacity = '0.5'; confirm.textContent = 'Adicionar ao mapa'; }
+    if (replaceBtn) { replaceBtn.style.display = 'none'; replaceBtn.disabled = false; replaceBtn.style.opacity = '1'; }
     if (fileInput) fileInput.value = '';
     delete window._v360CompPending;
   }
@@ -410,7 +415,7 @@
 
     let warning = '';
     if (alreadyLoaded) {
-      warning = `<div style="margin-top:10px;padding:8px 10px;background:var(--neutral-bg);color:var(--neutral);border-radius:6px;font-size:11.5px;">⚠️ A marca <b>${brandName}</b> já está carregada nesse mapa. Confirmar irá substituir os dados existentes.</div>`;
+      warning = `<div style="margin-top:10px;padding:8px 10px;background:var(--neutral-bg);color:var(--neutral);border-radius:6px;font-size:11.5px;line-height:1.5;">A marca <b>${brandName}</b> já está nesse mapa. <b>Adicionar aos dados</b> mantém os PDVs atuais e inclui os deste arquivo (merge por CNPJ). <b>Substituir tudo</b> apaga os atuais e usa só este arquivo.</div>`;
     } else if (isBaseBrand) {
       warning = `<div style="margin-top:10px;padding:8px 10px;background:rgba(220,38,38,0.1);color:#991b1b;border-radius:6px;font-size:11.5px;">⚠️ A marca <b>${brandName}</b> é a marca base desse mapa. Não é possível adicioná-la como concorrente.</div>`;
     }
@@ -453,13 +458,20 @@
       colorBtn.onclick = () => promptColorChange(brandName);
     }
 
+    const replaceBtn = document.getElementById('v360-comp-confirm-replace');
     if (isBaseBrand) {
       confirm.disabled = true;
       confirm.style.opacity = '0.5';
+      if (replaceBtn) replaceBtn.style.display = 'none';
     } else {
       confirm.disabled = false;
       confirm.style.opacity = '1';
-      confirm.textContent = alreadyLoaded ? 'Substituir dados' : 'Adicionar ao mapa';
+      confirm.textContent = alreadyLoaded ? 'Adicionar aos dados' : 'Adicionar ao mapa';
+      if (replaceBtn) {
+        replaceBtn.style.display = alreadyLoaded ? '' : 'none';
+        replaceBtn.disabled = false;
+        replaceBtn.style.opacity = '1';
+      }
     }
   }
 
@@ -485,7 +497,7 @@
   }
 
   // ─── Confirm & Save ──────────────────────────────────────────────────────
-  async function onConfirm() {
+  async function onConfirm(forceMode) {
     const pending = window._v360CompPending;
     if (!pending) return;
     const mapId = window._currentOpenMapId;
@@ -494,44 +506,62 @@
       return;
     }
 
+    // Resolve o modo: marca nova => 'new'; marca existente => 'append' (default
+    // não-destrutivo) ou 'replace' (botão "Substituir tudo", forceMode).
+    const existing = state.competitors.find(c => c.brand_name === pending.brandName);
+    const mode = !existing ? 'new' : (forceMode === 'replace' ? 'replace' : 'append');
+    const isAppend = mode === 'append';
+
     const confirmBtn = document.getElementById('v360-comp-confirm');
-    confirmBtn.disabled = true;
-    confirmBtn.style.opacity = '0.5';
-    confirmBtn.textContent = 'Salvando...';
+    const replaceBtn = document.getElementById('v360-comp-confirm-replace');
+    const activeBtn = (mode === 'replace') ? replaceBtn : confirmBtn;
+    [confirmBtn, replaceBtn].forEach(b => { if (b) { b.disabled = true; b.style.opacity = '0.5'; } });
+    if (activeBtn) activeBtn.textContent = 'Salvando...';
 
     try {
-      // Se a marca já existe, faz DELETE primeiro (substituir dados)
-      const existing = state.competitors.find(c => c.brand_name === pending.brandName);
-      if (existing) {
-        await window.sbFetch('map_competitors?id=eq.' + existing.id, {
-          method: 'DELETE',
-          headers: { 'Prefer': 'return=minimal' }
+      let competitorId;
+      if (isAppend) {
+        // Reusa o competitor existente; não deleta nada.
+        competitorId = existing.id;
+      } else {
+        // 'replace' apaga o competitor (cascateia os PDVs) antes de recriar.
+        if (mode === 'replace') {
+          await window.sbFetch('map_competitors?id=eq.' + existing.id, {
+            method: 'DELETE',
+            headers: { 'Prefer': 'return=minimal' }
+          });
+        }
+        const userEmail = window._currentUserEmail || 'unknown@hypr.mobi';
+        const created = await window.sbFetch('map_competitors', {
+          method: 'POST',
+          headers: { 'Prefer': 'return=representation' },
+          body: JSON.stringify([{
+            map_id: mapId,
+            brand_name: pending.brandName,
+            brand_color: pending.color,
+            source_filename: pending.filename,
+            row_count: pending.rowCount,
+            matched_count: pending.matchedCount,
+            unmatched_count: pending.unmatchedCount,
+            created_by: userEmail,
+          }])
         });
+        competitorId = Array.isArray(created) ? created[0].id : created.id;
       }
 
-      // Cria competitor
-      const userEmail = window._currentUserEmail || 'unknown@hypr.mobi';
-      const created = await window.sbFetch('map_competitors', {
-        method: 'POST',
-        headers: { 'Prefer': 'return=representation' },
-        body: JSON.stringify([{
-          map_id: mapId,
-          brand_name: pending.brandName,
-          brand_color: pending.color,
-          source_filename: pending.filename,
-          row_count: pending.rowCount,
-          matched_count: pending.matchedCount,
-          unmatched_count: pending.unmatchedCount,
-          created_by: userEmail,
-        }])
-      });
-      const competitorId = Array.isArray(created) ? created[0].id : created.id;
+      // No append, upsert por (competitor_id, cnpj_14) — idempotente, sem
+      // duplicar CNPJ e seguro contra re-upload acidental da mesma base.
+      const pdvPath = isAppend
+        ? 'map_competitor_pdvs?on_conflict=competitor_id,cnpj_14'
+        : 'map_competitor_pdvs';
+      const pdvPrefer = isAppend
+        ? 'return=minimal,resolution=merge-duplicates'
+        : 'return=minimal';
 
-      // Chunks de 500 pra map_competitor_pdvs, processados em paralelo (4 simultâneos)
+      // Chunks de 500, processados em paralelo (4 simultâneos)
       const CHUNK = 500;
       const PARALLEL = 4;
       const totalRows = pending.rows.length;
-      // Pré-monta payloads
       const payloads = [];
       for (let i = 0; i < totalRows; i += CHUNK) {
         payloads.push(pending.rows.slice(i, i+CHUNK).map(r => ({
@@ -551,64 +581,84 @@
         })));
       }
       let saved = 0;
-      // Processa em batches paralelos para acelerar (3-4x mais rápido sem saturar Supabase)
       for (let i = 0; i < payloads.length; i += PARALLEL) {
         const batch = payloads.slice(i, i + PARALLEL);
         await Promise.all(batch.map(payload =>
-          window.sbFetch('map_competitor_pdvs', {
+          window.sbFetch(pdvPath, {
             method: 'POST',
-            headers: { 'Prefer': 'return=minimal' },
+            headers: { 'Prefer': pdvPrefer },
             body: JSON.stringify(payload)
           })
         ));
         saved += batch.reduce((s, p) => s + p.length, 0);
-        confirmBtn.textContent = `Salvando ${saved.toLocaleString('pt-BR')}/${totalRows.toLocaleString('pt-BR')}...`;
+        if (activeBtn) activeBtn.textContent = `Salvando ${saved.toLocaleString('pt-BR')}/${totalRows.toLocaleString('pt-BR')}...`;
       }
 
-      // Atualiza state local
-      if (existing) {
-        state.competitors = state.competitors.filter(c => c.id !== existing.id);
+      // ─── Atualiza state local ───────────────────────────────────────────
+      let resultMatched;
+      if (isAppend) {
+        // Merge no Map existente (a nova linha sobrescreve a antiga do mesmo CNPJ).
+        for (const r of pending.rows) existing.pdvs.set(r.cnpj_14, r);
+        // Recalcula contadores a partir do Map mergeado (fonte de verdade,
+        // espelha o banco após o upsert). Somar cego erraria com CNPJ repetido.
+        const total = existing.pdvs.size;
+        let matched = 0;
+        for (const v of existing.pdvs.values()) if (v.matched) matched++;
+        existing.row_count = total;
+        existing.matched_count = matched;
+        existing.unmatched_count = total - matched;
+        resultMatched = matched;
+        // Persiste os contadores recalculados no competitor.
+        try {
+          await window.sbFetch('map_competitors?id=eq.' + competitorId, {
+            method: 'PATCH',
+            headers: { 'Prefer': 'return=minimal' },
+            body: JSON.stringify({
+              row_count: total,
+              matched_count: matched,
+              unmatched_count: total - matched,
+            })
+          });
+        } catch(e) { console.warn('[v360-comp] counter patch failed:', e.message); }
+      } else {
+        if (existing) {
+          state.competitors = state.competitors.filter(c => c.id !== existing.id);
+        }
+        const pdvMap = new Map();
+        for (const r of pending.rows) pdvMap.set(r.cnpj_14, r);
+        state.competitors.push({
+          id: competitorId,
+          brand_name: pending.brandName,
+          brand_color: pending.color,
+          row_count: pending.rowCount,
+          matched_count: pending.matchedCount,
+          unmatched_count: pending.unmatchedCount,
+          pdvs: pdvMap,
+        });
+        resultMatched = pending.matchedCount;
       }
-      const pdvMap = new Map();
-      for (const r of pending.rows) pdvMap.set(r.cnpj_14, r);
-      state.competitors.push({
-        id: competitorId,
-        brand_name: pending.brandName,
-        brand_color: pending.color,
-        row_count: pending.rowCount,
-        matched_count: pending.matchedCount,
-        unmatched_count: pending.unmatchedCount,
-        pdvs: pdvMap,
-      });
 
       // Detecta + persiste base_brand se ainda não setado
       await ensureBaseBrandPersisted();
 
       closeModal();
-      // (Fix #3) Re-render pós-adição pode levar 1-3s (recálculo de markers,
-      // hero, share por tipo, top redes). Banner discreto durante esse processo.
       _showColorUpdateBanner('Recalculando mapa com nova marca…');
-      // Cache do mapa atual fica stale com novo competitor — invalida
       try { window._invalidateOpenedMapCache && window._invalidateOpenedMapCache(mapId); } catch(_) {}
       renderHeaderUI();
-      // Notifica V360CompRender (hook em renderHeaderUI não pega chamadas
-      // internas porque o monkey-patch só substitui window.V360Comp.renderHeaderUI,
-      // e as chamadas locais usam o identifier original do módulo).
       try {
         window.dispatchEvent(new CustomEvent('v360:competitors-loaded', {
-          detail: { count: state.competitors.length, source: 'add' }
+          detail: { count: state.competitors.length, source: isAppend ? 'append' : 'add' }
         }));
       } catch(_) {}
-      // Esconde banner após o ciclo de re-render assentar (next tick + 600ms
-      // dá tempo do MapLibre repintar markers e do hero recalcular)
       setTimeout(_hideColorUpdateBanner, 800);
-      showToast(`Concorrente "${pending.brandName}" adicionado · ${pending.matchedCount.toLocaleString('pt-BR')} PDVs com match`);
+      const verb = isAppend ? 'atualizado' : (mode === 'replace' ? 'substituído' : 'adicionado');
+      showToast(`Concorrente "${pending.brandName}" ${verb} · ${resultMatched.toLocaleString('pt-BR')} PDVs com match`);
     } catch(e) {
       console.error('[v360-comp] save error:', e);
       showError('Erro ao salvar: ' + (e.message || e));
-      confirmBtn.disabled = false;
-      confirmBtn.style.opacity = '1';
-      confirmBtn.textContent = 'Adicionar ao mapa';
+      [confirmBtn, replaceBtn].forEach(b => { if (b) { b.disabled = false; b.style.opacity = '1'; } });
+      if (confirmBtn) confirmBtn.textContent = existing ? 'Adicionar aos dados' : 'Adicionar ao mapa';
+      if (replaceBtn && existing) replaceBtn.textContent = 'Substituir tudo';
     }
   }
 
