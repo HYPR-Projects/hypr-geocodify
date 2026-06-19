@@ -515,6 +515,74 @@
     popup.onclick = (e) => { if (e.target === popup) popup.remove(); };
   }
 
+  // ─── Geocode dos PDVs do concorrente sem ponto no mapa ───────────────────
+  // Para os CNPJs do arquivo que ainda não existem em map_pdvs, busca lat/lon
+  // no cnpj_cache (base permanente compartilhada) e insere como PDV de
+  // whitespace da marca base (marca = base, sem share base). Faz a praça
+  // aparecer no mapa mesmo antes de a base ter dados ali. Camada 1: só cache,
+  // sem geocode online (HERE) — cobertura parcial por design. lat/lon são NOT
+  // NULL em map_pdvs, então só entram os CNPJs que têm coordenada no cache.
+  async function geocodeUnmatchedViaCache(rows, mapId) {
+    const empty = { plotted: 0, missing: 0, plottedCnpjs: [] };
+    try {
+      if (typeof window.bulkCnpjGeocodeLookup !== 'function' || !Array.isArray(window.allData)) return empty;
+      const baseBrand = window._currentMapBaseBrand || null;
+
+      // CNPJs já presentes no mapa (têm ponto).
+      const present = new Set();
+      for (const r of window.allData) {
+        const c = r.cnpj_14 || (window._normalizeCnpj14 ? window._normalizeCnpj14(r.cnpj || '') : null);
+        if (c) present.add(c);
+      }
+      // CNPJs do arquivo sem ponto no mapa.
+      const unmatched = [];
+      const seen = new Set();
+      for (const r of rows) {
+        const c = r.cnpj_14;
+        if (c && !present.has(c) && !seen.has(c)) { seen.add(c); unmatched.push(c); }
+      }
+      if (!unmatched.length) return empty;
+
+      const hits = await window.bulkCnpjGeocodeLookup(unmatched);
+      const newRows = [];
+      const plottedCnpjs = [];
+      for (const c of unmatched) {
+        const h = hits.get(c);
+        if (!h || h.lat == null || h.lon == null) continue;
+        newRows.push({
+          map_id: mapId,
+          cnpj: c,                 // 14 dígitos; cnpj_14 é coluna gerada no banco
+          marca: baseBrand,        // whitespace da base: ponto existe, base ausente
+          lat: h.lat,
+          lon: h.lon,
+          uf: h.uf_geocode || null,
+          geo_address: h.geo_address || null,
+        });
+        plottedCnpjs.push(c);
+      }
+      if (!newRows.length) return { plotted: 0, missing: unmatched.length, plottedCnpjs: [] };
+
+      const CHUNK = 500;
+      for (let i = 0; i < newRows.length; i += CHUNK) {
+        await window.sbFetch('map_pdvs?on_conflict=map_id,cnpj_14', {
+          method: 'POST',
+          headers: { 'Prefer': 'resolution=ignore-duplicates,return=minimal' },
+          body: JSON.stringify(newRows.slice(i, i + CHUNK)),
+        });
+      }
+      // Espelha em allData pro render imediato (mesmo shape das linhas do mapa).
+      const ad = window.allData || [];
+      for (const r of newRows) {
+        ad.push({ cnpj: r.cnpj, cnpj_14: r.cnpj, marca: r.marca, lat: r.lat, lon: r.lon, uf: r.uf, geo_address: r.geo_address });
+      }
+      window.allData = ad; // setter (Object.defineProperty) propaga pro módulo
+      return { plotted: newRows.length, missing: unmatched.length - newRows.length, plottedCnpjs };
+    } catch (e) {
+      console.warn('[v360-comp] geocode via cache falhou:', e && e.message);
+      return empty;
+    }
+  }
+
   // ─── Confirm & Save ──────────────────────────────────────────────────────
   async function onConfirm(forceMode) {
     const pending = window._v360CompPending;
@@ -660,9 +728,30 @@
       // Detecta + persiste base_brand se ainda não setado
       await ensureBaseBrandPersisted();
 
+      // Geocodifica via cache os PDVs do concorrente que ainda não têm ponto
+      // no mapa e os plota como whitespace da base. Faz a praça nova aparecer.
+      if (activeBtn) activeBtn.textContent = 'Mapeando PDVs...';
+      const geoRes = await geocodeUnmatchedViaCache(pending.rows, mapId);
+
+      // Os CNPJs que ganharam ponto agora passam a casar — atualiza o state.
+      if (geoRes.plotted) {
+        const comp = state.competitors.find(c => c.brand_name === pending.brandName);
+        if (comp && comp.pdvs) {
+          for (const c of geoRes.plottedCnpjs) {
+            const pdv = comp.pdvs.get(c);
+            if (pdv) pdv.matched = true;
+          }
+          let m = 0; for (const v of comp.pdvs.values()) if (v.matched) m++;
+          comp.matched_count = m;
+          comp.unmatched_count = comp.pdvs.size - m;
+        }
+      }
+
       closeModal();
       _showColorUpdateBanner('Recalculando mapa com nova marca…');
       try { window._invalidateOpenedMapCache && window._invalidateOpenedMapCache(mapId); } catch(_) {}
+      // Re-renderiza os pins do mapa pra mostrar os PDVs recém-plotados.
+      try { if (typeof window.applyFilters === 'function') window.applyFilters(); } catch(_) {}
       renderHeaderUI();
       try {
         window.dispatchEvent(new CustomEvent('v360:competitors-loaded', {
@@ -670,16 +759,19 @@
         }));
       } catch(_) {}
       setTimeout(_hideColorUpdateBanner, 800);
+      const geoSuffix = geoRes.plotted
+        ? ` · +${geoRes.plotted.toLocaleString('pt-BR')} no mapa${geoRes.missing ? ` (${geoRes.missing.toLocaleString('pt-BR')} sem coordenada ainda)` : ''}`
+        : (geoRes.missing ? ` · ${geoRes.missing.toLocaleString('pt-BR')} sem coordenada no cache` : '');
       if (isAppend) {
         const nv = pending.newInBrand || 0;
         const dp = pending.dupInBrand || 0;
         const msg = nv > 0
-          ? `${pending.brandName}: +${nv.toLocaleString('pt-BR')} PDV${nv===1?'':'s'} novo${nv===1?'':'s'}${dp>0?` · ${dp.toLocaleString('pt-BR')} atualizados`:''}`
-          : `${pending.brandName}: 0 novos — ${dp.toLocaleString('pt-BR')} CNPJs já existiam (só atualizados). Verifique se o arquivo é o da praça certa.`;
+          ? `${pending.brandName}: +${nv.toLocaleString('pt-BR')} PDV${nv===1?'':'s'} novo${nv===1?'':'s'}${dp>0?` · ${dp.toLocaleString('pt-BR')} atualizados`:''}${geoSuffix}`
+          : `${pending.brandName}: 0 novos — ${dp.toLocaleString('pt-BR')} CNPJs já existiam${geoSuffix || '. Verifique se o arquivo é o da praça certa.'}`;
         showToast(msg);
       } else {
         const verb = (mode === 'replace') ? 'substituído' : 'adicionado';
-        showToast(`Concorrente "${pending.brandName}" ${verb} · ${resultMatched.toLocaleString('pt-BR')} PDVs com match`);
+        showToast(`Concorrente "${pending.brandName}" ${verb} · ${resultMatched.toLocaleString('pt-BR')} PDVs com match${geoSuffix}`);
       }
     } catch(e) {
       console.error('[v360-comp] save error:', e);
