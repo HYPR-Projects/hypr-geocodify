@@ -515,26 +515,37 @@
     popup.onclick = (e) => { if (e.target === popup) popup.remove(); };
   }
 
+  // ─── Banner de progresso (reusa o spinner do _showColorUpdateBanner) ─────
+  function _setGeoProgress(msg) {
+    const banner = document.getElementById('v360-update-banner');
+    if (banner) {
+      const spans = banner.querySelectorAll('span');
+      const txt = spans[spans.length - 1];
+      if (txt) { txt.textContent = msg; return; }
+    }
+    _showColorUpdateBanner(msg);
+  }
+
   // ─── Geocode dos PDVs do concorrente sem ponto no mapa ───────────────────
-  // Para os CNPJs do arquivo que ainda não existem em map_pdvs, busca lat/lon
-  // no cnpj_cache (base permanente compartilhada) e insere como PDV de
-  // whitespace da marca base (marca = base, sem share base). Faz a praça
-  // aparecer no mapa mesmo antes de a base ter dados ali. Camada 1: só cache,
-  // sem geocode online (HERE) — cobertura parcial por design. lat/lon são NOT
-  // NULL em map_pdvs, então só entram os CNPJs que têm coordenada no cache.
-  async function geocodeUnmatchedViaCache(rows, mapId) {
+  // Para os CNPJs do arquivo que ainda não existem em map_pdvs, obtém lat/lon
+  // (1) do cnpj_cache e (2) via geocode online — Receita + HERE, o MESMO
+  // pipeline da base — e insere em map_pdvs como whitespace da marca base
+  // (marca = base, sem share base). Faz a praça aparecer no mapa mesmo antes
+  // de a base ter dados ali. Não toca PDVs existentes (insert ignore-dup).
+  async function geocodeUnmatchedToBase(rows, mapId) {
     const empty = { plotted: 0, missing: 0, plottedCnpjs: [] };
     try {
-      if (typeof window.bulkCnpjGeocodeLookup !== 'function' || !Array.isArray(window.allData)) return empty;
+      if (!Array.isArray(window.allData)) return empty;
       const baseBrand = window._currentMapBaseBrand || null;
+      const norm = window._normalizeCnpj14 || ((x) => { const d = String(x||'').replace(/\D/g,''); return d.length>=14 ? d.slice(0,14) : null; });
 
       // CNPJs já presentes no mapa (têm ponto).
       const present = new Set();
       for (const r of window.allData) {
-        const c = r.cnpj_14 || (window._normalizeCnpj14 ? window._normalizeCnpj14(r.cnpj || '') : null);
+        const c = r.cnpj_14 || norm(r.cnpj);
         if (c) present.add(c);
       }
-      // CNPJs do arquivo sem ponto no mapa.
+      // CNPJs do arquivo sem ponto no mapa (únicos).
       const unmatched = [];
       const seen = new Set();
       for (const r of rows) {
@@ -543,42 +554,96 @@
       }
       if (!unmatched.length) return empty;
 
-      const hits = await window.bulkCnpjGeocodeLookup(unmatched);
-      const newRows = [];
-      const plottedCnpjs = [];
-      for (const c of unmatched) {
-        const h = hits.get(c);
-        if (!h || h.lat == null || h.lon == null) continue;
-        newRows.push({
-          map_id: mapId,
-          cnpj: c,                 // 14 dígitos; cnpj_14 é coluna gerada no banco
-          marca: baseBrand,        // whitespace da base: ponto existe, base ausente
-          lat: h.lat,
-          lon: h.lon,
-          uf: h.uf_geocode || null,
-          geo_address: h.geo_address || null,
-        });
-        plottedCnpjs.push(c);
-      }
-      if (!newRows.length) return { plotted: 0, missing: unmatched.length, plottedCnpjs: [] };
+      const mk = (c, lat, lon, uf, addr) => ({
+        map_id: mapId, cnpj: c, marca: baseBrand, lat, lon,
+        uf: uf || null, geo_address: addr || null,
+      });
 
-      const CHUNK = 500;
-      for (let i = 0; i < newRows.length; i += CHUNK) {
-        await window.sbFetch('map_pdvs?on_conflict=map_id,cnpj_14', {
-          method: 'POST',
-          headers: { 'Prefer': 'resolution=ignore-duplicates,return=minimal' },
-          body: JSON.stringify(newRows.slice(i, i + CHUNK)),
-        });
+      const plottedCnpjs = [];
+      let plottedCount = 0;
+      let buffer = [];
+
+      // Insere o buffer em map_pdvs, espelha em allData e repinta o mapa.
+      // Chamado em chunks pra plotar em tempo real e não perder progresso.
+      async function flushBuffer() {
+        if (!buffer.length) return;
+        const chunk = buffer; buffer = [];
+        try {
+          await window.sbFetch('map_pdvs?on_conflict=map_id,cnpj_14', {
+            method: 'POST',
+            headers: { 'Prefer': 'resolution=ignore-duplicates,return=minimal' },
+            body: JSON.stringify(chunk),
+          });
+          const ad = window.allData || [];
+          for (const r of chunk) {
+            ad.push({ cnpj: r.cnpj, cnpj_14: r.cnpj, marca: r.marca, lat: r.lat, lon: r.lon, uf: r.uf, geo_address: r.geo_address });
+          }
+          window.allData = ad; // setter propaga pro módulo
+          plottedCount += chunk.length;
+          try { if (typeof window.applyFilters === 'function') window.applyFilters(); } catch(_) {}
+        } catch (e) {
+          console.warn('[v360-comp] insert chunk falhou:', e && e.message);
+        }
       }
-      // Espelha em allData pro render imediato (mesmo shape das linhas do mapa).
-      const ad = window.allData || [];
-      for (const r of newRows) {
-        ad.push({ cnpj: r.cnpj, cnpj_14: r.cnpj, marca: r.marca, lat: r.lat, lon: r.lon, uf: r.uf, geo_address: r.geo_address });
+
+      // ── 1) Cache (cnpj_cache): instantâneo ──
+      const fromCache = new Set();
+      if (typeof window.bulkCnpjGeocodeLookup === 'function') {
+        _setGeoProgress('Consultando cache de CNPJs…');
+        const hits = await window.bulkCnpjGeocodeLookup(unmatched);
+        for (const c of unmatched) {
+          const h = hits.get(c);
+          if (h && h.lat != null && h.lon != null) {
+            buffer.push(mk(c, h.lat, h.lon, h.uf_geocode, h.geo_address));
+            plottedCnpjs.push(c);
+            fromCache.add(c);
+          }
+        }
+        await flushBuffer(); // plota o cache de imediato
       }
-      window.allData = ad; // setter (Object.defineProperty) propaga pro módulo
-      return { plotted: newRows.length, missing: unmatched.length - newRows.length, plottedCnpjs };
+
+      // ── 2) Online (Receita + HERE) pros que faltaram ──
+      const toOnline = unmatched.filter(c => !fromCache.has(c));
+      if (toOnline.length && typeof window.buscarReceita === 'function' && typeof window.geocodeHERE === 'function') {
+        const BATCH = 8, DELAY = 80, FLUSH_AT = 200;
+        let done = 0;
+        for (let i = 0; i < toOnline.length; i += BATCH) {
+          const batch = toOnline.slice(i, i + BATCH);
+          await Promise.all(batch.map(async (c) => {
+            try {
+              const receita = await window.buscarReceita(c);
+              let address = receita ? (receita.endereco_receita || null) : null;
+              let opts = null;
+              if (receita && (receita.municipio || receita.uf_receita)) {
+                opts = {
+                  street: [receita.logradouro, receita.numero].filter(Boolean).join(' '),
+                  city: receita.municipio || '',
+                  state: receita.uf_receita || '',
+                  district: receita.bairro || '',
+                };
+              }
+              if (!address && !opts) return;
+              const geo = await window.geocodeHERE(address, opts);
+              if (geo && geo.lat != null && geo.lon != null) {
+                const uf = (receita && receita.uf_receita) || geo.uf || null;
+                buffer.push(mk(c, geo.lat, geo.lon, uf, geo.geo_address));
+                plottedCnpjs.push(c);
+                try { window.queueCnpjGeoUpsert({ cnpj: c, lat: geo.lat, lon: geo.lon, geo_address: geo.geo_address, uf }); } catch(_) {}
+              }
+            } catch(_) {}
+          }));
+          done += batch.length;
+          if (buffer.length >= FLUSH_AT) await flushBuffer();
+          _setGeoProgress(`Mapeando endereços de ${baseBrand || 'concorrente'}: ${done.toLocaleString('pt-BR')}/${toOnline.length.toLocaleString('pt-BR')} · ${(plottedCount + buffer.length).toLocaleString('pt-BR')} no mapa`);
+          await new Promise(r => setTimeout(r, DELAY));
+        }
+        try { window.flushCnpjGeoUpserts && window.flushCnpjGeoUpserts(true); } catch(_) {}
+      }
+
+      await flushBuffer(); // resto
+      return { plotted: plottedCount, missing: unmatched.length - plottedCount, plottedCnpjs };
     } catch (e) {
-      console.warn('[v360-comp] geocode via cache falhou:', e && e.message);
+      console.warn('[v360-comp] geocode falhou:', e && e.message);
       return empty;
     }
   }
@@ -728,10 +793,15 @@
       // Detecta + persiste base_brand se ainda não setado
       await ensureBaseBrandPersisted();
 
-      // Geocodifica via cache os PDVs do concorrente que ainda não têm ponto
-      // no mapa e os plota como whitespace da base. Faz a praça nova aparecer.
-      if (activeBtn) activeBtn.textContent = 'Mapeando PDVs...';
-      const geoRes = await geocodeUnmatchedViaCache(pending.rows, mapId);
+      // Fecha o modal e mostra o mapa enquanto geocodifica (progresso no banner).
+      closeModal();
+      try { window._invalidateOpenedMapCache && window._invalidateOpenedMapCache(mapId); } catch(_) {}
+
+      // Geocodifica (cache + Receita/HERE) os PDVs do concorrente que ainda
+      // não têm ponto no mapa e os plota como whitespace da base. Faz a praça
+      // nova aparecer mesmo antes de a base existir ali.
+      _showColorUpdateBanner('Mapeando endereços…');
+      const geoRes = await geocodeUnmatchedToBase(pending.rows, mapId);
 
       // Os CNPJs que ganharam ponto agora passam a casar — atualiza o state.
       if (geoRes.plotted) {
@@ -747,9 +817,7 @@
         }
       }
 
-      closeModal();
-      _showColorUpdateBanner('Recalculando mapa com nova marca…');
-      try { window._invalidateOpenedMapCache && window._invalidateOpenedMapCache(mapId); } catch(_) {}
+      _setGeoProgress('Recalculando mapa…');
       // Re-renderiza os pins do mapa pra mostrar os PDVs recém-plotados.
       try { if (typeof window.applyFilters === 'function') window.applyFilters(); } catch(_) {}
       renderHeaderUI();
@@ -760,14 +828,14 @@
       } catch(_) {}
       setTimeout(_hideColorUpdateBanner, 800);
       const geoSuffix = geoRes.plotted
-        ? ` · +${geoRes.plotted.toLocaleString('pt-BR')} no mapa${geoRes.missing ? ` (${geoRes.missing.toLocaleString('pt-BR')} sem coordenada ainda)` : ''}`
-        : (geoRes.missing ? ` · ${geoRes.missing.toLocaleString('pt-BR')} sem coordenada no cache` : '');
+        ? ` · +${geoRes.plotted.toLocaleString('pt-BR')} no mapa${geoRes.missing ? ` (${geoRes.missing.toLocaleString('pt-BR')} sem endereço)` : ''}`
+        : (geoRes.missing ? ` · ${geoRes.missing.toLocaleString('pt-BR')} sem endereço localizável` : '');
       if (isAppend) {
         const nv = pending.newInBrand || 0;
         const dp = pending.dupInBrand || 0;
         const msg = nv > 0
           ? `${pending.brandName}: +${nv.toLocaleString('pt-BR')} PDV${nv===1?'':'s'} novo${nv===1?'':'s'}${dp>0?` · ${dp.toLocaleString('pt-BR')} atualizados`:''}${geoSuffix}`
-          : `${pending.brandName}: 0 novos — ${dp.toLocaleString('pt-BR')} CNPJs já existiam${geoSuffix || '. Verifique se o arquivo é o da praça certa.'}`;
+          : `${pending.brandName}: 0 novos no share — ${dp.toLocaleString('pt-BR')} CNPJs já existiam${geoSuffix || '. Verifique se o arquivo é o da praça certa.'}`;
         showToast(msg);
       } else {
         const verb = (mode === 'replace') ? 'substituído' : 'adicionado';
