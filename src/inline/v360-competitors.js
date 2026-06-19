@@ -312,6 +312,7 @@
 
         normalizedRows.push({
           cnpj_14: cnpj14,
+          cnpj_raw: String(r.cnpj || r.CNPJ || ''),  // formato HYPR: "CNPJ - RUA - BAIRRO - CIDADE/UF"
           matched: matched_flag,
           share_reais_sku_dimensao: shareR,
           share_volume_sku_dimensao: safeNum(r.share_volume_sku_dimensao),
@@ -602,30 +603,52 @@
         await flushBuffer(); // plota o cache de imediato
       }
 
-      // ── 2) Online (Receita + HERE) pros que faltaram ──
+      // ── 2) Online: endereço embutido no arquivo (extrairEndereco) → HERE ──
+      // O arquivo HYPR já traz o endereço no campo cnpj ("CNPJ - RUA - CIDADE/UF").
+      // Usamos ele direto (igual ao pipeline da base), SEM bater na Receita —
+      // é o que torna a base rápida e evita os 429/CORS. Receita vira só
+      // fallback pros poucos CNPJs sem endereço no arquivo (formato cru).
+      const rawByCnpj = new Map();
+      for (const r of rows) { if (r.cnpj_14 && r.cnpj_raw) rawByCnpj.set(r.cnpj_14, r.cnpj_raw); }
+      const extrair = window.extrairEndereco;
+
       const toOnline = unmatched.filter(c => !fromCache.has(c));
-      if (toOnline.length && typeof window.buscarReceita === 'function' && typeof window.geocodeHERE === 'function') {
-        const BATCH = 8, DELAY = 80, FLUSH_AT = 200;
+      if (toOnline.length && typeof window.geocodeHERE === 'function') {
+        const BATCH = 10, DELAY = 50, FLUSH_AT = 120;
         let done = 0;
         for (let i = 0; i < toOnline.length; i += BATCH) {
           const batch = toOnline.slice(i, i + BATCH);
           await Promise.all(batch.map(async (c) => {
             try {
-              const receita = await window.buscarReceita(c);
-              let address = receita ? (receita.endereco_receita || null) : null;
-              let opts = null;
-              if (receita && (receita.municipio || receita.uf_receita)) {
-                opts = {
-                  street: [receita.logradouro, receita.numero].filter(Boolean).join(' '),
-                  city: receita.municipio || '',
-                  state: receita.uf_receita || '',
-                  district: receita.bairro || '',
-                };
+              const raw = rawByCnpj.get(c);
+              let address = null, opts = null;
+              // (a) endereço embutido no arquivo — caminho rápido, sem Receita
+              if (raw && raw.indexOf(' - ') !== -1 && typeof extrair === 'function') {
+                const e = extrair(raw);
+                if (e && e.state) {
+                  address = e.address;
+                  opts = { street: e.street, city: e.city, state: e.state, district: e.district };
+                }
+              }
+              // (b) fallback Receita — só quando o arquivo não tem endereço
+              if (!opts && typeof window.buscarReceita === 'function') {
+                const receita = await window.buscarReceita(raw || c);
+                if (receita) {
+                  address = receita.endereco_receita || null;
+                  if (receita.municipio || receita.uf_receita) {
+                    opts = {
+                      street: [receita.logradouro, receita.numero].filter(Boolean).join(' '),
+                      city: receita.municipio || '',
+                      state: receita.uf_receita || '',
+                      district: receita.bairro || '',
+                    };
+                  }
+                }
               }
               if (!address && !opts) return;
               const geo = await window.geocodeHERE(address, opts);
               if (geo && geo.lat != null && geo.lon != null) {
-                const uf = (receita && receita.uf_receita) || geo.uf || null;
+                const uf = (opts && opts.state) || geo.uf || null;
                 buffer.push(mk(c, geo.lat, geo.lon, uf, geo.geo_address));
                 plottedCnpjs.push(c);
                 try { window.queueCnpjGeoUpsert({ cnpj: c, lat: geo.lat, lon: geo.lon, geo_address: geo.geo_address, uf }); } catch(_) {}
@@ -634,7 +657,7 @@
           }));
           done += batch.length;
           if (buffer.length >= FLUSH_AT) await flushBuffer();
-          _setGeoProgress(`Mapeando endereços de ${baseBrand || 'concorrente'}: ${done.toLocaleString('pt-BR')}/${toOnline.length.toLocaleString('pt-BR')} · ${(plottedCount + buffer.length).toLocaleString('pt-BR')} no mapa`);
+          _setGeoProgress(`Mapeando ${done.toLocaleString('pt-BR')}/${toOnline.length.toLocaleString('pt-BR')} endereços · ${(plottedCount + buffer.length).toLocaleString('pt-BR')} no mapa`);
           await new Promise(r => setTimeout(r, DELAY));
         }
         try { window.flushCnpjGeoUpserts && window.flushCnpjGeoUpserts(true); } catch(_) {}
